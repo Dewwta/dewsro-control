@@ -15,3 +15,6 @@
 /DewSROToolsDLL/imgui/examples
 /vsro-panel/static/Icon
 force_addobject.SAMPLE.txt
+/CoreLib/obj
+/CoreLib/obj/Debug/net8.0
+/CoreLib/bin
