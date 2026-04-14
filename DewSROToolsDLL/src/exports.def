@@ -1,0 +1,3 @@
+LIBRARY MyImGuiDLL
+EXPORTS
+    _DllMain@12

@@ -1,0 +1,17 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs
+/VSRO_CONTROL_API/obj
+/VSRO_CONTROL_API/bin/Debug/net8.0
+/VSRO_CONTROL_API/appsettings.json
+/CoreLib/bin/Debug
+/vsro-panel/.svelte-kit
+/vsro-panel/node_modules
+/VSRO_LUA_1_188
+/vsro-panel/static/Icon.zip
+/DewSROToolsDLL/imgui/docs
+/DewSROToolsDLL/imgui/examples
+/vsro-panel/static/Icon
+force_addobject.SAMPLE.txt

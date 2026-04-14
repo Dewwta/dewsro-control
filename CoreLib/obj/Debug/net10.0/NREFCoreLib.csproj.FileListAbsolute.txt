@@ -1,0 +1,12 @@
+D:\InProgress\NREFTimeManager\NREFCoreLib\bin\Debug\net10.0\NREFCoreLib.deps.json
+D:\InProgress\NREFTimeManager\NREFCoreLib\bin\Debug\net10.0\NREFCoreLib.dll
+D:\InProgress\NREFTimeManager\NREFCoreLib\bin\Debug\net10.0\NREFCoreLib.pdb
+D:\InProgress\NREFTimeManager\NREFCoreLib\obj\Debug\net10.0\NREFCoreLib.GeneratedMSBuildEditorConfig.editorconfig
+D:\InProgress\NREFTimeManager\NREFCoreLib\obj\Debug\net10.0\NREFCoreLib.AssemblyInfoInputs.cache
+D:\InProgress\NREFTimeManager\NREFCoreLib\obj\Debug\net10.0\NREFCoreLib.AssemblyInfo.cs
+D:\InProgress\NREFTimeManager\NREFCoreLib\obj\Debug\net10.0\NREFCoreLib.csproj.CoreCompileInputs.cache
+D:\InProgress\NREFTimeManager\NREFCoreLib\obj\Debug\net10.0\NREFCoreLib.sourcelink.json
+D:\InProgress\NREFTimeManager\NREFCoreLib\obj\Debug\net10.0\NREFCoreLib.dll
+D:\InProgress\NREFTimeManager\NREFCoreLib\obj\Debug\net10.0\refint\NREFCoreLib.dll
+D:\InProgress\NREFTimeManager\NREFCoreLib\obj\Debug\net10.0\NREFCoreLib.pdb
+D:\InProgress\NREFTimeManager\NREFCoreLib\obj\Debug\net10.0\ref\NREFCoreLib.dll

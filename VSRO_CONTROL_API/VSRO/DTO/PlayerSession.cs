@@ -1,0 +1,21 @@
+﻿namespace VSRO_CONTROL_API.VSRO.DTO
+{
+    public class PlayerSession
+    {
+        public string? CharacterName { get; set; }
+        
+        public int JID { get; set; }
+        public string? IP { get; set; }
+        public DateTime LoginTime { get; set; }
+        public DateTime LastActivity { get; set; }
+        public TimeSpan AccumulatedPlayTime { get; set; }
+        public bool IsAfk { get; set; }
+        public int RewardedHours { get; set; }
+        public Party? PlayerParty { get; set; } = null;
+        public PlayerStats? PlayerStats { get; set; } = null;
+        public uint ActivePetUID { get; set; }
+        public uint CharacterUID { get; set; }  // spawn UID, changes per session
+        public uint CharacterID { get; set; }   // persistent DB ID
+        public uint SessionKills = 0; // kills in session
+    }
+}

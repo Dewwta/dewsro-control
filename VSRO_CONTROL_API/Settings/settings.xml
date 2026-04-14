@@ -1,0 +1,48 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ApiSettings>
+
+	<Network>
+		<IP>0.0.0.0</IP>
+		<Port>5085</Port>
+	</Network>
+
+	<Logs>
+		<SaveTimerInHours>12</SaveTimerInHours>
+		<CleanupTimerInHours>24</CleanupTimerInHours>
+	</Logs>
+
+	<Backup>
+		<BackupPath>C:\\Users\\Public\\Documents\\DSRO_BACKUPS</BackupPath>
+		<BackupMaxCount>10</BackupMaxCount>
+		<BackupDatabases>SRO_VT_ACCOUNT,SRO_VT_SHARD,SRO_VT_LOG,SRO_VT_PROXY</BackupDatabases>
+	</Backup>
+
+	<Proxy>
+		<IP>192.168.0.11</IP>
+		<AgentPort>17774</AgentPort>
+		<GatewayPort>17779</GatewayPort>
+		<DownloadPort>17771</DownloadPort>
+		<SilkPerXHours>1</SilkPerXHours> <!-- Set to 0 to disable -->
+		<SilkAmount>25</SilkAmount>
+		<AutoNoticeInterval>5</AutoNoticeInterval>
+		<AutoNoticeMessage>Good luck!</AutoNoticeMessage>
+		<AutoLongestOnlinePlayerInterval>10</AutoLongestOnlinePlayerInterval>
+		<LongestPlayerOnlineMessage>{NAME} has been no-lifing for {TIME}</LongestPlayerOnlineMessage>
+		<AfkMessage>{NAME}, You are AFK</AfkMessage>
+		<AfkTime>300</AfkTime>
+		<BackFromAfkMessage>Welcome back {NAME}!</BackFromAfkMessage>
+	</Proxy>
+
+	<Patching>
+		<GameServerPath>C:\\Users\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\SR_GameServer.exe</GameServerPath>
+		<MachineManagerPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\MachineManager.exe</MachineManagerPath>
+		<AgentServerPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\AgentServer.exe</AgentServerPath>
+	</Patching>
+
+	<Cert>
+		<CompileCertPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\CertModule\\CertModule\\1 - compile.bat</CompileCertPath>
+	</Cert>
+	<ServerCfgPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\server.cfg</ServerCfgPath>
+	<DebugMode>true</DebugMode>
+
+</ApiSettings>

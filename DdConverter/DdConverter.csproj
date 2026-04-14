@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>DdConverter</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Pfim" Version="0.11.3" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.6">
+      <!-- Local offline conversion tool — not processing untrusted input -->
+      <NoWarn>NU1902;NU1903</NoWarn>
+    </PackageReference>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+  </Folder>
+  <Project Path="CoreLib/CoreLib.csproj" />
+  <Project Path="VSRO_CONTROL_API/VSRO_CONTROL_API.csproj" />
+</Solution>

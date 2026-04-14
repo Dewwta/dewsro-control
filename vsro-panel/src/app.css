@@ -1,0 +1,114 @@
+/* ═══════════════════════════════════════════════════════════════════
+   VSRO Panel — Global Stylesheet
+   Palette: old-school Silkroad Online — dark, tan parchment, crimson,
+   gold trim, green accents
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+	/* ── Background layers ─────────────────────────────────────────── */
+	--bg-deep:    #080603;
+	--bg-base:    #0f0b07;
+	--bg-surface: #1a1309;
+	--bg-raised:  #241a0c;
+	--bg-hover:   #2e2210;
+
+	/* ── Borders ────────────────────────────────────────────────────── */
+	--border-dark:   #2d2010;
+	--border-mid:    #4d3618;
+	--border-gold:   #7a5828;
+	--border-accent: #9a7030;
+
+	/* ── Gold / primary ─────────────────────────────────────────────── */
+	--gold-dim:    #7a5a25;
+	--gold:        #c8943c;
+	--gold-light:  #e0aa4a;
+	--gold-bright: #f0c060;
+
+	/* ── Crimson / danger ───────────────────────────────────────────── */
+	--red-dark:   #5c1010;
+	--red:        #8c2020;
+	--red-light:  #b03030;
+	--red-bright: #d04040;
+
+	/* ── Forest green / success ─────────────────────────────────────── */
+	--green-dark:   #152d0c;
+	--green:        #276018;
+	--green-light:  #3d8a28;
+	--green-bright: #5ab038;
+
+	/* ── Cold steel / info ───────────────────────────────────────────── */
+	--steel-dark:   #0d1e2a;
+	--steel:        #1e4d6b;
+	--steel-light:  #2e7096;
+	--steel-bright: #4a9ac0;
+	--border-steel: #1e4d6b;
+
+	/* ── Text ───────────────────────────────────────────────────────── */
+	--text-bright: #f0ddb0;
+	--text-base:   #c8a870;
+	--text-muted:  #7a6042;
+	--text-dim:    #4a3820;
+
+	/* ── Sidebar ────────────────────────────────────────────────────── */
+	--sidebar-width: 220px;
+
+	/* ── Typography ─────────────────────────────────────────────────── */
+	--font-heading: 'Cinzel', 'Georgia', serif;
+	--font-body:    'Crimson Text', 'Georgia', serif;
+	--font-mono:    'Consolas', 'Courier New', monospace;
+
+	/* ── Misc ───────────────────────────────────────────────────────── */
+	--gap:    1rem;
+	--radius: 4px;
+}
+
+*, *::before, *::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html, body {
+	height: 100%;
+	background-color: var(--bg-base);
+	color: var(--text-base);
+	font-family: var(--font-body);
+	font-size: 16px;
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+	font-family: var(--font-heading);
+	color: var(--text-bright);
+	letter-spacing: 0.05em;
+}
+
+a {
+	color: var(--gold);
+	text-decoration: none;
+}
+a:hover { color: var(--gold-light); }
+
+/* ── Scrollbar ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar            { width: 5px; height: 5px; }
+::-webkit-scrollbar-track      { background: var(--bg-deep); }
+::-webkit-scrollbar-thumb      { background: var(--border-gold); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover{ background: var(--gold-dim); }
+
+/* ── Utilities ──────────────────────────────────────────────────────── */
+.text-muted    { color: var(--text-muted); }
+.text-bright   { color: var(--text-bright); }
+.text-gold     { color: var(--gold); }
+.text-red      { color: var(--red-light); }
+.text-green    { color: var(--green-bright); }
+.text-steel    { color: var(--steel-bright); }
+.font-heading  { font-family: var(--font-heading); }
+.font-mono     { font-family: var(--font-mono); }
+
+.divider {
+	border: none;
+	border-top: 1px solid var(--border-dark);
+	margin: var(--gap) 0;
+}
+.divider--gold { border-color: var(--border-gold); }
