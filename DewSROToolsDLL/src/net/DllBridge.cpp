@@ -98,23 +98,11 @@ int DllBridge::ExtractInt(const std::string& json, const std::string& key) {
 
 void DllBridge::Dispatch(const std::string& json) {
     std::string type = ExtractStr(json, "type");
-
-    if (type == "session_init") {
-        m_state.charName = ExtractStr(json, "charName");
-        m_state.hp = ExtractInt(json, "hp");
-        m_state.maxHp = ExtractInt(json, "maxHp");
-        m_state.mp = ExtractInt(json, "mp");
-        m_state.maxMp = ExtractInt(json, "maxMp");
-        m_state.gold = (uint64_t)ExtractInt(json, "gold");
-        m_state.valid = true;
-    }
-    else if (type == "hp_update") {
-        m_state.hp = ExtractInt(json, "hp");
-        m_state.maxHp = ExtractInt(json, "maxHp");
-    }
-    else if (type == "gold_update") {
-        m_state.gold = (uint64_t)ExtractInt(json, "gold");
-    }
+    auto it = m_handlers.find(type);
+    if (it != m_handlers.end())
+        it->second(json);
 }
 
-// TODO: make handler registry, and make abstractions for sending. 
+void DllBridge::RegisterHandler(const std::string& type, BridgeHandler handler) {
+    m_handlers[type] = handler;
+}

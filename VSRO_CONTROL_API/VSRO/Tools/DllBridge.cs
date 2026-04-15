@@ -7,6 +7,9 @@ using System.Text.Json;
 public class DllBridge : IDisposable
 {
     public static readonly DllBridge Instance = new();
+    private readonly Dictionary<string, Func<string, JsonElement, Task>> _handlers = new();
+    public void RegisterHandler(string type, Func<string, JsonElement, Task> handler)
+    => _handlers[type] = handler;
 
     private TcpListener _listener;
     private CancellationTokenSource _cts;
@@ -69,17 +72,11 @@ public class DllBridge : IDisposable
                 var line = await reader.ReadLineAsync(ct);
                 if (line == null) break;
 
-                var type = ExtractStr(line, "type");
-                if (type == "auth")
-                {
-                    accountName = ExtractStr(line, "user");
-                    _clients[accountName] = writer;
-                    Logger.Info(this, $"Authenticated: {accountName}");
-                }
-                else
-                {
-                    Logger.Info(this, $"{accountName ?? "unknown"}: {line}");
-                }
+                var doc = JsonDocument.Parse(line);
+                var type = doc.RootElement.GetProperty("type").GetString();
+
+                if (_handlers.TryGetValue(type!, out var handler))
+                    await handler(accountName!, doc.RootElement);
             }
         }
         catch (OperationCanceledException) { }
@@ -101,5 +98,3 @@ public class DllBridge : IDisposable
         catch { return ""; }
     }
 }
-
-// TODO: Implement handlers for responses, define types

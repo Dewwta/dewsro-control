@@ -3,7 +3,7 @@
 
 static DWORD WINAPI InitThreadProc(LPVOID)
 {
-    AppManager::Initialize();
+    Control::Initialize();
     return 0;
 }
 

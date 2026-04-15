@@ -1,7 +1,7 @@
 #ifndef APPMANAGER_H
 #define APPMANAGER_H
 
-class AppManager
+class Control
 {
 public:
     static void Initialize();

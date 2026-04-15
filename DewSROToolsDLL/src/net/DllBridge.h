@@ -3,6 +3,8 @@
 #include <thread>
 #include <atomic>
 #include <functional>
+#include <unordered_map>
+
 
 #define BRIDGE_HOST "REDACTED"
 #define BRIDGE_PORT 9001
@@ -16,9 +18,11 @@ struct OverlayState
     bool valid = false;
 };
 
+using BridgeHandler = std::function<void(const std::string& json)>;
 class DllBridge
 {
 public:
+    void RegisterHandler(const std::string& type, BridgeHandler handler);
     std::string m_username;
     std::atomic<bool> m_connected{ false };
     OverlayState m_state;
@@ -34,6 +38,7 @@ private:
     std::string ExtractStr(const std::string& json, const std::string& key);
     int ExtractInt(const std::string& json, const std::string& key);
     void Dispatch(const std::string& json);
+    std::unordered_map<std::string, BridgeHandler> m_handlers;
 };
 
 extern DllBridge g_bridge;
