@@ -8,10 +8,12 @@
 // Hook
 #include <d3d9.h>
 #include <MinHook.h>
-
+#include <iostream>
 // Internal
 #include "../Settings.h"
 #include "../net/NetActions.h"
+#include "../net/LoginHook.h"
+
 
 static bool initialized = false;
 
@@ -164,10 +166,6 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
         oWndProc = (WNDPROC)GetWindowLongPtrA(params.hFocusWindow, GWLP_WNDPROC);
         SetWindowLongPtrA(params.hFocusWindow, GWLP_WNDPROC, (LONG)hkWndProc);
 
-        //g_bridge.SetIdentity("dewwta");
-        //g_bridge.Connect();
-
-
         initialized = true;
     }
 
@@ -298,12 +296,14 @@ void dx9_hook::init()
     HMODULE d3d9 = GetModuleHandleA("d3d9.dll");
     void* create9addr = GetProcAddress(d3d9, "Direct3DCreate9");
 
+    std::cout << "Installing D3d9 hook" << std::endl;
     MH_Initialize();
     MH_CreateHook(create9addr, hkDirect3DCreate9,
         reinterpret_cast<void**>(&oCreate));
     MH_EnableHook(create9addr);
     //MessageBoxA(nullptr, "Create9 hook installed", "ok", MB_OK);
-    //InstallLoginHook();
+    std::cout << "Installing login hook" << std::endl;
+    InstallLoginHook();
 }
 
 // Only for debugging, do not use this in release stupid

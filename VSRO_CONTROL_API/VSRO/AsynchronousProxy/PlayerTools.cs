@@ -133,9 +133,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                     Logger.Debug("ChardataHandler", $"HP={hp} MP={mp} Zerk={remainHwanCount}");
 
-                    // --- NOW ALIGNED ---
-                    byte invSize = packet.ReadByte();         // Should now read 97 (0x61)
-                    byte itemCount = packet.ReadByte();       // Should now read 28 (0x1C)
+                    byte invSize = packet.ReadByte();         // 0x61
+                    byte itemCount = packet.ReadByte();       // 0x1C
 
                     Logger.Debug("ChardataHandler", $"invSize={invSize} itemCount={itemCount}");
 
@@ -184,9 +183,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                         if (!itemInfo.success)
                         {
-                            // CRITICAL: We MUST still consume this item's bytes or the entire 
-                            // packet goes out of alignment. Default ETC items have a ushort stack.
-                            // This is a best-guess fallback — log it so we can investigate.
                             Logger.Warn("ChardataHandler", $"DB MISS: refItemId={refItemId} at item index={i}, slot={slot}");
                             Logger.Warn("ChardataHandler",
                                 $"Unknown refItemId={refItemId} at slot={slot} — reading ushort as fallback");
@@ -197,11 +193,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         ushort finalStack = 1;
                         Logger.Debug("ChardataHandler", $"{itemInfo.item.CodeName}: T1={itemInfo.item.T1} | T2={itemInfo.item.T2} | T3={itemInfo.item.T3} | T4={itemInfo.item.T4}");
                         // 3. BRANCHING LOGIC
-                        // --- TYPE BRANCHING (Strictly following community logic) ---
-                        if (itemInfo.item.T1 == 1) // NPC/Character objects (wolves, horses, etc.)
+                        if (itemInfo.item.T1 == 1) // NPC/Character objects
                         {
-                            // These appear in inventory but aren't items — skip their data
-                            // Need to determine structure. For now, log and skip.
+                            // Need to determine structure
                             Logger.Warn("ChardataHandler", $"T1=1 object: {itemInfo.item.CodeName} T2={itemInfo.item.T2} T3={itemInfo.item.T3} T4={itemInfo.item.T4} remaining={packet.RemainingRead()}");
                         }
                         else if(itemInfo.item.T1 == 3) // ITEM_
@@ -217,9 +211,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 {
                                     packet.ReadUInt(); packet.ReadUInt();
                                 }
-
-                                // --- AVATAR / SOCKET DATA ---
-                                // You MUST read these even if they are empty (count 0)
 
                                 // 1. Sockets (Binding Type 1)
                                 packet.ReadByte(); // Binding Type

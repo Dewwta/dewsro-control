@@ -1,8 +1,3 @@
-// #################################################
-// This is not finished yet.  
-// It does not function.
-// #################################################
-
 #pragma once
 #include <string>
 #include <thread>
@@ -34,7 +29,7 @@ public:
     void Send(const std::string& msg);
 
 private:
-    void* m_socket = nullptr; // opaque, real type in .cpp
+    void* m_socket = nullptr; // opaque
     void RunLoop();
     std::string ExtractStr(const std::string& json, const std::string& key);
     int ExtractInt(const std::string& json, const std::string& key);

@@ -18,13 +18,13 @@ public class DllBridge : IDisposable
     {
         _cts = new CancellationTokenSource();
         await Task.Run(() => ListenAsync(_cts.Token));
-        Logger.Info(this, "[Bridge] Listening on port 9001...");
+        Logger.Info(this, "Listening on port 9001...");
     }
     public void Stop()
     {
         _cts?.Cancel();
         _listener?.Stop();
-        Logger.Info(this, "[Bridge] Stopped.");
+        Logger.Info(this, "Stopped.");
     }
 
     public void Dispose() => Stop();
@@ -52,7 +52,7 @@ public class DllBridge : IDisposable
                 _ = HandleClientAsync(client, ct);
             }
             catch (OperationCanceledException) { break; }
-            catch (Exception ex) { Logger.Info(this, $"[Bridge] Listener error: {ex.Message}"); }
+            catch (Exception ex) { Logger.Info(this, $"Listener error: {ex.Message}"); }
         }
     }
 
@@ -74,16 +74,16 @@ public class DllBridge : IDisposable
                 {
                     accountName = ExtractStr(line, "user");
                     _clients[accountName] = writer;
-                    Logger.Info(this, $"[Bridge] Authenticated: {accountName}");
+                    Logger.Info(this, $"Authenticated: {accountName}");
                 }
                 else
                 {
-                    Logger.Info(this, $"[Bridge] {accountName ?? "unknown"}: {line}");
+                    Logger.Info(this, $"{accountName ?? "unknown"}: {line}");
                 }
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { Logger.Info(this, $"[Bridge] Client error: {ex.Message}"); }
+        catch (Exception ex) { Logger.Info(this, $"Client error: {ex.Message}"); }
         finally
         {
             if (accountName != null) _clients.TryRemove(accountName, out _);

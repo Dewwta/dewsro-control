@@ -2,21 +2,24 @@
 #include <windows.h>
 #include <MinHook.h>
 #include "DllBridge.h"
-#include "../hooks/dx9_hook.h"
+#include <iostream>
 
 typedef bool(__thiscall* LoginFn)(void*, LPCSTR, LPCSTR, char, int);
 static LoginFn o_Login = nullptr;
 
-// __fastcall with dummy edx = correct way to hook __thiscall in MSVC x86
+// MSVC x86
 static bool __fastcall hk_Login(void* thisPtr, void* edx,
     LPCSTR username, LPCSTR password, char shardId, int a5)
 {
     if (username) {
         g_bridge.SetIdentity(username);
         g_bridge.Connect();
-        
-    }
+        std::cout << "Connecting to proxy... Username: " << username << std::endl;
 
+    }
+    else {
+        std::cout << "Didnt get username! proxy bridge failed" << std::endl;
+    }
     return o_Login(thisPtr, username, password, shardId, a5);
 }
 
