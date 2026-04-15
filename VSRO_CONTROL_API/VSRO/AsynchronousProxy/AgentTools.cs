@@ -93,10 +93,15 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     return;
 
                 var now = DateTime.UtcNow;
-
+                var userName = await DBConnect.GetUserNameByJID(acc.jid);
+                if (userName.success == false)
+                {
+                    Logger.Warn("PlayerLoginHandler", $"Couldnt get username by jid: {userName.reason} | JID={acc.jid}");
+                }
                 e.Proxy.Session = new PlayerSession
                 {
                     CharacterName = charName,
+                    AccountName = userName.userName,
                     JID = acc.jid,
                     IP = userIp,
                     LoginTime = now,

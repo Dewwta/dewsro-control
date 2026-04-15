@@ -47,7 +47,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network
         public byte CurrentGroupSpawnType { get; set; } = 0;  // 1=spawn, 2=despawn
         internal void CheckPlaytimeReward(PlayerSession session)
         {
-            if (SettingsLoader.Settings != null && SettingsLoader.Settings.Proxy.SilkPerXHours > 0)
+            if (SettingsLoader.Settings != null && SettingsLoader.Settings.Proxy?.SilkPerXHours > 0)
             {
                 var hours = (int)session.AccumulatedPlayTime.TotalHours;
 

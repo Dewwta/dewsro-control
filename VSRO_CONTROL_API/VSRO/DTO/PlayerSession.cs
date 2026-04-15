@@ -3,7 +3,7 @@
     public class PlayerSession
     {
         public string? CharacterName { get; set; }
-        
+        public string? AccountName { get; set; }
         public int JID { get; set; }
         public string? IP { get; set; }
         public DateTime LoginTime { get; set; }

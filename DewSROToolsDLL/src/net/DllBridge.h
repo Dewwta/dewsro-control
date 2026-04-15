@@ -31,12 +31,13 @@ public:
     void SetIdentity(const std::string& username);
     void Connect();
     void Send(const std::string& msg);
+    std::string ExtractStr(const std::string& json, const std::string& key);
+    int ExtractInt(const std::string& json, const std::string& key);
 
 private:
     void* m_socket = nullptr; // opaque
     void RunLoop();
-    std::string ExtractStr(const std::string& json, const std::string& key);
-    int ExtractInt(const std::string& json, const std::string& key);
+    
     void Dispatch(const std::string& json);
     std::unordered_map<std::string, BridgeHandler> m_handlers;
 };

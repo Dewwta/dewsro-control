@@ -19,7 +19,7 @@ add_subdirectory(src/BSLib)
 
 add_library(DewSROToolkit SHARED
     src/DllMain.cpp
-    src/AppManager.cpp
+    "src/Control.cpp"
     src/hooks/dx9_hook.cpp
     kiero/kiero.cpp
     imgui/imgui.cpp

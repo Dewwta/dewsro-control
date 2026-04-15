@@ -20,9 +20,11 @@ public class DllBridge : IDisposable
     public async Task StartAsync()
     {
         _cts = new CancellationTokenSource();
-        await Task.Run(() => ListenAsync(_cts.Token));
+        _ = Task.Run(() => ListenAsync(_cts.Token));
         Logger.Info(this, "Listening on port 9001...");
+        await Task.CompletedTask;
     }
+
     public void Stop()
     {
         _cts?.Cancel();

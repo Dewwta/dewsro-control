@@ -185,6 +185,10 @@ namespace VSRO_CONTROL_API.VSRO
                        Name, Email, sex, sec_primary, AccPlayTime
                 FROM SRO_VT_ACCOUNT.dbo.TB_User
                 WHERE StrUserID = @Username";
+        public const string GetUserNameByJID_q = @"
+                SELECT StrUserID
+                FROM SRO_VT_ACCOUNT.dbo.TB_User
+                WHERE StrUserID = @JID";
         public const string GetSilkByUsername_q = @"
                 SELECT s.silk_own
                 FROM SRO_VT_ACCOUNT.dbo.TB_User u

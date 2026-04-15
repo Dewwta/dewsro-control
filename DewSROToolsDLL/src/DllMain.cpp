@@ -1,5 +1,5 @@
 #include "DllMain.h"
-#include "AppManager.h"
+#include "Control.h"
 
 static DWORD WINAPI InitThreadProc(LPVOID)
 {

@@ -670,6 +670,22 @@ namespace VSRO_CONTROL_API.VSRO
             AgentProxy.Start(15884);
             RegisterAGSHandlers();
 
+            DllBridge.Instance.RegisterHandler("auth", async (_, element) => {
+                try
+                {
+                    var user = element.GetProperty("user").GetString();
+                    // store writer
+                    Logger.Debug("DllAuth", $"Sending ack for user {user}");
+                    DllBridge.Instance.SendToDll(user!, "loginAck", new { });
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("DllAuth", ex.Message);
+                }
+            });
+
+            
+
             Logger.Info(typeof(Overseer), "FoxProxy started on ports 15779, 15881, 15884");
         }
         public static async Task BuildShopDB()

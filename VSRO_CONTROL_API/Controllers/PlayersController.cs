@@ -25,6 +25,7 @@ namespace VSRO_CONTROL_API.Controllers
         }
 
         // GET api/players/online-count
+        [AllowAnonymous]
         [HttpGet("online-count")]
         public async Task<IActionResult> GetOnlineCount()
         {

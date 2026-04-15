@@ -3,6 +3,7 @@ using Microsoft.Data.SqlClient;
 using System.Data;
 using System.Diagnostics;
 using System.Text;
+using System.Xml.Linq;
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Enums;
 using VSRO_CONTROL_API.VSRO.Tools;
@@ -629,6 +630,34 @@ namespace VSRO_CONTROL_API.VSRO
                 return (false, null, msg);
             }
         }
+        public static async Task<(bool success, string? userName, string reason)> GetUserNameByJID(int _jid)
+        {
+            try
+            {
+                using SqlConnection conn = new(_connectionString);
+                await conn.OpenAsync();
+                using SqlCommand cmd = new(Constant.GetUserNameByJID_q, conn);
+                cmd.Parameters.AddWithValue("@JID", _jid);
+                using SqlDataReader reader = await cmd.ExecuteReaderAsync();
+
+                if (await reader.ReadAsync())
+                {
+                    string name = reader.GetString(0);
+                    
+                    return (true, name, "User found.");
+                }
+                return (false, null, $"No user found with JID '{_jid}'.");
+            }
+            catch (Exception ex)
+            {
+                string msg = $"FERROR: Error fetching user with jid '{_jid}': {ex.Message}";
+                Logger.Error(typeof(DBConnect), msg);
+                return (false, null, msg);
+            }
+        }
+
+
+
         public static async Task<(bool success, LoginResponseObject? obj, string reason)> AuthenticateUserAccount(string _username, string _password)
         {
             try

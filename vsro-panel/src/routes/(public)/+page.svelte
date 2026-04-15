@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { serverApi, noticeApi } from '$lib/api/serverApi';
+	import { serverApi, noticeApi, playersApi } from '$lib/api/serverApi';
 
 	let serverOnline: boolean | null = null;
 	let playerCount: string | null = null;
@@ -21,7 +21,7 @@
 	onMount(async () => {
 		const [statusResult, countResult] = await Promise.allSettled([
 			serverApi.getPublicStatus(),
-			serverApi.getPublicPlayerCount()
+			playersApi.getOnlineCount()
 		]);
 		serverOnline = statusResult.status === 'fulfilled' ? statusResult.value.isRunning : false;
 		playerCount  = countResult.status  === 'fulfilled' ? countResult.value.count     : '—';
