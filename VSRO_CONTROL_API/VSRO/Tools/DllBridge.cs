@@ -69,6 +69,7 @@ public class DllBridge : IDisposable
 
         try
         {
+            
             while (!ct.IsCancellationRequested && tcp.Connected)
             {
                 var line = await reader.ReadLineAsync(ct);
@@ -77,8 +78,16 @@ public class DllBridge : IDisposable
                 var doc = JsonDocument.Parse(line);
                 var type = doc.RootElement.GetProperty("type").GetString();
 
+                // Intercept auth to bind the writer.
+                if (type == "auth")
+                {
+                    accountName = doc.RootElement.GetProperty("user").GetString();
+                    _clients[accountName] = writer;
+                    Logger.Info(this, $"Registered connection for {accountName}");
+                }
+
                 if (_handlers.TryGetValue(type!, out var handler))
-                    await handler(accountName!, doc.RootElement);
+                    await handler(accountName ?? "unknown", doc.RootElement);
             }
         }
         catch (OperationCanceledException) { }

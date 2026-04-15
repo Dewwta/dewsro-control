@@ -684,8 +684,6 @@ namespace VSRO_CONTROL_API.VSRO
                 }
             });
 
-            
-
             Logger.Info(typeof(Overseer), "FoxProxy started on ports 15779, 15881, 15884");
         }
         public static async Task BuildShopDB()
@@ -1027,6 +1025,7 @@ namespace VSRO_CONTROL_API.VSRO
             PlayerTools.RegisterSTRINTUpdateHandler(AgentProxy);
             PlayerTools.RegisterClientMovementHandler(AgentProxy);
             PlayerTools.RegisterClientSortHandler(AgentProxy);
+
             // Activity Time
             ushort[] activityOpcodes =
             {
@@ -1188,9 +1187,6 @@ namespace VSRO_CONTROL_API.VSRO
 
             return true;
         }
-
-        // ── SMC Node Launch Automation ────────────────────────────────────────────
-
         static bool TryLaunchAllNodes(string smcWindowTitle)
         {
             Logger.Info(typeof(Overseer), "Waiting for login dialog to close...");
@@ -1278,10 +1274,6 @@ namespace VSRO_CONTROL_API.VSRO
 
             return true;
         }
-
-        
-        // ── Window Helpers ────────────────────────────────────────────────────────
-
         static IntPtr WaitForWindow(string title, int timeoutMs = 10000, int pollMs = 500)
         {
             int elapsed = 0;
@@ -1294,14 +1286,12 @@ namespace VSRO_CONTROL_API.VSRO
             }
             return IntPtr.Zero;
         }
-
         static void FocusWindow(IntPtr hwnd)
         {
             ShowWindow(hwnd, ShowWindowCommands.Show);
             BringWindowToTop(hwnd);
             SetForegroundWindow(hwnd);
         }
-
         static void WaitForWindowToClose(string title, int timeoutMs = 10000, int pollMs = 300)
         {
             int elapsed = 0;
@@ -1314,7 +1304,6 @@ namespace VSRO_CONTROL_API.VSRO
             }
             Logger.Warn(typeof(Overseer), $"Window '{title}' did not close within timeout.");
         }
-
         static void ClickAt(int x, int y)
         {
             SetCursorPos(x, y);
@@ -1324,7 +1313,6 @@ namespace VSRO_CONTROL_API.VSRO
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
             Thread.Sleep(150);
         }
-
         static void RightClickAt(int x, int y)
         {
             SetCursorPos(x, y);
@@ -1334,7 +1322,6 @@ namespace VSRO_CONTROL_API.VSRO
             mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
             Thread.Sleep(150);
         }
-
         public static List<string> GetMyLocalAddresses()
         {
             List<string> myLocalIps = new List<string>();
@@ -1345,7 +1332,6 @@ namespace VSRO_CONTROL_API.VSRO
             //return ip;
             return myLocalIps;
         }
-
         public static int SendNotice(string message)
         {
             if (AgentProxy == null)
@@ -1374,6 +1360,11 @@ namespace VSRO_CONTROL_API.VSRO
 
             Logger.Info(typeof(Overseer), $"Notice sent to {sent} client(s): {message}");
             return sent;
+        }
+        public static Proxy? GetProxyByAccount(string accountName)
+        {
+            return AgentProxy?.Connections.Values
+                .FirstOrDefault(p => p.Session?.AccountName == accountName);
         }
 
         #endregion

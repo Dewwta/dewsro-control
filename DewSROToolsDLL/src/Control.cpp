@@ -5,17 +5,30 @@
 #include "net/DllBridge.h"
 
 void RegisterAllHandlers() {
-    g_bridge.RegisterHandler("loginAck", [](const std::string&) {
+    g_bridge.RegisterHandler("loginAck", [](const std::string& _) {
         std::cout << "Bridge connected. Waiting for ack..." << std::endl;
     });
 
     g_bridge.RegisterHandler("session_init", [](const std::string& json) {
         g_bridge.m_state.charName = g_bridge.ExtractStr(json, "charName");
-        g_bridge.m_state.hp = g_bridge.ExtractInt(json, "hp");
+        g_bridge.m_state.accJID = g_bridge.ExtractInt(json, "jid");
+        g_bridge.m_state.accName = g_bridge.ExtractInt(json, "accName");
 
-        g_bridge.m_state.valid = true;
         std::cout << "Character loaded: " << g_bridge.m_state.charName << std::endl;
     });
+
+    g_bridge.RegisterHandler("char_init", [](const std::string& json) {
+        g_bridge.m_state.hp = g_bridge.ExtractInt(json, "hp");
+        g_bridge.m_state.mp = g_bridge.ExtractInt(json, "mp");
+        g_bridge.m_state.strength = g_bridge.ExtractInt(json, "strength");
+        g_bridge.m_state.intelligence = g_bridge.ExtractInt(json, "intelligence");
+        g_bridge.m_state.sessionKills = g_bridge.ExtractInt(json, "sessionKills");
+        g_bridge.m_state.unusedStatPoints = g_bridge.ExtractInt(json, "unusedStatPoints");
+        g_bridge.m_state.currentLevel = g_bridge.ExtractInt(json, "currentLevel");
+        g_bridge.m_state.gold = g_bridge.ExtractInt(json, "gold");
+
+    });
+
 }
 
 const bool Debug = true;

@@ -1,7 +1,7 @@
 #pragma once
 #include "../BSLib/ClientNet/MsgStreamBuffer.h"
 #include <BSLib/ClientNet/ClientNet.h>
-#include "DllBridge.h"
+
 
 
 #define DEW_SORT 0xE101
@@ -19,9 +19,6 @@ public:
         NEWMSG(DEW_SORT)
             pReq << (BYTE)sortType;
         SENDMSG()
-    }
-    static OverlayState SendStatusRequest() {
-
     }
 
 private:

@@ -155,7 +155,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                         // 1. SLOT & RENT
                         byte slot = packet.ReadByte();
-                        uint rentType = packet.ReadUInt(); // CORRECT -----------------
+                        uint rentType = packet.ReadUInt();
                         Logger.Debug("ChardataHandler", $"ITEM {i}: slot={slot} rentType={rentType}");
                         if (rentType == 1)
                         {

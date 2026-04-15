@@ -3,6 +3,7 @@
 #include <ws2tcpip.h>
 #include <Windows.h>
 #include "DllBridge.h"
+#include <iostream>
 
 DllBridge g_bridge;
 
@@ -21,7 +22,10 @@ void DllBridge::Connect() {
 void DllBridge::Send(const std::string& msg) {
     if (!m_socket) return;
     std::string line = msg + "\n";
-    send(SOCK, line.c_str(), (int)line.size(), 0);
+    if (send((SOCKET)(size_t)m_socket, line.c_str(), (int)line.size(), 0) == SOCKET_ERROR) {
+        m_connected = false;
+        std::cout << "Error connecting client to proxy socket" << std::endl;
+    }
 }
 
 void DllBridge::RunLoop() {
@@ -51,24 +55,49 @@ void DllBridge::RunLoop() {
             Sleep(2000);
             continue;
         }
+        DWORD timeout = 1000; // 1000ms = 1 second
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
 
         Send("{\"type\":\"auth\",\"user\":\"" + m_username + "\"}");
         m_connected = true;
 
         char buf[4096];
         std::string accum;
+        DWORD lastHeartbeat = GetTickCount();
+        while (m_connected) {
+            DWORD currentTick = GetTickCount();
 
-        while (true) {
+            // heartbeat
+            if (currentTick - lastHeartbeat > 30000) {
+                Send("{\"type\":\"ping\"}");
+                lastHeartbeat = currentTick;
+            }
+
             int bytes = recv(s, buf, sizeof(buf) - 1, 0);
-            if (bytes <= 0) break;
-            buf[bytes] = '\0';
-            accum += buf;
 
-            size_t pos;
-            while ((pos = accum.find('\n')) != std::string::npos) {
-                std::string line = accum.substr(0, pos);
-                accum.erase(0, pos + 1);
-                if (!line.empty()) Dispatch(line);
+            if (bytes > 0) {
+                buf[bytes] = '\0';
+                accum += buf;
+
+                size_t pos;
+                while ((pos = accum.find('\n')) != std::string::npos) {
+                    std::string line = accum.substr(0, pos);
+                    accum.erase(0, pos + 1);
+                    if (!line.empty()) Dispatch(line);
+                }
+            }
+            else if (bytes == 0) {
+                // Proxy closed the connection gracefully
+                m_connected = false;
+            }
+            else {
+                // bytes are negative
+                int err = WSAGetLastError();
+                if (err != WSAETIMEDOUT) {
+                    // It's a real error (WSAECONNRESET), kill the loop to reconnect
+                    m_connected = false;
+                }
+                // If it IS WSAETIMEDOUT, do nothing
             }
         }
 
