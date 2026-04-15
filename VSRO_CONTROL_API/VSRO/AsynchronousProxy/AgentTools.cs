@@ -110,6 +110,13 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     IsAfk = false,
                 };
 
+                DllBridge.Instance.SendToDll(userName.userName!, "session_init", new
+                {
+                    charName = charName,
+                    jid = acc.jid,
+                    accName = userName.userName
+                });
+
                 e.Proxy.SessionTokenSource = new CancellationTokenSource();
 
                 _ = Task.Run(() =>

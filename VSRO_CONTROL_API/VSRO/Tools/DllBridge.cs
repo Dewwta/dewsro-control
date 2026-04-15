@@ -1,4 +1,5 @@
-﻿using CoreLib.Tools.Logging;
+﻿using CoreLib.Models;
+using CoreLib.Tools.Logging;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
@@ -36,10 +37,24 @@ public class DllBridge : IDisposable
 
     public void SendToDll(string accountName, string eventType, object payload)
     {
-        if (!_clients.TryGetValue(accountName, out var writer)) return;
+        Logger.Info(this, $"SendToDll called: account='{accountName}' type='{eventType}'");
+        if (!_clients.TryGetValue(accountName.ToLowerInvariant(), out var writer))
+        {
+            Logger.Warn(this, $"No connected DLL client for account '{accountName}' — dropping '{eventType}'");
+            return;
+        }
+        
         try
         {
-            writer.WriteLine(JsonSerializer.Serialize(new { type = eventType, data = payload }));
+            // Serialize payload fields flat alongside "type", not nested under "data"
+            var payloadJson = JsonSerializer.Serialize(payload);
+            var payloadDoc = JsonDocument.Parse(payloadJson);
+
+            var merged = new Dictionary<string, object> { ["type"] = eventType };
+            foreach (var prop in payloadDoc.RootElement.EnumerateObject())
+                merged[prop.Name] = prop.Value.Clone();  // Clone so it survives doc disposal
+
+            writer.WriteLine(JsonSerializer.Serialize(merged));
         }
         catch { _clients.TryRemove(accountName, out _); }
     }
@@ -82,7 +97,9 @@ public class DllBridge : IDisposable
                 if (type == "auth")
                 {
                     accountName = doc.RootElement.GetProperty("user").GetString();
-                    _clients[accountName] = writer;
+                    _clients[accountName.ToLowerInvariant()] = writer;
+                    Logger.Debug("DllAuth", $"Sending ack for user {accountName}");
+                    DllBridge.Instance.SendToDll(accountName!, "login_ack", new { });
                     Logger.Info(this, $"Registered connection for {accountName}");
                 }
 

@@ -4,6 +4,7 @@
 #include <Windows.h>
 #include "DllBridge.h"
 #include <iostream>
+#include "Logging/Logger.h"
 
 DllBridge g_bridge;
 
@@ -29,6 +30,8 @@ void DllBridge::Send(const std::string& msg) {
 }
 
 void DllBridge::RunLoop() {
+    Sleep(4000);
+    auto& log = GetLogger();
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
 
@@ -50,6 +53,7 @@ void DllBridge::RunLoop() {
         addr.sin_addr = *(in_addr*)host->h_addr_list[0];
 
         if (connect(s, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            log.Err("DllBridge::RunLoop", "connect() failed, WSAError=" + std::to_string(WSAGetLastError()));
             closesocket(s);
             m_socket = nullptr;
             Sleep(2000);
@@ -57,9 +61,11 @@ void DllBridge::RunLoop() {
         }
         DWORD timeout = 1000; // 1000ms = 1 second
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
-
+        // this would also send the password in prod, not right now.
         Send("{\"type\":\"auth\",\"user\":\"" + m_username + "\"}");
+        log.Info("DllBridge::RunLoop", "Sent user auth, waiting for ack...");
         m_connected = true;
+        
 
         char buf[4096];
         std::string accum;
@@ -71,6 +77,7 @@ void DllBridge::RunLoop() {
             if (currentTick - lastHeartbeat > 30000) {
                 Send("{\"type\":\"ping\"}");
                 lastHeartbeat = currentTick;
+                log.Info("DllBridge::Heartbeat", "Hearbeat sent");
             }
 
             int bytes = recv(s, buf, sizeof(buf) - 1, 0);
@@ -88,13 +95,16 @@ void DllBridge::RunLoop() {
             }
             else if (bytes == 0) {
                 // Proxy closed the connection gracefully
+                log.Err("DllBridge::Parse", "Client closed the connection");
                 m_connected = false;
+                
             }
             else {
                 // bytes are negative
                 int err = WSAGetLastError();
                 if (err != WSAETIMEDOUT) {
                     // It's a real error (WSAECONNRESET), kill the loop to reconnect
+
                     m_connected = false;
                 }
                 // If it IS WSAETIMEDOUT, do nothing

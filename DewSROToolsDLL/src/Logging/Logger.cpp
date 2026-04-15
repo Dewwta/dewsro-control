@@ -5,6 +5,12 @@ void Logger::Alloc() {
 	AllocConsole();
 	m_consoleHwnd = GetConsoleWindow();
 	m_consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+
+	FILE* f;
+	freopen_s(&f, "CONOUT$", "w", stdout);
+	freopen_s(&f, "CONOUT$", "w", stderr);
+	freopen_s(&f, "CONIN$", "r", stdin);
+
 	m_isAlloced = true;
 }
 
@@ -63,4 +69,9 @@ void Logger::Dbg(std::string loc, std::string msg) {
 	std::cout << "[" << loc << "] " << msg << std::endl;
 
 	SetConsoleTextAttribute(m_consoleHandle, DEFAULT_COLOR);
+}
+
+Logger& GetLogger() {
+	static Logger instance; // constructed once, thread-safe in C++11+
+	return instance;
 }

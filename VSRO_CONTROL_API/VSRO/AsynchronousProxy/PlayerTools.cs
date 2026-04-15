@@ -380,7 +380,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     {
                         e.Proxy.Session!.PlayerStats!.STR = STR;
                         e.Proxy.Session!.PlayerStats!.INT = INT;
-                        e.Proxy.Session!.PlayerStats!.MaxMP = MaxHP;
+                        e.Proxy.Session!.PlayerStats!.MaxHP = MaxHP;
                         e.Proxy.Session!.PlayerStats.MaxMP = MaxMP;
 
                         var payload = new

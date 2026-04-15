@@ -15,6 +15,7 @@
 #include "../Settings.h"
 #include "../net/NetActions.h"
 #include "../net/LoginHook.h"
+#include "Logging/Logger.h"
 
 static bool initialized = false;
 
@@ -361,16 +362,18 @@ LRESULT CALLBACK hkWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 void dx9_hook::init()
 {
+    auto& log = GetLogger();
+
     HMODULE d3d9 = GetModuleHandleA("d3d9.dll");
     void* create9addr = GetProcAddress(d3d9, "Direct3DCreate9");
 
-    std::cout << "Installing D3d9 hook" << std::endl;
+    log.Info("dx9_hook::init", "Installing D3d9 hook");
     MH_Initialize();
     MH_CreateHook(create9addr, hkDirect3DCreate9,
         reinterpret_cast<void**>(&oCreate));
     MH_EnableHook(create9addr);
     //MessageBoxA(nullptr, "Create9 hook installed", "ok", MB_OK);
-    std::cout << "Installing login hook" << std::endl;
+    log.Info("dx9_hook::init", "Installing login hook");
     InstallLoginHook();
 }
 
