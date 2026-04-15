@@ -8,7 +8,6 @@ namespace VSRO_CONTROL_API.Controllers
     [Route("api/backup")]
     public class BackupController : ControllerBase
     {
-        // POST api/backup/run — admin only, triggers an immediate backup of all configured databases
         [RequireAdmin]
         [HttpPost("run")]
         public async Task<IActionResult> RunBackup()
@@ -23,7 +22,6 @@ namespace VSRO_CONTROL_API.Controllers
                 : StatusCode(500, new { message });
         }
 
-        // GET api/backup/status — admin only, returns service state + file listing
         [RequireAdmin]
         [HttpGet("status")]
         public IActionResult GetStatus()

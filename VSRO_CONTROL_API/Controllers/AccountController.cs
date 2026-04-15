@@ -160,7 +160,6 @@ namespace VSRO_CONTROL_API.Controllers
             return Ok(new { silk = res.silk });
         }
 
-        // ── Invite Code Management (admin only) ──────────────────────────────────
 
         [RequireAdmin]
         [HttpGet("invite-codes")]

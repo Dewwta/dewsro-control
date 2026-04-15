@@ -2,7 +2,7 @@
 #include "../BSLib/ClientNet/MsgStreamBuffer.h"
 #include <BSLib/ClientNet/ClientNet.h>
 #include "DllBridge.h"
-#include <BSLib/ClientNet/MsgStreamBuffer.h>
+
 
 #define DEW_SORT 0xE101
 

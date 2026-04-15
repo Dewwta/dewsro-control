@@ -1,18 +1,20 @@
 #include "dx9_hook.h"
+
+// ImGui
 #include "imgui.h"
 #include "imgui_impl_dx9.h"
 #include "imgui_impl_win32.h"
+
+// Hook
 #include <d3d9.h>
 #include <MinHook.h>
-#include "../net/NetActions.h"
-#include "../Settings.h"
-#include "../net/DllBridge.h"
-#include "../net/LoginHook.h"
-#include "../Interfaces/PlayerInterface.h";
 
-static PlayerInterface g_player;
+// Internal
+#include "../Settings.h"
+#include "../net/NetActions.h"
 
 static bool initialized = false;
+
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 typedef HRESULT(__stdcall* Present_t)(IDirect3DDevice9*, CONST RECT*, CONST RECT*, HWND, CONST RGNDATA*);
 static Present_t oPresent = nullptr;
@@ -101,31 +103,11 @@ static void RenderWatermark(const char* text)
 static void RenderTools() {
     ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_Always);
     ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
-
     int currentLevel = 0;
     short availablePoints = 0;
 
-    if (g_pMyPlayerObj)
-    {
-        currentLevel = g_player.GetCurrentLevel();
-        availablePoints = g_player.GetStatPoints();
-    }
 
     ImGui::Begin("VSRO Tools", &showToolsWindow);
-
-    // DEBUG
-    ImGui::TextDisabled("DEBUG / PLAYER TEST");
-    ImGui::Separator();
-    ImGui::Text("Player pointer: %s", g_pMyPlayerObj ? "VALID" : "NULL");
-    if (g_pMyPlayerObj)
-    {
-        ImGui::Text("Level: %d", currentLevel);
-        ImGui::Text("Stat Points: %d", availablePoints);
-    }
-    else
-    {
-        ImGui::TextColored(ImVec4(1, 0, 0, 1), "Player not loaded yet");
-    }
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -182,8 +164,8 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
         oWndProc = (WNDPROC)GetWindowLongPtrA(params.hFocusWindow, GWLP_WNDPROC);
         SetWindowLongPtrA(params.hFocusWindow, GWLP_WNDPROC, (LONG)hkWndProc);
 
-        g_bridge.SetIdentity("dewwta"); // or pull from settings/login hook
-        g_bridge.Connect();
+        //g_bridge.SetIdentity("dewwta");
+        //g_bridge.Connect();
 
 
         initialized = true;
@@ -321,9 +303,10 @@ void dx9_hook::init()
         reinterpret_cast<void**>(&oCreate));
     MH_EnableHook(create9addr);
     //MessageBoxA(nullptr, "Create9 hook installed", "ok", MB_OK);
-    InstallLoginHook();
+    //InstallLoginHook();
 }
 
+// Only for debugging, do not use this in release stupid
 void dx9_hook::notify(const char* msg) {
     MessageBoxA(nullptr, msg, "ok", MB_OK);
 }

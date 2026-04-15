@@ -15,16 +15,7 @@ endif()
 
 add_subdirectory(minhook)
 
-# === JMX / GFX Libraries ===
 add_subdirectory(src/BSLib) 
-add_subdirectory(src/libs/JMX/GFX/FM)               # GFXFileManagerLIB
-add_subdirectory(src/libs/JMX/GFX/GFXMainFrame)     # GFXMainFrame
-add_subdirectory(src/libs/JMX/GFX/GFX3DFunction)    # GFX3DFunction
-add_subdirectory(src/libs/NavMesh)                  # NavMesh
-add_subdirectory(src/libs/JMX/SROInterfaceLib)      # SROInterfaceLIB
-add_subdirectory(src/libs/SimpleViewer)             # SimpleViewer
-add_subdirectory(src/libs/TypeId)                   # TypeId
-add_subdirectory(src/libs/ClientLib)                # support
 
 add_library(DewSROToolkit SHARED
     src/DllMain.cpp
@@ -39,10 +30,9 @@ add_library(DewSROToolkit SHARED
     imgui/backends/imgui_impl_win32.cpp
     imgui/imgui_demo.cpp
     "src/net/NetActions.h"
+    "src/net/LoginHook.h"
     "src/Settings.h" 
-    "src/Interfaces/PlayerInterface.h"
-    "src/game/System.cpp"
- "src/Interfaces/PlayerInterface.cpp" "src/net/DllBridge.cpp")
+    "src/net/DllBridge.cpp")
 
 target_include_directories(DewSROToolkit PRIVATE
     src/
@@ -52,34 +42,15 @@ target_include_directories(DewSROToolkit PRIVATE
     minhook/include/
     BSLib
 
-    # FIXED ROOTS (this is the important part)
-    src/libs/TypeId
-    src/libs/JMX/GFX
-    src/libs/JMX/GFX/GFXMainFrame
-    src/libs/JMX/GFX/GFX3DFunction
-    src/libs/JMX/GFX/FM
-    src/libs/ClientLib/src
-    src/libs/NavMesh
-    src/libs/SimpleViewer/include
-
     "${DXSDK_DIR}/Include"
 )
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /NODEFAULTLIB:d3dx9dt.lib /DEFAULTLIB:d3dx9d.lib")
 target_link_libraries(DewSROToolkit PRIVATE
     d3d9.lib
-    d3dx9.lib        # Often required by GFX libraries
-    d3dxof.lib       # Fixed the error
+    d3dx9.lib
     dwmapi.lib
     minhook
     BSLib
-    GFXFileManagerLIB
-    GFXMainFrame
-    GFX3DFunction
-    NavMesh
-    TypeId
-    SROInterfaceLIB
-    ClientLib
-    SimpleViewer
     ws2_32
 )
 
