@@ -14,7 +14,7 @@ static bool __fastcall hk_Login(void* thisPtr, void* edx,
     if (username) {
         g_bridge.SetIdentity(username);
         g_bridge.Connect();
-        std::cout << "Connecting to proxy... Username: " << username << std::endl;
+        std::cout << "Connecting to proxy...\nUsername: " << username << std::endl;
 
     }
     else {

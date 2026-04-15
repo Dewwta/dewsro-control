@@ -125,6 +125,27 @@ int DllBridge::ExtractInt(const std::string& json, const std::string& key) {
     return std::stoi(json.substr(s));
 }
 
+
+uint64_t DllBridge::ExtractUint64(const std::string& json, const std::string& key) {
+    std::string search = "\"" + key + "\":";
+    auto s = json.find(search);
+    if (s == std::string::npos) return 0;
+
+    s += search.size();
+
+    // Find where the number ends (usually a comma or closing brace)
+    auto e = json.find_first_of(",}", s);
+    std::string valueStr = json.substr(s, e - s);
+
+    try {
+        return std::stoull(valueStr);
+    }
+    catch (...) {
+        return 0;
+    }
+}
+
+
 void DllBridge::Dispatch(const std::string& json) {
     std::string type = ExtractStr(json, "type");
     auto it = m_handlers.find(type);

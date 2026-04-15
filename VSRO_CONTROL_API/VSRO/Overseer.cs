@@ -676,7 +676,7 @@ namespace VSRO_CONTROL_API.VSRO
                     var user = element.GetProperty("user").GetString();
                     // store writer
                     Logger.Debug("DllAuth", $"Sending ack for user {user}");
-                    DllBridge.Instance.SendToDll(user!, "loginAck", new { });
+                    DllBridge.Instance.SendToDll(user!, "login_ack", new { });
                 }
                 catch (Exception ex)
                 {

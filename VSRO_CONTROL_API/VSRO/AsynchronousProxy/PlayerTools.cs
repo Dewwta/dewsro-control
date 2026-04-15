@@ -1,13 +1,14 @@
-﻿using CoreLib.Tools.Logging;
+﻿using CoreLib.Models;
+using CoreLib.Tools.Logging;
 using System.Collections.Concurrent;
 using System.Text;
 using VSRO_CONTROL_API.Settings;
+using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Framework;
+using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
+using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Tracking;
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Tools;
-using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
-using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements;
-using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Tracking;
 
 namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 {
@@ -149,6 +150,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         RemainingSkillPoints = remainSkillPoint,
                     };
 
+                    
                     for (int i = 0; i < itemCount; i++)
                     {
                         Logger.Debug("ChardataHandler", $"--- ITEM {i} ---");
@@ -176,8 +178,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             packet.ReadUShort(); // CanRecharge
                             packet.ReadUInt();   // PackingTime
                         }
-                        
-                        // 2. ITEM ID & DB LOOKUP
+
+                        // ITEMS
                         uint refItemId = packet.ReadUInt();
                         var itemInfo = await DBConnect.GetItemRecord(refItemId);
 
@@ -192,7 +194,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         // Initialize defaults
                         ushort finalStack = 1;
                         Logger.Debug("ChardataHandler", $"{itemInfo.item.CodeName}: T1={itemInfo.item.T1} | T2={itemInfo.item.T2} | T3={itemInfo.item.T3} | T4={itemInfo.item.T4}");
-                        // 3. BRANCHING LOGIC
+
                         if (itemInfo.item.T1 == 1) // NPC/Character objects
                         {
                             // Need to determine structure
@@ -212,7 +214,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                     packet.ReadUInt(); packet.ReadUInt();
                                 }
 
-                                // 1. Sockets (Binding Type 1)
+                                // Sockets (Binding Type 1)
                                 packet.ReadByte(); // Binding Type
                                 byte socketCount = packet.ReadByte();
                                 for (int j = 0; j < socketCount; j++)
@@ -220,7 +222,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                     packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt();
                                 }
 
-                                // 2. Adv Elixirs (Binding Type 2)
+                                // Adv Elixirs (Binding Type 2)
                                 packet.ReadByte(); // Binding Type
                                 byte advCount = packet.ReadByte();
                                 for (int j = 0; j < advCount; j++)
@@ -338,6 +340,16 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         $"CRASH parsing CHARDATA: {ex.Message}\n{ex.StackTrace}");
                 }
 
+                var payload = new
+                {
+                    hp = e.Proxy.Session.PlayerStats.CurrentHP,
+                    mp = e.Proxy.Session.PlayerStats.CurrentMP,
+                    sessionKills = e.Proxy.Session.SessionKills,
+                    unusedStatPoints = e.Proxy.Session.PlayerStats.UnusedStatPoints,
+                    currentLevel = e.Proxy.Session.PlayerStats.CurrentLevel,
+                    gold = e.Proxy.Session.PlayerStats.RemainingGold,
+                };
+                DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "char_init", payload);
 
             });
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_STATS, async (sender, e) =>
@@ -368,7 +380,20 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     {
                         e.Proxy.Session!.PlayerStats!.STR = STR;
                         e.Proxy.Session!.PlayerStats!.INT = INT;
-                    } 
+                        e.Proxy.Session!.PlayerStats!.MaxMP = MaxHP;
+                        e.Proxy.Session!.PlayerStats.MaxMP = MaxMP;
+
+                        var payload = new
+                        {
+                            strength = e.Proxy.Session.PlayerStats.STR,
+                            intelligence = e.Proxy.Session.PlayerStats.INT,
+                            maxHp = e.Proxy.Session.PlayerStats.MaxHP,
+                            maxMp = e.Proxy.Session.PlayerStats.MaxMP,
+                        };
+                        DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "stat_init", payload);
+
+
+                    }
                     else
                     {
                         Logger.Error("ServerStatsHandler", $"Character session was null!: STR={STR} INT={INT} MaxHP={MaxHP} MaxMP={MaxMP} HitRate={HitRate} ParryRate={ParryRate}");

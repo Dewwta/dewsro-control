@@ -33,6 +33,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network
         private Dictionary<ushort, List<PacketTransferEventHandler>>
             m_ClientPacketEventHandlers = new Dictionary<ushort, List<PacketTransferEventHandler>>(),
             m_ServerPacketEventHandlers = new Dictionary<ushort, List<PacketTransferEventHandler>>();
+        
         #endregion
 
         #region Public Properties

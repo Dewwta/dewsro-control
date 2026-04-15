@@ -32,7 +32,7 @@ add_library(DewSROToolkit SHARED
     "src/net/NetActions.h"
     "src/net/LoginHook.h"
     "src/Settings.h" 
-    "src/net/DllBridge.cpp" "src/client/ClassLink.h" "src/client/TypeId/TypeIdBase.h" "src/client/TypeId/TypeIdRegistry.cpp" "src/client/TypeId/TypeId.h" "src/client/data/CommonData.h")
+    "src/net/DllBridge.cpp" "src/client/ClassLink.h" "src/client/TypeId/TypeIdBase.h" "src/client/TypeId/TypeIdRegistry.cpp" "src/client/TypeId/TypeId.h" "src/client/data/CommonData.h" "src/Logging/Logger.h" "src/Logging/Logger.cpp")
 
 target_include_directories(DewSROToolkit PRIVATE
     src/

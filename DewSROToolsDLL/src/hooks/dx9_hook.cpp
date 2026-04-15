@@ -4,16 +4,17 @@
 #include "imgui.h"
 #include "imgui_impl_dx9.h"
 #include "imgui_impl_win32.h"
+#include "imgui_internal.h"
 
 // Hook
 #include <d3d9.h>
 #include <MinHook.h>
 #include <iostream>
+
 // Internal
 #include "../Settings.h"
 #include "../net/NetActions.h"
 #include "../net/LoginHook.h"
-
 
 static bool initialized = false;
 
@@ -103,22 +104,91 @@ static void RenderWatermark(const char* text)
     ImGui::PopStyleVar();
 }
 static void RenderTools() {
-    ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
-    int currentLevel = 0;
-    short availablePoints = 0;
+    ImGui::SetNextWindowSizeConstraints(ImVec2(300, 200), ImVec2(600, 800));
 
+    ImGui::Begin("Player Actions", &showToolsWindow);
 
-    ImGui::Begin("VSRO Tools", &showToolsWindow);
+    // Snapshot state once — safe read off the network thread
+    PlayerState ps = g_bridge.m_state;
+    bool hasPlayer = !ps.charName.empty();
+
+    // ── PLAYER ──────────────────────────────────────────
+    ImGui::TextDisabled("PLAYER");
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (!hasPlayer) {
+        ImGui::TextDisabled("Waiting for session...");
+    }
+    else {
+        // Identity row
+        float col1 = 80.0f;
+        ImGui::Text("Character"); ImGui::SameLine(col1);
+        ImGui::TextColored(ImVec4(0.75f, 0.88f, 1.0f, 1.0f), "%s", ps.charName.c_str());
+
+        ImGui::Text("Account");   ImGui::SameLine(col1);
+        ImGui::TextColored(ImVec4(0.75f, 0.88f, 1.0f, 1.0f), "%s", ps.accName.c_str());
+
+        ImGui::Text("Level");     ImGui::SameLine(col1);
+        ImGui::Text("%d", ps.currentLevel);
+        if (ps.unusedStatPoints > 0) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "(%d pts)", ps.unusedStatPoints);
+        }
+
+        ImGui::Spacing();
+
+        // HP bar
+        int safeMaxHp = (ps.maxHp > 0) ? ps.maxHp : 1;
+        float hpFrac = ImClamp((float)ps.hp / (float)safeMaxHp, 0.0f, 1.0f);
+        char hpLabel[32];
+        snprintf(hpLabel, sizeof(hpLabel), "%d / %d", ps.hp, ps.maxHp);
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.75f, 0.22f, 0.17f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.05f, 0.10f, 0.14f, 1.0f));
+        ImGui::ProgressBar(hpFrac, ImVec2(-1, 14), hpLabel);
+        ImGui::PopStyleColor(2);
+
+        // MP bar
+        int safeMaxMp = (ps.maxMp > 0) ? ps.maxMp : 1;
+        float mpFrac = ImClamp((float)ps.mp / (float)safeMaxMp, 0.0f, 1.0f);
+        char mpLabel[32];
+        snprintf(mpLabel, sizeof(mpLabel), "%d / %d", ps.mp, ps.maxMp);
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.13f, 0.40f, 0.69f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.05f, 0.10f, 0.14f, 1.0f));
+        ImGui::ProgressBar(mpFrac, ImVec2(-1, 14), mpLabel);
+        ImGui::PopStyleColor(2);
+
+        ImGui::Spacing();
+
+        // Stats row
+        float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
+        ImGui::BeginGroup();
+        ImGui::TextDisabled("STR"); ImGui::SameLine(36); ImGui::Text("%d", ps.strength);
+        ImGui::TextDisabled("INT"); ImGui::SameLine(36); ImGui::Text("%d", ps.intelligence);
+        ImGui::EndGroup();
+        ImGui::SameLine(half);
+        ImGui::BeginGroup();
+        ImGui::TextDisabled("Kills"); ImGui::SameLine(48); ImGui::Text("%d", ps.sessionKills);
+        ImGui::TextDisabled("Gold");  ImGui::SameLine(48);
+        // Format gold with commas via manual split (no locale in MSVC CRT easily)
+        if (ps.gold >= 1000000)
+            ImGui::TextColored(ImVec4(0.78f, 0.64f, 0.23f, 1.0f), "%.2fM", ps.gold / 1000000.0);
+        else if (ps.gold >= 1000)
+            ImGui::TextColored(ImVec4(0.78f, 0.64f, 0.23f, 1.0f), "%.1fK", ps.gold / 1000.0);
+        else
+            ImGui::TextColored(ImVec4(0.78f, 0.64f, 0.23f, 1.0f), "%llu", ps.gold);
+        ImGui::EndGroup();
+    }
 
     ImGui::Spacing();
-    ImGui::Separator();
 
-    // INVENTORY
+    // ── INVENTORY ───────────────────────────────────────
     ImGui::TextDisabled("INVENTORY");
     ImGui::Separator();
     ImGui::Spacing();
-    ImGui::Text("Sort");
+    ImGui::TextDisabled("Sort");
     ImGui::Spacing();
 
     float btnWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
@@ -130,13 +200,12 @@ static void RenderTools() {
 
     ImGui::Spacing();
 
-    // GENERAL
+    // ── GENERAL ─────────────────────────────────────────
     ImGui::TextDisabled("GENERAL");
     ImGui::Separator();
     ImGui::Spacing();
     bool kf = Settings::keepFocused;
-    if (ImGui::Checkbox("Keep Focus", &kf))
-    {
+    if (ImGui::Checkbox("Keep Focus", &kf)) {
         Settings::keepFocused = kf;
         Settings::Save();
     }
@@ -147,7 +216,6 @@ static void RenderTools() {
 
     ImGui::End();
 }
-
 LRESULT CALLBACK hkWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONST RECT* pDestRect, HWND hDestWindow, CONST RGNDATA* pDirtyRegion)
 {
@@ -176,7 +244,7 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    RenderWatermark("V1.199 BETA - @Dewwta");  // always visible
+    RenderWatermark("V1.199 BETA - @Dewwta");
 
     if (showToolsWindow)
         RenderTools();

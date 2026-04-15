@@ -19,6 +19,7 @@ struct PlayerState
     int ZerkLevel = 0;
     int strength = 0, intelligence = 0;
     int hp = 0, mp = 0;
+    int maxHp = 0, maxMp = 0;
     int sessionKills = 0;
     int unusedStatPoints = 0;
     int currentLevel = 0;
@@ -40,7 +41,7 @@ public:
     void Send(const std::string& msg);
     std::string ExtractStr(const std::string& json, const std::string& key);
     int ExtractInt(const std::string& json, const std::string& key);
-
+    uint64_t ExtractUint64(const std::string& json, const std::string& key);
 private:
     void* m_socket = nullptr; // opaque
     void RunLoop();
