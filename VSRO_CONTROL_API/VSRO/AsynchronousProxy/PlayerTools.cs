@@ -1757,8 +1757,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 e.CancelTransfer = true;
                 var packet = e.Packet.Clone();
                 var type = packet.ReadByte();
-                
-                Logger.Info("SortHandler:Dew", $"Sorting called!!");
+
+                // This is for later. :3
+                // var target = packet.ReadByte();
 
                 e.Proxy.IsSorting = true;
                 string sortMode = "type";
@@ -1796,7 +1797,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                             if (result == SortResult.Aborted)
                             {
-                                return; // silently stop (you already sent a reason inside)
+                                return;
                             }
 
                             await Task.Delay(150);
@@ -1823,6 +1824,28 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
         #endregion
 
         #region - Sorting -
+        private static async Task<bool> SendPetMoveAndWait(Proxy proxy, byte source, byte dest, ushort qty, int timeoutMs = 3000)
+        {
+            var tcs = new TaskCompletionSource<bool>();
+
+            proxy.PendingMoves[source] = tcs;
+
+            var movePacket = new Packet(Constant.CLIENT_ITEM_MOVE);
+            movePacket.WriteByte(16);
+            movePacket.WriteByte(source);
+            movePacket.WriteByte(dest);
+            movePacket.WriteUShort(qty);
+            proxy.Server.Send(movePacket);
+
+            var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
+
+            proxy.PendingMoves.Remove(source);
+
+            if (completed == tcs.Task)
+                return tcs.Task.Result;
+
+            return false;
+        }
 
         private static async Task<bool> SendMoveAndWait(Proxy proxy, byte source, byte dest, ushort qty, int timeoutMs = 3000)
         {
@@ -1849,107 +1872,98 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
         public static async Task<SortResult> SortInventoryStep(Proxy proxy, string sortMode = "type")
         {
-            var (success, items, _) =
-                await DBConnect.GetInventoryWithNamesByCharName(proxy.Session!.CharacterName!);
-
-            if (!success || items == null || items.Count == 0)
+            if (proxy.Inventory.Slots.IsEmpty)
                 return SortResult.Aborted;
 
             if (proxy.Inventory.Slots.Values.Any(s => s.CodeName == "MALL_PENDING"))
             {
-                PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null, "You have pending mall items detected. Teleport to resync inventory before sorting");
-                return SortResult.Aborted;
-            } 
-            else if (proxy.Inventory.Slots.Values.Any(s => s.CodeName == "UNKNOWN_PET_TRANSFER"))
-            {
-                PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null, "You have unsynced items. Teleport to resync inventory before sorting");
+                PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null, "You have pending mall items. Teleport to resync before sorting.");
                 return SortResult.Aborted;
             }
-            int start = 13;
-
-            var ordered = items.OrderBy(i => i.Slot).ToList();
-
-            // =========================
-            // PHASE 1: STACK
-            // =========================
-            for (int i = 0; i < ordered.Count; i++)
+            else if (proxy.Inventory.Slots.Values.Any(s => s.CodeName == "UNKNOWN_PET_TRANSFER"))
             {
-                var a = ordered[i];
+                PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null, "You have unsynced items. Teleport to resync before sorting.");
+                return SortResult.Aborted;
+            }
 
-                for (int j = i + 1; j < ordered.Count; j++)
+            // Snapshot current inventory slots (slot >= 13 = player inventory)
+            var slots = proxy.Inventory.Slots
+                .Where(kvp => kvp.Key >= 13)
+                .OrderBy(kvp => kvp.Key)
+                .ToList();
+
+            // Stack
+            bool didStack = false;
+            for (int i = 0; i < slots.Count; i++)
+            {
+                var (slotA, itemA) = slots[i];
+                if (itemA.MaxStack <= 1) continue;
+                if (itemA.Stack >= itemA.MaxStack) continue;
+
+                for (int j = i + 1; j < slots.Count; j++)
                 {
-                    var b = ordered[j];
+                    var (slotB, itemB) = slots[j];
+                    if (itemB.ItemID != itemA.ItemID) continue;
+                    if (itemB.Stack <= 0) continue;
 
-                    if (a.ItemID == b.ItemID && a.MaxStack > 1)
+                    int spaceInA = itemA.MaxStack - itemA.Stack;
+                    if (spaceInA <= 0) break; // A is full, move to next A
+
+                    ushort qty = (ushort)Math.Min(itemB.Stack, spaceInA);
+                    bool moved = await SendMoveAndWait(proxy, slotA, slotB, qty);
+                    if (moved)
                     {
-                        int spaceInA = a.MaxStack - proxy.Inventory.Slots[a.Slot].Stack;
-                        if (spaceInA <= 0) continue;
+                        didStack = true;
+                        itemA = (itemA.ItemID, itemA.CodeName, itemA.Stack + qty, itemA.MaxStack);
+                        slots[i] = new KeyValuePair<byte, (int, string, int, int)>(slotA, itemA);
 
-                        ushort qty = (ushort)Math.Min(proxy.Inventory.Slots[b.Slot].Stack, spaceInA);
-                        await SendMoveAndWait(proxy, b.Slot, a.Slot, qty);
-                        return SortResult.Continue;
+                        itemB = (itemB.ItemID, itemB.CodeName, itemB.Stack - qty, itemB.MaxStack);
+                        slots[j] = new KeyValuePair<byte, (int, string, int, int)>(slotB, itemB);
                     }
                 }
             }
+            if (didStack) return SortResult.Continue;
 
-            // =========================
-            // PHASE 2: PACK (fill gaps)
-            // =========================
-            for (int i = 0; i < ordered.Count; i++)
+            // Pack
+            int start = 13;
+            for (int i = 0; i < slots.Count; i++)
             {
                 byte expectedSlot = (byte)(start + i);
-
-                if (ordered[i].Slot != expectedSlot)
+                var (slot, item) = slots[i];
+                if (slot != expectedSlot)
                 {
-                    byte from = ordered[i].Slot;
-                    byte to = expectedSlot;
-                    ushort qty = (ushort)proxy.Inventory.Slots[from].Stack;
-
-                    await SendMoveAndWait(proxy, from, to, qty);
+                    await SendMoveAndWait(proxy, slot, expectedSlot, (ushort)item.Stack);
                     return SortResult.Continue;
                 }
             }
 
-            // =========================
-            // PHASE 3: SORT
-            // =========================
-            var sorted =
-                sortMode == "name"
-                    ? ordered
-                        .OrderBy(i => GameObjectNameResolver.Resolve(i.CodeName))
-                        .ThenBy(i => i.CodeName)
-                        .ThenByDescending(i => proxy.Inventory.Slots[i.Slot].Stack)
-                        .ToList()
-                    : ordered
-                        .OrderBy(i => i.CodeName)
-                        .ThenByDescending(i => proxy.Inventory.Slots[i.Slot].Stack)
-                        .ToList();
+            // Sort
+            var sorted = sortMode == "name"
+                ? slots
+                    .OrderBy(s => GameObjectNameResolver.Resolve(s.Value.CodeName))
+                    .ThenBy(s => s.Value.CodeName)
+                    .ThenByDescending(s => s.Value.Stack)
+                    .ToList()
+                : slots
+                    .OrderBy(s => s.Value.CodeName)
+                    .ThenByDescending(s => s.Value.Stack)
+                    .ToList();
 
             for (int i = 0; i < sorted.Count; i++)
             {
                 byte targetSlot = (byte)(start + i);
+                var (currentSlot, item) = sorted[i];
 
-                var desired = sorted[i];
-
-                var current = ordered.FirstOrDefault(x =>
-                    x.ItemID == desired.ItemID &&
-                    x.Slot != targetSlot
-                );
-
-                if (current.Slot == 0)
-                    continue;
-
-                if (current.Slot != targetSlot)
+                if (currentSlot != targetSlot)
                 {
-                    ushort qty = (ushort)proxy.Inventory.Slots[current.Slot].Stack;
-                    await SendMoveAndWait(proxy, current.Slot, targetSlot, qty);
+                    await SendMoveAndWait(proxy, currentSlot, targetSlot, (ushort)item.Stack);
                     return SortResult.Continue;
                 }
             }
-            
+
             return SortResult.Completed;
         }
-        
+
         #endregion
 
         #region - Play Time -

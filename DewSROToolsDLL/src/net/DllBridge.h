@@ -5,7 +5,6 @@
 #include <functional>
 #include <unordered_map>
 
-
 #define BRIDGE_HOST "REDACTED"
 #define BRIDGE_PORT 9001
 
@@ -26,6 +25,14 @@ struct PlayerState
     uint64_t gold = 0;
 };
 
+struct State
+{
+    std::string sessionTime;
+    std::string totalTime;
+    int isAfk = 0;
+
+};
+
 using BridgeHandler = std::function<void(const std::string& json)>;
 class DllBridge
 {
@@ -34,6 +41,7 @@ public:
     std::string m_username;
     std::atomic<bool> m_connected{ false };
     PlayerState m_state;
+    State m_sessionState;
     std::function<void(const std::string& type, const std::string& json)> OnEvent;
 
     void SetIdentity(const std::string& username);

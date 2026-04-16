@@ -30,7 +30,7 @@ void DllBridge::Send(const std::string& msg) {
 }
 
 void DllBridge::RunLoop() {
-    Sleep(4000);
+    Sleep(3000);
     auto& log = GetLogger();
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);

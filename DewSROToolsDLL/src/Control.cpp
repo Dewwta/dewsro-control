@@ -40,6 +40,11 @@ void RegisterAllHandlers() {
         log.Info("Control_Handler::stat_init", "Stats received.");
     });
 
+    g_bridge.RegisterHandler("session_sync", [](const std::string& json) {
+        auto& log = GetLogger();
+        
+    });
+
 }
 
 void Control::Initialize()
