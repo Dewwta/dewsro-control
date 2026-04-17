@@ -929,6 +929,13 @@ namespace VSRO_CONTROL_API.VSRO
                             proxy.SessionTokenSource = null;
                         }
 
+                        if (proxy.ActiveSortCts != null)
+                        {
+                            proxy.ActiveSortCts?.Cancel();
+                            proxy.ActiveSortCts?.Dispose();
+                            proxy.ActiveSortCts = null;
+                        }
+                        
                         if (session != null && !string.IsNullOrEmpty(session.CharacterName))
                         {
                             await DBConnect.AddPlayTimeAsync(session.CharacterName, session.AccumulatedPlayTime);
@@ -1000,7 +1007,6 @@ namespace VSRO_CONTROL_API.VSRO
             // Character Inventories
             PlayerTools.RegisterChatCommandHandler(AgentProxy);
             PlayerTools.RegisterItemMoveHandler(AgentProxy);
-            PlayerTools.RegisterCosDespawnHandler(AgentProxy);
             PlayerTools.RegisterChardataHandler(AgentProxy);
             PlayerTools.RegisterItemUseHandler(AgentProxy);
             PlayerTools.RegisterCosSpawnHandler(AgentProxy);

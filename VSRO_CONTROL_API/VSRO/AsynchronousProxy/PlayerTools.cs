@@ -1289,35 +1289,69 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
             });
         }
-        public static void RegisterCosDespawnHandler(Server _agentProxy)
-        {
-            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_ANIMATION_COS_REMOVE_MENU, (sender, e) =>
-            {
-                var packet = e.Packet.Clone();
-                uint petUID = packet.ReadUInt();
-                byte type = packet.ReadByte();
-
-                var inv = e.Proxy.Inventory;
-
-                inv.Pets.TryGetValue(petUID, out var pet);
-                string petName = pet?.Info.Name ?? $"0x{petUID:X}";
-
-                if (type == 1)
-                {
-                    inv.Pets.TryRemove(petUID, out _);
-                    if (e.Proxy.Session?.ActivePetUID == petUID)
-                        e.Proxy.Session.ActivePetUID = 0;
-                    Logger.Debug("CosDespawnHandler", $"Pet {petName} despawned and removed");
-                }
-                else if (type == 2)
-                {
-                    // State change only - inventory stays, pet is recalled/unsummoned
-                    Logger.Debug("CosDespawnHandler", $"Pet {petName} state change (recalled)");
-                }
-            });
-        }
         public static void RegisterCosSpawnHandler(Server _agentProxy)
         {
+            async Task ParseCosPage(Packet packet, byte itemCount, uint petUID, InventoryTracker inv)
+            {
+                var pet = inv.Pets[petUID];
+                for (int i = 0; i < itemCount; i++)
+                {
+                    byte indexByte = packet.ReadByte();
+                    packet.ReadUInt(); // padding
+                    uint refItemId = packet.ReadUInt();
+                    byte slot = (byte)(indexByte + 1);
+
+                    var itemInfoResult = await DBConnect.GetItemRecord(refItemId);
+                    if (!itemInfoResult.success)
+                    {
+                        Logger.Warn("CosSpawn", $"0x30C9 unknown refObjID 0x{refItemId:X} at slot {slot}");
+                        break;
+                    }
+
+                    var item = itemInfoResult.item;
+                    ushort finalStack = 1;
+
+                    if (item.T2 == 3)
+                    {
+                        finalStack = packet.ReadUShort();
+                        if (finalStack == 0) finalStack = 1;
+                        if (item.CodeName.Contains("ATTRSTONE"))
+                            packet.ReadByte(); // assimilation byte
+
+                    }
+                    else if (item.T2 == 1)
+                    {
+                        packet.ReadByte();
+                        packet.ReadULong();
+                        packet.ReadUInt();
+                        byte magCount = packet.ReadByte();
+                        for (int m = 0; m < magCount; m++) { packet.ReadUInt(); packet.ReadUInt(); }
+                        packet.ReadByte();
+                        byte scCount = packet.ReadByte();
+                        for (int s = 0; s < scCount; s++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
+                        packet.ReadByte();
+                        byte acCount = packet.ReadByte();
+                        for (int a = 0; a < acCount; a++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
+                    }
+                    else
+                    {
+                        Logger.Warn("CosSpawn", $"0x30C9 unhandled T2={item.T2} for {item.CodeName} at slot {slot}");
+                        break;
+                    }
+                    Logger.Debug("CosSpawn", $"0x30C9 Pet 0x{petUID:X} Slot [{slot}] {item.CodeName} ({finalStack}/{item.MaxStack}) | remaining={packet.RemainingRead()}");
+                    pet.Inventory[slot] = ((int)refItemId, item.CodeName, finalStack, item.MaxStack);
+                    Logger.Debug("CosSpawn", $"0x30C9 Pet 0x{petUID:X} Slot [{slot}] {item.CodeName} ({finalStack}/{item.MaxStack})");
+                }
+
+                if (packet.RemainingRead() > 0)
+                {
+                    var tail = new List<string>();
+                    while (packet.RemainingRead() > 0)
+                        tail.Add(packet.ReadByte().ToString("X2"));
+                    Logger.Debug("CosSpawn", $"0x30C9 trailing bytes: {string.Join(" ", tail)}");
+                }
+            }
+
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_ANIMATION_COS_SPAWN, async (sender, e) =>
             {
                 try
@@ -1351,8 +1385,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         packet.ReadByte();
 
                         Logger.Debug("CosSpawn", $"Attack pet 0x{petUID:X} name='{attackPetName}'");
-                        
-                        // Create attack pet object for tracking
+
                         inv.Pets[petUID] = new Pet
                         {
                             Uid = petUID,
@@ -1374,27 +1407,22 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     string petName = packet.ReadAscii();
                     byte invSize = packet.ReadByte();
                     byte itemCount = packet.ReadByte();
-                    
 
-                    
                     Logger.Debug("CosSpawn", $"Pet 0x{petUID:X} name='{(string.IsNullOrEmpty(petName) ? "No name" : petName)}' invSize={invSize} itemCount={itemCount}");
 
                     var petSlots = new ConcurrentDictionary<byte, (int ItemID, string CodeName, int Stack, int MaxStack)>();
 
                     for (int i = 0; i < itemCount; i++)
                     {
-                        // Every item: [index byte] [4 bytes padding/rent] [refObjID uint]
                         byte indexByte = packet.ReadByte();
-                        packet.ReadUInt();  // 00 00 00 00 padding
+                        packet.ReadUInt();  // padding
                         uint refItemId = packet.ReadUInt();
-
                         byte slot = (byte)(indexByte + 1);
 
                         var itemInfoResult = await DBConnect.GetItemRecord(refItemId);
                         if (!itemInfoResult.success)
                         {
                             Logger.Warn("CosSpawn", $"Unknown item refObjID 0x{refItemId:X} at slot {slot}");
-                            // Can't safely continue — we don't know how many bytes to skip
                             break;
                         }
 
@@ -1403,44 +1431,23 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                         if (item.T2 == 3)
                         {
-                            // ETC: [qty ushort]  — done, 11 bytes total per item
                             finalStack = packet.ReadUShort();
+                            if (item.CodeName.Contains("ATTRSTONE") || item.CodeName.Contains("MAGICSTONE"))
+                                packet.ReadByte();
                         }
                         else if (item.T2 == 1)
                         {
-                            // Equipment blob
-                            packet.ReadByte();   // opt1 (plus/state byte)
-                            packet.ReadULong();  // serial
-                            packet.ReadUInt();   // durability
-
+                            packet.ReadByte();
+                            packet.ReadULong();
+                            packet.ReadUInt();
                             byte magCount = packet.ReadByte();
-                            for (int m = 0; m < magCount; m++)
-                            {
-                                packet.ReadUInt();
-                                packet.ReadUInt();
-                            }
-
-                            packet.ReadByte();   // plus level
-
+                            for (int m = 0; m < magCount; m++) { packet.ReadUInt(); packet.ReadUInt(); }
+                            packet.ReadByte();
                             byte scCount = packet.ReadByte();
-                            for (int s = 0; s < scCount; s++)
-                            {
-                                packet.ReadByte();
-                                packet.ReadUInt();
-                                packet.ReadUInt();
-                            }
-
-                            packet.ReadByte();   // separator
-
+                            for (int s = 0; s < scCount; s++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
+                            packet.ReadByte();
                             byte acCount = packet.ReadByte();
-                            for (int a = 0; a < acCount; a++)
-                            {
-                                packet.ReadByte();
-                                packet.ReadUInt();
-                                packet.ReadUInt();
-                            }
-
-                            finalStack = 1;
+                            for (int a = 0; a < acCount; a++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
                         }
                         else
                         {
@@ -1451,6 +1458,11 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         petSlots[slot] = ((int)refItemId, item.CodeName, finalStack, item.MaxStack);
                         Logger.Debug("CosSpawn", $"Pet 0x{petUID:X} Slot [{slot}] {item.CodeName} ({finalStack}/{item.MaxStack})");
                     }
+
+                    // Consume trailing 5 bytes
+                    packet.ReadUInt(); // linked UID
+                    packet.ReadByte(); // unknown
+
                     inv.Pets[petUID] = new Pet
                     {
                         Uid = petUID,
@@ -1466,10 +1478,59 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                     e.Proxy.Session!.ActivePetUID = petUID;
                     Logger.Debug("CosSpawn", $"Successfully parsed pet 0x{petUID:X} with {petSlots.Count} items");
+
+                    if (inv.PendingCosPages.TryRemove(petUID, out var pending))
+                    {
+                        Logger.Debug("CosSpawn", $"Draining pending 0x30C9 for pet 0x{petUID:X}");
+                        await ParseCosPage(pending.Packet, pending.ItemCount, petUID, inv);
+                    }
                 }
                 catch (Exception ex)
                 {
                     Logger.Error("CosSpawn", $"Error parsing pet spawn: {ex.Message}\n{ex.StackTrace}");
+                }
+            });
+
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_ANIMATION_COS_REMOVE_MENU, async (sender, e) =>
+            {
+                var packet = e.Packet.Clone();
+                uint petUID = packet.ReadUInt();
+                byte type = packet.ReadByte();
+
+                var inv = e.Proxy.Inventory;
+                inv.Pets.TryGetValue(petUID, out var pet);
+                string petName = pet?.Info.Name ?? $"0x{petUID:X}";
+
+                if (type == 1)
+                {
+                    inv.Pets.TryRemove(petUID, out _);
+                    if (e.Proxy.Session?.ActivePetUID == petUID)
+                        e.Proxy.Session.ActivePetUID = 0;
+                    Logger.Debug("CosDespawnHandler", $"Pet {petName} despawned and removed");
+                    return;
+                }
+
+                if (type == 2 && packet.RemainingRead() == 0)
+                {
+                    Logger.Debug("CosDespawnHandler", $"Pet {petName} state change (recalled)");
+                    return;
+                }
+
+                if (type == 2 && packet.RemainingRead() > 0)
+                {
+                    packet.ReadByte();              // 0x70 — unknown
+                    byte pageItemCount = packet.ReadByte(); // 0x0F = item count for this page
+
+                    Logger.Debug("CosSpawn", $"0x30C9 inventory page for pet 0x{petUID:X} | pageItemCount={pageItemCount} remaining={packet.RemainingRead()}");
+
+                    if (pet == null)
+                    {
+                        Logger.Debug("CosSpawn", $"0x30C9 arrived early for 0x{petUID:X}, queuing");
+                        inv.PendingCosPages[petUID] = (packet, pageItemCount);
+                        return;
+                    }
+
+                    await ParseCosPage(packet, pageItemCount, petUID, inv);
                 }
             });
         }
@@ -1801,6 +1862,10 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 {
                     sortMode = "name";
                 }
+                else if (type == 0x03) // logical
+                {
+                    sortMode = "logical";
+                }
                 else
                 {
                     PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Usage: !sort [name|type]");
@@ -1811,13 +1876,17 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 {
                     try
                     {
+                        using var cts = new CancellationTokenSource();
+                        e.Proxy.ActiveSortCts = cts;
                         PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sorting started...");
 
                         int safety = 0;
-
+                        
                         while (safety <= 300)
                         {
-                            var result = await SortInventoryStep(e.Proxy, sortMode);
+
+                            var result = sortMode == "logical" ? await SortInventoryStep(e.Proxy, sortMode, cts.Token) : await SortInventoryLogical(e.Proxy, cts.Token);
+                            
 
                             if (result == SortResult.Completed)
                             {
@@ -1830,12 +1899,16 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 return;
                             }
 
-                            await Task.Delay(150);
+                            await Task.Delay(150, cts.Token);
                             safety++;
                         }
 
                         PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort timed out.");
 
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // normal shutdown
                     }
                     catch (Exception ex)
                     {
@@ -1846,6 +1919,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     finally
                     {
                         e.Proxy.IsSorting = false;
+                        e.Proxy.ActiveSortCts?.Cancel();
+                        e.Proxy.ActiveSortCts?.Dispose();
+                        e.Proxy.ActiveSortCts = null;
                     }
                 });
             });
@@ -1877,10 +1953,12 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             return false;
         }
 
-        private static async Task<bool> SendMoveAndWait(Proxy proxy, byte source, byte dest, ushort qty, int timeoutMs = 3000)
-        {
-            var tcs = new TaskCompletionSource<bool>();
 
+        private static async Task<bool> SendMoveAndWait(Proxy proxy, byte source, byte dest, ushort qty, CancellationToken cancellationToken = default, int timeoutMs = 3000)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var tcs = new TaskCompletionSource<bool>();
             proxy.PendingMoves[source] = tcs;
 
             var movePacket = new Packet(Constant.CLIENT_ITEM_MOVE);
@@ -1890,9 +1968,16 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             movePacket.WriteUShort(qty);
             proxy.Server.Send(movePacket);
 
-            var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
+            // Delay now respects the token
+            var completed = await Task.WhenAny(
+                tcs.Task,
+                Task.Delay(timeoutMs, cancellationToken));
 
             proxy.PendingMoves.Remove(source);
+
+            // If we were cancelled while waiting, just bail
+            if (cancellationToken.IsCancellationRequested)
+                return false;
 
             if (completed == tcs.Task)
                 return tcs.Task.Result;
@@ -1900,8 +1985,17 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             return false;
         }
 
-        public static async Task<SortResult> SortInventoryStep(Proxy proxy, string sortMode = "type")
+        /// <summary>
+        /// Sorts inventory by type and name.
+        /// </summary>
+        /// <param name="proxy"></param>
+        /// <param name="sortMode"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
+        public static async Task<SortResult> SortInventoryStep(Proxy proxy, string sortMode = "type", CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (proxy.Inventory.Slots.IsEmpty)
                 return SortResult.Aborted;
 
@@ -1922,7 +2016,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 .OrderBy(kvp => kvp.Key)
                 .ToList();
 
-            // Stack
+            // === STACK (fixed direction + token checks) ===
             bool didStack = false;
             for (int i = 0; i < slots.Count; i++)
             {
@@ -1932,15 +2026,19 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                 for (int j = i + 1; j < slots.Count; j++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();   // ← important for large inventories
+
                     var (slotB, itemB) = slots[j];
                     if (itemB.ItemID != itemA.ItemID) continue;
                     if (itemB.Stack <= 0) continue;
 
                     int spaceInA = itemA.MaxStack - itemA.Stack;
-                    if (spaceInA <= 0) break; // A is full, move to next A
+                    if (spaceInA <= 0) break;
 
                     ushort qty = (ushort)Math.Min(itemB.Stack, spaceInA);
-                    bool moved = await SendMoveAndWait(proxy, slotA, slotB, qty);
+
+                    // FIXED: move FROM later stack TO earlier stack
+                    bool moved = await SendMoveAndWait(proxy, slotB, slotA, qty, cancellationToken);
                     if (moved)
                     {
                         didStack = true;
@@ -1954,20 +2052,22 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             }
             if (didStack) return SortResult.Continue;
 
-            // Pack
+            // === PACK ===
             int start = 13;
             for (int i = 0; i < slots.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 byte expectedSlot = (byte)(start + i);
                 var (slot, item) = slots[i];
                 if (slot != expectedSlot)
                 {
-                    await SendMoveAndWait(proxy, slot, expectedSlot, (ushort)item.Stack);
+                    await SendMoveAndWait(proxy, slot, expectedSlot, (ushort)item.Stack, cancellationToken);
                     return SortResult.Continue;
                 }
             }
 
-            // Sort
+            // === SORT ===
             var sorted = sortMode == "name"
                 ? slots
                     .OrderBy(s => GameObjectNameResolver.Resolve(s.Value.CodeName))
@@ -1981,12 +2081,207 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
             for (int i = 0; i < sorted.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 byte targetSlot = (byte)(start + i);
                 var (currentSlot, item) = sorted[i];
 
                 if (currentSlot != targetSlot)
                 {
-                    await SendMoveAndWait(proxy, currentSlot, targetSlot, (ushort)item.Stack);
+                    await SendMoveAndWait(proxy, currentSlot, targetSlot, (ushort)item.Stack, cancellationToken);
+                    return SortResult.Continue;
+                }
+            }
+
+            return SortResult.Completed;
+        }
+
+
+        /// <summary>
+        /// Logical sort should be as follows:
+        /// Pet Scrolls -> slots 13 & 14 (first 2) starts with ITEM_COS AND ends with "SCROLL"
+        /// Reverse Return, Instant Return scroll, and ITEM_MOVE_SPEED_UP next (Contains("REVERSE_RETURN_SCROLL") OR RETURN_SCROLL_HIGH_SPEED
+        /// if any slot contains an HP (ITEM_ETC_HP_POTION_01 - 05)item with a stack higher than 20, put that single stack in next slot, the rest are deferred to the end of the slots, same with MP potions for the next slot
+        /// Next should be all quest items contains("SNOWFLAKE") or "QNO" or "QSP"
+        /// Next should be potion of growth contains PET_GROWTH_POTION, ITEM_PET_SKILL_FIRE or COLD or LIGHTNING
+        /// Last should be all equipment, and deferred items. (this may change as im thinking of more ways to improve this)
+        /// </summary>
+        public static async Task<SortResult> SortInventoryLogical(Proxy proxy, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (proxy.Inventory.Slots.IsEmpty)
+                return SortResult.Aborted;
+
+            if (proxy.Inventory.Slots.Values.Any(s => s.CodeName == "MALL_PENDING"))
+            {
+                PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null, "You have pending mall items. Teleport to resync before sorting.");
+                return SortResult.Aborted;
+            }
+            else if (proxy.Inventory.Slots.Values.Any(s => s.CodeName == "UNKNOWN_PET_TRANSFER"))
+            {
+                PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null, "You have unsynced items. Teleport to resync before sorting.");
+                return SortResult.Aborted;
+            }
+
+            // Snapshot current inventory slots (slot >= 13 = player inventory)
+            var slots = proxy.Inventory.Slots
+                .Where(kvp => kvp.Key >= 13)
+                .OrderBy(kvp => kvp.Key)
+                .ToList();
+
+            // === STACK (fixed direction + token checks) ===
+            bool didStack = false;
+            for (int i = 0; i < slots.Count; i++)
+            {
+                var (slotA, itemA) = slots[i];
+                if (itemA.MaxStack <= 1) continue;
+                if (itemA.Stack >= itemA.MaxStack) continue;
+
+                for (int j = i + 1; j < slots.Count; j++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var (slotB, itemB) = slots[j];
+                    if (itemB.ItemID != itemA.ItemID) continue;
+                    if (itemB.Stack <= 0) continue;
+
+                    int spaceInA = itemA.MaxStack - itemA.Stack;
+                    if (spaceInA <= 0) break;
+
+                    ushort qty = (ushort)Math.Min(itemB.Stack, spaceInA);
+
+                    // FIXED: move FROM later stack TO earlier stack
+                    bool moved = await SendMoveAndWait(proxy, slotB, slotA, qty, cancellationToken);
+                    if (moved)
+                    {
+                        didStack = true;
+                        itemA = (itemA.ItemID, itemA.CodeName, itemA.Stack + qty, itemA.MaxStack);
+                        slots[i] = new KeyValuePair<byte, (int, string, int, int)>(slotA, itemA);
+
+                        itemB = (itemB.ItemID, itemB.CodeName, itemB.Stack - qty, itemB.MaxStack);
+                        slots[j] = new KeyValuePair<byte, (int, string, int, int)>(slotB, itemB);
+                    }
+                }
+            }
+            if (didStack) return SortResult.Continue;
+
+            // === PACK ===
+            int start = 13;
+            for (int i = 0; i < slots.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                byte expectedSlot = (byte)(start + i);
+                var (slot, item) = slots[i];
+                if (slot != expectedSlot)
+                {
+                    await SendMoveAndWait(proxy, slot, expectedSlot, (ushort)item.Stack, cancellationToken);
+                    return SortResult.Continue;
+                }
+            }
+
+            // === LOGICAL SORT ===
+            // Helper predicates (exactly as you described)
+            bool IsPetScroll(string cn) => cn.StartsWith("ITEM_COS") && cn.EndsWith("SCROLL");
+
+            bool IsSpecialScroll(string cn) => cn.Contains("REVERSE_RETURN_SCROLL") ||
+                                               cn.Contains("RETURN_SCROLL_HIGH_SPEED") ||
+                                               cn.Contains("ITEM_MOVE_SPEED_UP");
+
+            bool IsHpPotion(string cn) => cn.StartsWith("ITEM_ETC_HP_POTION_") &&
+                                          int.TryParse(cn.Substring(19), out int lvl) && lvl is >= 1 and <= 5;
+
+            bool IsMpPotion(string cn) => cn.StartsWith("ITEM_ETC_MP_POTION_") &&
+                                          int.TryParse(cn.Substring(19), out int lvl) && lvl is >= 1 and <= 5;
+
+            bool IsQuestItem(string cn) => cn.Contains("SNOWFLAKE") || cn.Contains("QNO") || cn.Contains("QSP");
+
+            bool IsGrowthPotion(string cn) => cn.Contains("PET_GROWTH_POTION") ||
+                                              cn.Contains("ITEM_PET_SKILL_FIRE") ||
+                                              cn.Contains("ITEM_PET_SKILL_COLD") ||
+                                              cn.Contains("ITEM_PET_SKILL_LIGHTNING");
+
+            // Find the SINGLE largest HP / MP stack (>20) to promote
+            var largeHpCandidate = slots
+                .Where(s => IsHpPotion(s.Value.CodeName) && s.Value.Stack > 20)
+                .OrderByDescending(s => s.Value.Stack)
+                .FirstOrDefault();
+
+            var largeMpCandidate = slots
+                .Where(s => IsMpPotion(s.Value.CodeName) && s.Value.Stack > 20)
+                .OrderByDescending(s => s.Value.Stack)
+                .FirstOrDefault();
+
+            // Build ordered list exactly in the sequence you wanted
+            var sorted = new List<KeyValuePair<byte, (int ItemID, string CodeName, int Stack, int MaxStack)>>();
+
+            // 1. Pet Scrolls
+            sorted.AddRange(slots
+                .Where(s => IsPetScroll(s.Value.CodeName))
+                .OrderBy(s => s.Value.CodeName)
+                .ThenByDescending(s => s.Value.Stack));
+
+            // 2. Special scrolls
+            sorted.AddRange(slots
+                .Where(s => IsSpecialScroll(s.Value.CodeName))
+                .OrderBy(s => s.Value.CodeName)
+                .ThenByDescending(s => s.Value.Stack));
+
+            // 3. One large HP stack (if any)
+            if (largeHpCandidate.Key != 0)
+                sorted.Add(largeHpCandidate);
+
+            // 4. One large MP stack (if any)
+            if (largeMpCandidate.Key != 0)
+                sorted.Add(largeMpCandidate);
+
+            var placed = new HashSet<byte>(sorted.Select(s => s.Key));
+
+            // 5. Quest items (everything not already placed)
+            sorted.AddRange(slots
+                .Where(s => IsQuestItem(s.Value.CodeName) && !placed.Contains(s.Key))
+                .OrderBy(s => s.Value.CodeName)
+                .ThenByDescending(s => s.Value.Stack));
+
+            placed.UnionWith(sorted.Skip(placed.Count).Select(s => s.Key));
+
+            // 6. Growth / pet skill potions
+            sorted.AddRange(slots
+                .Where(s => IsGrowthPotion(s.Value.CodeName) && !placed.Contains(s.Key))
+                .OrderBy(s => s.Value.CodeName)
+                .ThenByDescending(s => s.Value.Stack));
+
+            placed.UnionWith(sorted.Skip(placed.Count).Select(s => s.Key));
+
+            // 7a. Everything else that is NOT a potion (equipment, weapons, etc.)
+            //     This group comes first in the final section
+            sorted.AddRange(slots
+                .Where(s => !placed.Contains(s.Key) &&
+                            !IsHpPotion(s.Value.CodeName) &&
+                            !IsMpPotion(s.Value.CodeName))
+                .OrderBy(s => s.Value.CodeName)
+                .ThenByDescending(s => s.Value.Stack));
+
+            // 7b. Deferred HP and MP potions (the rest of them)
+            //     These are pushed to the VERY END of the entire inventory
+            sorted.AddRange(slots
+                .Where(s => !placed.Contains(s.Key) &&
+                            (IsHpPotion(s.Value.CodeName) || IsMpPotion(s.Value.CodeName)))
+                .OrderBy(s => s.Value.CodeName)
+                .ThenByDescending(s => s.Value.Stack));
+
+            // === FINAL MOVE TO TARGET SLOTS ===
+            for (int i = 0; i < sorted.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                byte targetSlot = (byte)(start + i);
+                var (currentSlot, item) = sorted[i];
+
+                if (currentSlot != targetSlot)
+                {
+                    await SendMoveAndWait(proxy, currentSlot, targetSlot, (ushort)item.Stack, cancellationToken);
                     return SortResult.Continue;
                 }
             }

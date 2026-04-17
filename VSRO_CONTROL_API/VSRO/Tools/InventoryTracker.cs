@@ -1,5 +1,6 @@
-﻿using System.Collections.Concurrent;
-using CoreLib.Tools.Logging;
+﻿using CoreLib.Tools.Logging;
+using System.Collections.Concurrent;
+using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Framework;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Tracking;
 using VSRO_CONTROL_API.VSRO.DTO;
 
@@ -7,7 +8,9 @@ namespace VSRO_CONTROL_API.VSRO.Tools
 {
     public class InventoryTracker
     {
-        
+        // 0x30C9 is sometime delayed after 0x30C8. so we need to defer it from parsing until the pet spawn packet is parsed.
+        public ConcurrentDictionary<uint, (Packet Packet, byte ItemCount)> PendingCosPages { get; } = new();
+
         // Avatars
         public ConcurrentDictionary<byte, (int ItemID, string CodeName, int Stack, int MaxStack)> Avatars { get; } = new();
 
