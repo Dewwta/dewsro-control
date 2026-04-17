@@ -22,7 +22,7 @@ public class DllBridge : IDisposable
     {
         _cts = new CancellationTokenSource();
         _ = Task.Run(() => ListenAsync(_cts.Token));
-        Logger.Info(this, "Listening on port 9001...");
+        Logger.Debug(this, "Listening on port 9001...");
         await Task.CompletedTask;
     }
 
@@ -37,7 +37,7 @@ public class DllBridge : IDisposable
 
     public void SendToDll(string accountName, string eventType, object payload)
     {
-        Logger.Info(this, $"SendToDll called: account='{accountName}' type='{eventType}'");
+        Logger.Debug(this, $"SendToDll called: account='{accountName}' type='{eventType}'");
         if (!_clients.TryGetValue(accountName.ToLowerInvariant(), out var writer))
         {
             Logger.Warn(this, $"No connected DLL client for account '{accountName}' — dropping '{eventType}'");

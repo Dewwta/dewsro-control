@@ -288,7 +288,7 @@ static void RenderSettings() {
     }
 
     bool showWaterMark = Settings::showWatermark;
-    if (ImGui::Checkbox("Show FPS counter", &showWaterMark)) {
+    if (ImGui::Checkbox("Show Watermark", &showWaterMark)) {
         Settings::showWatermark = showWaterMark;
         Settings::Save();
     }
@@ -340,7 +340,7 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    RenderWatermark("V1.199 BETA - @Dewwta");
+    if (Settings::showWatermark) RenderWatermark("V1.199 BETA - @Dewwta");
 
     if (Settings::showFPSCounter) RenderFPS();
     

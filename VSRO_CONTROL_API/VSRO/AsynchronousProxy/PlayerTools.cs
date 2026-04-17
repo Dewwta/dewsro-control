@@ -656,6 +656,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                         for (int p = 0; p < cm; p++) { packet.ReadUInt(); packet.ReadUInt(); }
                                     }
                                 }
+                                if (itemInfo.item.CodeName.Contains("SNOWFLAKE")) break;
 
                                 if (itemInfo.item.T2 == 3 && itemInfo.item.T3 == 12)
                                 {
@@ -713,10 +714,27 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                     }
                                 }
 
-                                if (!inv.Pets.ContainsKey(petUID))
-                                    inv.Pets[petUID] = new();
-                                inv.Pets[petUID].Inventory[slot] = ((int)refItemId, itemInfo.item.CodeName, finalStack, itemInfo.item.MaxStack);
-                                Logger.Debug("ItemMoveHandler", $"Pet picked up {itemInfo.item.CodeName} x{finalStack} → pet 0x{petUID:X} slot {slot}");
+
+                                bool isQuestItem = itemInfo.item.CodeName.Contains("SNOWFLAKE") ||
+                                                   itemInfo.item.CodeName.Contains("QNO") ||
+                                                   itemInfo.item.CodeName.Contains("QSP");
+
+                                if (isQuestItem)
+                                {
+                                    // Route to PLAYER inventory
+                                    inv.Slots[slot] = ((int)refItemId, itemInfo.item.CodeName, finalStack, itemInfo.item.MaxStack);
+                                    Logger.Debug("ItemMoveHandler", $"Pet picked up quest item {itemInfo.item.CodeName} x{finalStack} → PLAYER slot {slot}");
+                                }
+                                else
+                                {
+                                    // Route to PET inventory
+                                    if (!inv.Pets.ContainsKey(petUID))
+                                        inv.Pets[petUID] = new();
+
+                                    inv.Pets[petUID].Inventory[slot] = ((int)refItemId, itemInfo.item.CodeName, finalStack, itemInfo.item.MaxStack);
+                                    Logger.Debug("ItemMoveHandler", $"Pet picked up {itemInfo.item.CodeName} x{finalStack} → pet 0x{petUID:X} slot {slot}");
+                                }
+
                                 break;
                             }
 
@@ -1289,12 +1307,12 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     inv.Pets.TryRemove(petUID, out _);
                     if (e.Proxy.Session?.ActivePetUID == petUID)
                         e.Proxy.Session.ActivePetUID = 0;
-                    Logger.Info("CosDespawnHandler", $"Pet {petName} despawned and removed");
+                    Logger.Debug("CosDespawnHandler", $"Pet {petName} despawned and removed");
                 }
                 else if (type == 2)
                 {
                     // State change only - inventory stays, pet is recalled/unsummoned
-                    Logger.Info("CosDespawnHandler", $"Pet {petName} state change (recalled)");
+                    Logger.Debug("CosDespawnHandler", $"Pet {petName} state change (recalled)");
                 }
             });
         }
