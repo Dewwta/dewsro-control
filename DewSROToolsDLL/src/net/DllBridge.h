@@ -1,4 +1,5 @@
 #pragma once
+#include <Windows.h>
 #include <string>
 #include <thread>
 #include <atomic>
@@ -27,10 +28,10 @@ struct PlayerState
 
 struct State
 {
-    std::string sessionTime;
-    std::string totalTime;
+    int sessionSeconds = 0;  // raw seconds, formatted for display locally
+    int sessionKills = 0;
     int isAfk = 0;
-
+    DWORD syncTick = 0;
 };
 
 using BridgeHandler = std::function<void(const std::string& json)>;
@@ -40,6 +41,7 @@ public:
     void RegisterHandler(const std::string& type, BridgeHandler handler);
     std::string m_username;
     std::atomic<bool> m_connected{ false };
+    std::atomic<bool> m_started{ false };
     PlayerState m_state;
     State m_sessionState;
     std::function<void(const std::string& type, const std::string& json)> OnEvent;

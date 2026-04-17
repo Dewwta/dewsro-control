@@ -17,12 +17,29 @@
 #include "../net/LoginHook.h"
 #include "Logging/Logger.h"
 
+static std::string FormatSeconds(int totalSeconds) {
+    int h = totalSeconds / 3600;
+    int m = (totalSeconds % 3600) / 60;
+    int s = totalSeconds % 60;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", h, m, s);
+    return buf;
+}
+
+
 static bool initialized = false;
+static ImFont* g_fontWatermark = nullptr;
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 typedef HRESULT(__stdcall* Present_t)(IDirect3DDevice9*, CONST RECT*, CONST RECT*, HWND, CONST RGNDATA*);
 static Present_t oPresent = nullptr;
-static bool showToolsWindow = false; // Test window
+
+static bool showToolsWindow = false;
+static bool showSettingsWindow = false;
+
+static bool AnyWindowOpen() {
+    return showToolsWindow || showSettingsWindow;
+}
 
 typedef IDirect3D9* (__stdcall* Direct3DCreate9_t)(UINT);
 static Direct3DCreate9_t oCreate = nullptr;
@@ -72,11 +89,12 @@ static void RenderWatermark(const char* text)
     ImGuiIO& io = ImGui::GetIO();
     ImGuiStyle& style = ImGui::GetStyle();
 
-    float paddingX = 10.0f;  // distance from right edge
-    float paddingY = 10.0f;  // distance from bottom edge
+    if (g_fontWatermark) ImGui::PushFont(g_fontWatermark);
+
+    float paddingX = 2.0f;
+    float paddingY = 2.0f;
     ImVec2 textSize = ImGui::CalcTextSize(text);
 
-    // Account for window padding on both sides
     float windowWidth = textSize.x + style.WindowPadding.x * 2;
     float windowHeight = textSize.y + style.WindowPadding.y * 2;
 
@@ -84,6 +102,8 @@ static void RenderWatermark(const char* text)
         io.DisplaySize.x - windowWidth - paddingX,
         io.DisplaySize.y - windowHeight - paddingY
     );
+
+    if (g_fontWatermark) ImGui::PopFont(); // pop before Begin
 
     ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(windowWidth, windowHeight), ImGuiCond_Always);
@@ -100,22 +120,24 @@ static void RenderWatermark(const char* text)
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::Begin("##watermark", nullptr, flags);
+    if (g_fontWatermark) ImGui::PushFont(g_fontWatermark);
     ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 0.8f), text);
+    if (g_fontWatermark) ImGui::PopFont();
     ImGui::End();
     ImGui::PopStyleVar();
 }
-static void RenderTools() {
-    ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_FirstUseEver);
+static void RenderPlayerActions() {
+    ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(300, 200), ImVec2(600, 800));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(260, 100), ImVec2(500, 600));
 
     ImGui::Begin("Player Actions", &showToolsWindow);
 
-    // Snapshot state once — safe read off the network thread
     PlayerState ps = g_bridge.m_state;
+    State ss = g_bridge.m_sessionState;
     bool hasPlayer = !ps.charName.empty();
 
-    // ── PLAYER ──────────────────────────────────────────
+    // ── PLAYER INFO ─────────────────────────────────────
     ImGui::TextDisabled("PLAYER");
     ImGui::Separator();
     ImGui::Spacing();
@@ -124,63 +146,32 @@ static void RenderTools() {
         ImGui::TextDisabled("Waiting for session...");
     }
     else {
-        // Identity row
-        float col1 = 80.0f;
+        float col1 = 90.0f;
+
         ImGui::Text("Character"); ImGui::SameLine(col1);
         ImGui::TextColored(ImVec4(0.75f, 0.88f, 1.0f, 1.0f), "%s", ps.charName.c_str());
 
-        ImGui::Text("Account");   ImGui::SameLine(col1);
+        ImGui::Text("Account"); ImGui::SameLine(col1);
         ImGui::TextColored(ImVec4(0.75f, 0.88f, 1.0f, 1.0f), "%s", ps.accName.c_str());
 
-        ImGui::Text("Level");     ImGui::SameLine(col1);
-        ImGui::Text("%d", ps.currentLevel);
-        if (ps.unusedStatPoints > 0) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "(%d pts)", ps.unusedStatPoints);
-        }
+        ImGui::Text("JID"); ImGui::SameLine(col1);
+        ImGui::TextColored(ImVec4(0.75f, 0.88f, 1.0f, 1.0f), "%d", ps.accJID);
 
         ImGui::Spacing();
 
-        // HP bar
-        int safeMaxHp = (ps.maxHp > 0) ? ps.maxHp : 1;
-        float hpFrac = ImClamp((float)ps.hp / (float)safeMaxHp, 0.0f, 1.0f);
-        char hpLabel[32];
-        snprintf(hpLabel, sizeof(hpLabel), "%d / %d", ps.hp, ps.maxHp);
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.75f, 0.22f, 0.17f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.05f, 0.10f, 0.14f, 1.0f));
-        ImGui::ProgressBar(hpFrac, ImVec2(-1, 14), hpLabel);
-        ImGui::PopStyleColor(2);
+        ImGui::Text("Session"); ImGui::SameLine(col1);
+        
+        int elapsed = 0;
+        if (ss.syncTick > 0)
+            elapsed = (int)((GetTickCount() - ss.syncTick) / 1000);
 
-        // MP bar
-        int safeMaxMp = (ps.maxMp > 0) ? ps.maxMp : 1;
-        float mpFrac = ImClamp((float)ps.mp / (float)safeMaxMp, 0.0f, 1.0f);
-        char mpLabel[32];
-        snprintf(mpLabel, sizeof(mpLabel), "%d / %d", ps.mp, ps.maxMp);
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.13f, 0.40f, 0.69f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.05f, 0.10f, 0.14f, 1.0f));
-        ImGui::ProgressBar(mpFrac, ImVec2(-1, 14), mpLabel);
-        ImGui::PopStyleColor(2);
+        std::string sessionStr = FormatSeconds(ss.sessionSeconds + elapsed);
+        ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f), "%s%s",
+            sessionStr.c_str(),
+            ss.isAfk ? "  [AFK]" : "");
 
-        ImGui::Spacing();
-
-        // Stats row
-        float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
-        ImGui::BeginGroup();
-        ImGui::TextDisabled("STR"); ImGui::SameLine(36); ImGui::Text("%d", ps.strength);
-        ImGui::TextDisabled("INT"); ImGui::SameLine(36); ImGui::Text("%d", ps.intelligence);
-        ImGui::EndGroup();
-        ImGui::SameLine(half);
-        ImGui::BeginGroup();
-        ImGui::TextDisabled("Kills"); ImGui::SameLine(48); ImGui::Text("%d", ps.sessionKills);
-        ImGui::TextDisabled("Gold");  ImGui::SameLine(48);
-        // Format gold with commas via manual split (no locale in MSVC CRT easily)
-        if (ps.gold >= 1000000)
-            ImGui::TextColored(ImVec4(0.78f, 0.64f, 0.23f, 1.0f), "%.2fM", ps.gold / 1000000.0);
-        else if (ps.gold >= 1000)
-            ImGui::TextColored(ImVec4(0.78f, 0.64f, 0.23f, 1.0f), "%.1fK", ps.gold / 1000.0);
-        else
-            ImGui::TextColored(ImVec4(0.78f, 0.64f, 0.23f, 1.0f), "%llu", ps.gold);
-        ImGui::EndGroup();
+        ImGui::Text("Kills"); ImGui::SameLine(col1);
+        ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.6f, 1.0f), "%d", ss.sessionKills);
     }
 
     ImGui::Spacing();
@@ -192,19 +183,30 @@ static void RenderTools() {
     ImGui::TextDisabled("Sort");
     ImGui::Spacing();
 
-    float btnWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
+    float btnWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f;
     if (ImGui::Button("By Type", ImVec2(btnWidth, 28)))
         NetActions::SendSortRequest(SortType::ByType);
     ImGui::SameLine();
     if (ImGui::Button("By Name", ImVec2(btnWidth, 28)))
         NetActions::SendSortRequest(SortType::ByName);
+    ImGui::SameLine();
+    if (ImGui::Button("Logical", ImVec2(btnWidth, 28)))
+        NetActions::SendSortRequest(SortType::Logical);
 
     ImGui::Spacing();
+    ImGui::End();
+}
+static void RenderSettings() {
+    ImGui::SetNextWindowSize(ImVec2(280, 0), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(60, 60), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(220, 80), ImVec2(400, 400));
 
-    // ── GENERAL ─────────────────────────────────────────
+    ImGui::Begin("Settings", &showSettingsWindow);
+
     ImGui::TextDisabled("GENERAL");
     ImGui::Separator();
     ImGui::Spacing();
+
     bool kf = Settings::keepFocused;
     if (ImGui::Checkbox("Keep Focus", &kf)) {
         Settings::keepFocused = kf;
@@ -229,7 +231,19 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
 
         ImGui::CreateContext();
         SetupImGuiStyle();
-        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+
+        ImGuiIO& io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+
+        // Load watermark font
+        ImFontConfig cfg;
+        cfg.OversampleH = 3;
+        cfg.OversampleV = 3;
+        cfg.PixelSnapH = false;
+        g_fontWatermark = io.Fonts->AddFontFromFileTTF(
+            "C:\\Windows\\Fonts\\arial.ttf", 15.0f, &cfg);
+
+
         ImGui_ImplWin32_Init(params.hFocusWindow);
         ImGui_ImplDX9_Init(device);
 
@@ -239,8 +253,8 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
         initialized = true;
     }
 
-    if (GetAsyncKeyState('Z') & 1)
-        showToolsWindow = !showToolsWindow;
+    if (GetAsyncKeyState('Z') & 1) showToolsWindow = !showToolsWindow;
+    if (GetAsyncKeyState('F') & 1) showSettingsWindow = !showSettingsWindow;
 
     ImGui_ImplDX9_NewFrame();
     ImGui_ImplWin32_NewFrame();
@@ -248,8 +262,8 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
 
     RenderWatermark("V1.199 BETA - @Dewwta");
 
-    if (showToolsWindow)
-        RenderTools();
+    if (showToolsWindow)    RenderPlayerActions();
+    if (showSettingsWindow) RenderSettings();
 
     ImGui::EndFrame();
     ImGui::Render();
@@ -311,7 +325,7 @@ IDirect3D9* __stdcall hkDirect3DCreate9(UINT sdkVersion)
 }
 LRESULT CALLBACK hkWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    if (showToolsWindow) {
+    if (AnyWindowOpen()) {
         ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
 
         ImGuiIO& io = ImGui::GetIO();
@@ -382,3 +396,4 @@ void dx9_hook::init()
 void dx9_hook::notify(const char* msg) {
     MessageBoxA(nullptr, msg, "ok", MB_OK);
 }
+

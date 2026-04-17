@@ -9,7 +9,8 @@
 enum class SortType : BYTE
 {
     ByType = 0x01,
-    ByName = 0x02
+    ByName = 0x02,
+    Logical = 0x03
 };
 
 class NetActions

@@ -7,49 +7,49 @@ namespace VSRO_CONTROL_API.VSRO.Settings
     public class StartupSettings
     {
         [JsonProperty("certServerPath")]
-        public string? CertServerPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\CertModule\\CertModule\\CustomCertificationServer.exe";
+        public string? CertServerPath { get; set; }
 
         [JsonProperty("certServerArgs")]
         public string? CertServerArgs { get; set; } = "packt.dat";
 
         [JsonProperty("globalManagerPath")]
-        public string? GlobalManagerPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\GlobalManager.exe";
+        public string? GlobalManagerPath { get; set; }
 
         [JsonProperty("downloadServerPath")]
-        public string? DownloadServerPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\DownloadServer.exe";
+        public string? DownloadServerPath { get; set; }
 
         [JsonProperty("machineManagerPath")]
-        public string? MachineManagerPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\MachineManager.exe";
+        public string? MachineManagerPath { get; set; }
 
         [JsonProperty("gatewayServerPath")]
-        public string? GatewayServerPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\GatewayServer.exe";
+        public string? GatewayServerPath { get; set; }
 
         [JsonProperty("farmManagerPath")]
-        public string? FarmManagerPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\FarmManager.exe";
+        public string? FarmManagerPath { get; set; }
 
         [JsonProperty("agentServerPath")]
-        public string? AgentServerPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\AgentServer.exe";
+        public string? AgentServerPath { get; set; }
 
         [JsonProperty("shardManagerPath")]
-        public string? ShardManagerPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\SR_ShardManager.exe";
+        public string? ShardManagerPath { get; set; }
 
         [JsonProperty("gameServerPath")]
-        public string? GameServerPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\SR_GameServer.exe";
+        public string? GameServerPath { get; set; }
 
         [JsonProperty("proxyPath")]
-        public string? ProxyPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\Filter\\Filter\\VSROProxy.exe";
+        public string? ProxyPath { get; set; }
 
         [JsonProperty("smcPath")]
-        public string? SMCPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\SMC_Independent\\SMC_Independent\\smc_independent.exe";
+        public string? SMCPath { get; set; }
 
         [JsonProperty("nodeTypeIniPath")]
-        public string? NodeTypeIniPath { get; set; } = "C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\CertModule\\CertModule\\ini\\srNodeType.ini";
+        public string? NodeTypeIniPath { get; set; }
 
         [JsonProperty("smcUsername")]
-        public string? SmcUsername { get; set; } = "Dellta";
+        public string? SmcUsername { get; set; }
 
         [JsonProperty("smcPassword")]
-        public string? SmcPassword { get; set; } = "silkroad23"; // Not a real password.
+        public string? SmcPassword { get; set; }
 
         [JsonProperty("smcMainWindowTitle")]
         public string? SmcMainWindowTitle { get; set; } = "SMC";

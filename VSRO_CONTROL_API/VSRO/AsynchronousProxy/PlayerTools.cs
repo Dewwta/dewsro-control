@@ -9,6 +9,7 @@ using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Tracking;
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Tools;
+using static System.Collections.Specialized.BitVector32;
 
 namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 {
@@ -150,7 +151,13 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         RemainingSkillPoints = remainSkillPoint,
                     };
 
-                    
+                    DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "session_sync", new
+                    {
+                        sessionSeconds = (int)e.Proxy.Session.AccumulatedPlayTime.TotalSeconds,
+                        sessionKills = e.Proxy.Session.SessionKills,
+                        isAfk = e.Proxy.Session.IsAfk ? 1 : 0  // int not bool
+                    });
+
                     for (int i = 0; i < itemCount; i++)
                     {
                         Logger.Debug("ChardataHandler", $"--- ITEM {i} ---");
@@ -959,7 +966,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                         case ItemMovement.GameServerToInventory:    // 0x0E
                             {
-                                ushort slot = packet.ReadUShort();     // Why is slot a ushort? no idea, but this is the only place it is.
+                                ushort slot = packet.ReadUShort();     // Why is slot a ushort? no idea
 
                                 uint padding = packet.ReadUInt();      // 00 00 00 00
 
@@ -1614,6 +1621,11 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             $"{proxy.Session?.CharacterName} killed mob {GameObjectNameResolver.Resolve(result.codeName)} " +
                             $"in {RegionResolver.Resolve((short)spawnInfo.RegionID)} " +
                             $"(refObjID={spawnInfo.RefObjID}, UID=0x{mobUID:X}) +{exp}exp +{sExp}sp");
+
+                        DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "kill_update", new
+                        {
+                            sessionKills = e.Proxy.Session.SessionKills
+                        });
                     }
                     else
                     {

@@ -19,7 +19,7 @@ public:
         std::string path = GetSettingsPath();
         const char* p = path.c_str();
 
-        WritePrivateProfileStringA("General", "KeepFocused", keepFocused ? "1" : "0", p);
+        WritePrivateProfileStringA("General", "KeepFocused", keepFocused ? "true" : "false", p);
         WritePrivateProfileStringA("General", "ShowOnKey", std::to_string(showOnKey).c_str(), p);
     }
 

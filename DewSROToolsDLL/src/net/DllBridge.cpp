@@ -16,7 +16,8 @@ void DllBridge::SetIdentity(const std::string& username) {
 }
 
 void DllBridge::Connect() {
-    if (m_username.empty() || m_connected) return;
+    if (m_username.empty()) return;
+    if (m_started.exchange(true)) return; // atomic test-and-set, only one thread ever starts
     std::thread([this]() { RunLoop(); }).detach();
 }
 
@@ -31,6 +32,7 @@ void DllBridge::Send(const std::string& msg) {
 
 void DllBridge::RunLoop() {
     Sleep(3000);
+    
     auto& log = GetLogger();
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
@@ -132,7 +134,12 @@ int DllBridge::ExtractInt(const std::string& json, const std::string& key) {
     auto s = json.find(search);
     if (s == std::string::npos) return 0;
     s += search.size();
-    return std::stoi(json.substr(s));
+    try {
+        return std::stoi(json.substr(s));
+    }
+    catch (...) {
+        return 0;
+    }
 }
 
 

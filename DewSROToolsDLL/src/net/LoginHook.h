@@ -2,7 +2,7 @@
 #include <windows.h>
 #include <MinHook.h>
 #include "DllBridge.h"
-#include <iostream>
+#include "Logging/Logger.h"
 
 typedef bool(__thiscall* LoginFn)(void*, LPCSTR, LPCSTR, char, int);
 static LoginFn o_Login = nullptr;
@@ -11,15 +11,18 @@ static LoginFn o_Login = nullptr;
 static bool __fastcall hk_Login(void* thisPtr, void* edx,
     LPCSTR username, LPCSTR password, char shardId, int a5)
 {
+    auto& log = GetLogger();
     if (username) {
         g_bridge.SetIdentity(username);
         g_bridge.Connect();
-        std::cout << "Connecting to proxy...\nUsername: " << username << std::endl;
-
+        LPCSTR connMsg = "Connecting with ";
+        std::string msg = std::string(connMsg).append(username).c_str();
+        log.Info("login_hook", msg);
     }
     else {
-        std::cout << "Didnt get username! proxy bridge failed" << std::endl;
+        log.Err("login_hook", "Couldn't retrieve username for dll bridge connection!");
     }
+
     return o_Login(thisPtr, username, password, shardId, a5);
 }
 
