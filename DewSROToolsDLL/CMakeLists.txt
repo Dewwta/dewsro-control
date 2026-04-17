@@ -19,21 +19,48 @@ add_subdirectory(src/BSLib)
 
 add_library(DewSROToolkit SHARED
     src/DllMain.cpp
-    "src/Control.cpp"
+    src/Control.cpp
+
+    # Hooks
     src/hooks/dx9_hook.cpp
-    kiero/kiero.cpp
+    src/hooks/patcher.cpp
+    src/hooks/patcher.h
+
+    # Net
+    src/net/DllBridge.cpp
+    src/net/NetActions.h
+    src/net/LoginHook.h
+
+    # Client
+    src/client/ClassLink.h
+    src/client/data/CommonData.h
+    src/client/TypeId/TypeId.h
+    src/client/TypeId/TypeIdBase.h
+    src/client/TypeId/TypeIdRegistry.cpp
+
+    # Memory
+    src/mem/Process.h
+    src/mem/hook.h
+
+    # Logging
+    src/Logging/Logger.cpp
+    src/Logging/Logger.h
+
+    # Settings
+    src/Settings.h
+
+    # ImGui
     imgui/imgui.cpp
     imgui/imgui_draw.cpp
     imgui/imgui_tables.cpp
     imgui/imgui_widgets.cpp
+    imgui/imgui_demo.cpp
     imgui/backends/imgui_impl_dx9.cpp
     imgui/backends/imgui_impl_win32.cpp
-    imgui/imgui_demo.cpp
-    "src/net/NetActions.h"
-    "src/net/LoginHook.h"
-    "src/Settings.h" 
-    "src/net/DllBridge.cpp" "src/client/ClassLink.h" "src/client/TypeId/TypeIdBase.h" "src/client/TypeId/TypeIdRegistry.cpp" "src/client/TypeId/TypeId.h" "src/client/data/CommonData.h" "src/Logging/Logger.h" "src/Logging/Logger.cpp")
 
+    # Kiero
+    kiero/kiero.cpp
+)
 target_include_directories(DewSROToolkit PRIVATE
     src/
     kiero/

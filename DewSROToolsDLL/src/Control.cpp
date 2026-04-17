@@ -1,9 +1,11 @@
 #include "Control.h"
 #include "hooks/dx9_hook.h"
+#include "hooks/patcher.h"
 #include "Windows.h"
 #include <iostream>
 #include "net/DllBridge.h"
 #include "Logging/Logger.h"
+
 
 void RegisterAllHandlers() {
     g_bridge.RegisterHandler("login_ack", [](const std::string& _) {
@@ -59,7 +61,7 @@ void Control::Initialize()
     auto& log = GetLogger();
 
     log.Alloc();
-    log.SetState(false);
+    log.SetState(true);
 
     dx9_hook::init();
     
@@ -67,5 +69,6 @@ void Control::Initialize()
 
     RegisterAllHandlers();
     log.Info("Control::Initialize", "Registered g_bridge handlers.");
+    Patcher::PatchAll();
 }
 

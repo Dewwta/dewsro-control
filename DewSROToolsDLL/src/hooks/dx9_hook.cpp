@@ -34,12 +34,14 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 typedef HRESULT(__stdcall* Present_t)(IDirect3DDevice9*, CONST RECT*, CONST RECT*, HWND, CONST RGNDATA*);
 static Present_t oPresent = nullptr;
 
-static bool showToolsWindow = false;
+static bool showPlayerActionsWindow = false;
 static bool showSettingsWindow = false;
 
 static bool AnyWindowOpen() {
-    return showToolsWindow || showSettingsWindow;
+    return showPlayerActionsWindow || showSettingsWindow;
 }
+
+static HWND g_gameHwnd = nullptr;
 
 typedef IDirect3D9* (__stdcall* Direct3DCreate9_t)(UINT);
 static Direct3DCreate9_t oCreate = nullptr;
@@ -49,6 +51,28 @@ static CreateDevice_t oCreateDevice = nullptr;
 
 typedef HRESULT(__stdcall* Reset_t)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
 static Reset_t oReset = nullptr;
+
+typedef HWND(WINAPI* GetForegroundWindow_t)();
+typedef HWND(WINAPI* GetActiveWindow_t)();
+
+static GetForegroundWindow_t oGetForegroundWindow = nullptr;
+static GetActiveWindow_t oGetActiveWindow = nullptr;
+
+HWND WINAPI hkGetForegroundWindow()
+{
+    if (Settings::keepFocused && g_gameHwnd)
+        return g_gameHwnd;
+
+    return oGetForegroundWindow();
+}
+
+HWND WINAPI hkGetActiveWindow()
+{
+    if (Settings::keepFocused && g_gameHwnd)
+        return g_gameHwnd;
+
+    return oGetActiveWindow();
+}
 
 static WNDPROC oWndProc = nullptr;
 
@@ -126,12 +150,56 @@ static void RenderWatermark(const char* text)
     ImGui::End();
     ImGui::PopStyleVar();
 }
+static void RenderFPS()
+{
+    ImGuiIO& io = ImGui::GetIO();
+    ImGuiStyle& style = ImGui::GetStyle();
+
+    float paddingX = 6.0f;
+    float paddingY = 4.0f;
+
+    float fps = io.Framerate;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "FPS: %.0f", fps);
+
+    ImVec2 textSize = ImGui::CalcTextSize(buf);
+
+    float windowWidth = textSize.x + style.WindowPadding.x * 2;
+    float windowHeight = textSize.y + style.WindowPadding.y * 2;
+
+    // 👇 bottom-left instead of bottom-right
+    ImVec2 pos = ImVec2(
+        paddingX,
+        io.DisplaySize.y - windowHeight - paddingY
+    );
+
+    ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(windowWidth, windowHeight), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.0f);
+
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoInputs |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoFocusOnAppearing |
+        ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoBackground;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::Begin("##fps", nullptr, flags);
+
+    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 0.8f), buf);
+
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
 static void RenderPlayerActions() {
     ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(260, 100), ImVec2(500, 600));
 
-    ImGui::Begin("Player Actions", &showToolsWindow);
+    ImGui::Begin("Player Actions", &showPlayerActionsWindow);
 
     PlayerState ps = g_bridge.m_state;
     State ss = g_bridge.m_sessionState;
@@ -213,6 +281,18 @@ static void RenderSettings() {
         Settings::Save();
     }
 
+    bool showFPS = Settings::showFPSCounter;
+    if (ImGui::Checkbox("Show FPS counter", &showFPS)) {
+        Settings::showFPSCounter = showFPS;
+        Settings::Save();
+    }
+
+    bool showWaterMark = Settings::showWatermark;
+    if (ImGui::Checkbox("Show FPS counter", &showWaterMark)) {
+        Settings::showWatermark = showWaterMark;
+        Settings::Save();
+    }
+
     ImGui::Spacing();
     ImGui::TextDisabled("MORE COMING SOON");
     ImGui::Separator();
@@ -228,7 +308,7 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
         Settings::Load();
         D3DDEVICE_CREATION_PARAMETERS params;
         device->GetCreationParameters(&params);
-
+        g_gameHwnd = params.hFocusWindow;
         ImGui::CreateContext();
         SetupImGuiStyle();
 
@@ -253,8 +333,8 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
         initialized = true;
     }
 
-    if (GetAsyncKeyState('Z') & 1) showToolsWindow = !showToolsWindow;
-    if (GetAsyncKeyState('F') & 1) showSettingsWindow = !showSettingsWindow;
+    if (GetAsyncKeyState(Settings::showPlayerActionsKey) & 1) showPlayerActionsWindow = !showPlayerActionsWindow;
+    if (GetAsyncKeyState(Settings::showSettingsKey) & 1) showSettingsWindow = !showSettingsWindow;
 
     ImGui_ImplDX9_NewFrame();
     ImGui_ImplWin32_NewFrame();
@@ -262,7 +342,9 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
 
     RenderWatermark("V1.199 BETA - @Dewwta");
 
-    if (showToolsWindow)    RenderPlayerActions();
+    if (Settings::showFPSCounter) RenderFPS();
+    
+    if (showPlayerActionsWindow)    RenderPlayerActions();
     if (showSettingsWindow) RenderSettings();
 
     ImGui::EndFrame();
@@ -280,8 +362,20 @@ HRESULT __stdcall hkReset(IDirect3DDevice9* device, D3DPRESENT_PARAMETERS* pp)
         ImGui_ImplDX9_CreateDeviceObjects();
     return hr;
 }
-HRESULT __stdcall hkCreateDevice(IDirect3D9* d3d, UINT adapter, D3DDEVTYPE devType, HWND hwnd, DWORD flags, D3DPRESENT_PARAMETERS* pp, IDirect3DDevice9** outDevice)
+HRESULT __stdcall hkCreateDevice(
+    IDirect3D9* d3d,
+    UINT adapter,
+    D3DDEVTYPE devType,
+    HWND hwnd,
+    DWORD flags,
+    D3DPRESENT_PARAMETERS* pp,
+    IDirect3DDevice9** outDevice)
 {
+    if (pp)
+    {
+        pp->PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    }
+
     HRESULT hr = oCreateDevice(d3d, adapter, devType, hwnd, flags, pp, outDevice);
 
     if (SUCCEEDED(hr) && outDevice && *outDevice)

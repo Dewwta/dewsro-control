@@ -17,7 +17,7 @@ void DllBridge::SetIdentity(const std::string& username) {
 
 void DllBridge::Connect() {
     if (m_username.empty()) return;
-    if (m_started.exchange(true)) return; // atomic test-and-set, only one thread ever starts
+    if (m_started.exchange(true)) return;
     std::thread([this]() { RunLoop(); }).detach();
 }
 
