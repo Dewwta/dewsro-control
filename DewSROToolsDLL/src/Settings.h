@@ -55,11 +55,10 @@ private:
         GetModuleFileNameA(NULL, buf, MAX_PATH);
 
         std::string path(buf);
-        // strip exe filename, keep directory
+        // strip exe filename
         path = path.substr(0, path.find_last_of("\\/"));
         path += "\\VSRO_Tools\\settings.ini";
 
-        // create folder if it doesn't exist
         std::string folder = path.substr(0, path.find_last_of("\\/"));
         CreateDirectoryA(folder.c_str(), NULL);
 

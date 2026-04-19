@@ -58,14 +58,13 @@ void RegisterAllHandlers() {
         int level = g_bridge.ExtractInt(json, "level");
         std::vector<RewardOption> options;
         auto& log = GetLogger();
-        // find the options array
+
         auto arrStart = json.find("\"options\":[");
         if (arrStart != std::string::npos) {
-            arrStart += 11; // skip past "options":[
+            arrStart += 11; 
             auto arrEnd = json.find(']', arrStart);
             std::string arr = json.substr(arrStart, arrEnd - arrStart);
 
-            // split into individual objects by }
             size_t pos = 0;
             while (pos < arr.size()) {
                 auto objStart = arr.find('{', pos);

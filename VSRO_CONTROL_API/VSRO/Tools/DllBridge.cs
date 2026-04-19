@@ -48,7 +48,7 @@ public class DllBridge : IDisposable
         if (accountName.Contains("PartyBot"))
             return;
         
-        Logger.Debug(this, $"SendToDll called: account='{accountName}' type='{eventType}'");
+        //Logger.Debug(this, $"SendToDll called: account='{accountName}' type='{eventType}'");
 
         if (!_clients.TryGetValue(accountName.ToLowerInvariant(), out var writer))
         {
@@ -58,13 +58,12 @@ public class DllBridge : IDisposable
         
         try
         {
-            // Serialize payload fields flat alongside "type", not nested under "data"
             var payloadJson = JsonSerializer.Serialize(payload);
             var payloadDoc = JsonDocument.Parse(payloadJson);
 
             var merged = new Dictionary<string, object> { ["type"] = eventType };
             foreach (var prop in payloadDoc.RootElement.EnumerateObject())
-                merged[prop.Name] = prop.Value.Clone();  // Clone so it survives doc disposal
+                merged[prop.Name] = prop.Value.Clone();  // clone so it survives doc disposal
 
             writer.WriteLine(JsonSerializer.Serialize(merged));
         }

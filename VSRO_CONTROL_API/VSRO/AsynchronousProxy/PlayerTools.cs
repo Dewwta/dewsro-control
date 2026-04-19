@@ -1712,8 +1712,15 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     if (e.Proxy.Session != null)
                     {
                         Interlocked.Increment(ref e.Proxy.Session.SessionKills); // Not a bug fix, but techincally more correct here.
-                        await AchievementService.OnMonsterKill(proxy.Session!.CharacterName!, result.codeName, proxy);
-
+                        await proxy.Session!.AchievementLock.WaitAsync();
+                        try
+                        {
+                            await AchievementService.OnMonsterKill(proxy.Session!.CharacterName!, result.codeName, proxy);
+                        }
+                        finally
+                        {
+                            proxy.Session!.AchievementLock.Release();
+                        }
                         Logger.Debug("KillTracker",
                             $"{proxy.Session?.CharacterName} killed mob {GameObjectNameResolver.Resolve(result.codeName)} " +
                             $"in {RegionResolver.Resolve((short)spawnInfo.RegionID)} " +
@@ -2009,7 +2016,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     });
 
                     PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null,
-                        $"Reward claimed! {itemCode} has been added to your inventory.");
+                        $"Reward claimed! {GameObjectNameResolver.Resolve(itemCode)} has been added to your inventory.");
 
                     Logger.Info("RewardClaim",
                         $"{session.CharacterName} claimed {itemCode} x{qty} +{plus} for level {claimedLevel}");
@@ -2607,11 +2614,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
             var codeNames = options.Select(o => o.CodeName);
             var iconPaths = await DBConnect.GetItemIconPaths(codeNames);
-
-            // Debug
-            Logger.Debug("OnPlayerLevelUp", $"Icon paths fetched: {iconPaths.Count} for codes: {string.Join(", ", codeNames)}");
-            foreach (var kvp in iconPaths)
-                Logger.Debug("OnPlayerLevelUp", $"  {kvp.Key} -> {kvp.Value}");
 
             proxy.Session!.UnclaimedRewards.Add(newLevel);
             await DBConnect.AddUnclaimedRewardAsync(proxy.Session.CharacterName!, newLevel);

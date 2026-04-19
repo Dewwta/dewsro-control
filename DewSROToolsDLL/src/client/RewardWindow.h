@@ -24,6 +24,7 @@ struct RewardWindow
     std::vector<RewardOption> options;
     std::map<std::string, IDirect3DTexture9*> iconCache;
     IDirect3DDevice9* device = nullptr;
+    int selectedIndex = -1;
 
     static bool Contains(const std::string& str, const std::string& sub) {
         return str.find(sub) != std::string::npos;
@@ -64,6 +65,7 @@ struct RewardWindow
         
         level = lvl;
         options = std::move(opts);
+        selectedIndex = -1;
         isOpen = true;
     }
 

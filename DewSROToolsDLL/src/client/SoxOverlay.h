@@ -39,7 +39,6 @@ struct SoxOverlay
         }
     }
 
-    // call this after ImGui::Image or invisible button for the icon
     void Render(ImVec2 pos, ImVec2 size) {
         auto& log = GetLogger();
 
