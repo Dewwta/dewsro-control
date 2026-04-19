@@ -165,9 +165,13 @@ uint64_t DllBridge::ExtractUint64(const std::string& json, const std::string& ke
 
 void DllBridge::Dispatch(const std::string& json) {
     std::string type = ExtractStr(json, "type");
+    auto& log = GetLogger();
+    log.Dbg("DllBridge::Dispatch", "type='" + type + "' json=" + json);
     auto it = m_handlers.find(type);
     if (it != m_handlers.end())
         it->second(json);
+    else
+        log.Warn("DllBridge::Dispatch", "No handler for type: " + type);
 }
 
 void DllBridge::RegisterHandler(const std::string& type, BridgeHandler handler) {

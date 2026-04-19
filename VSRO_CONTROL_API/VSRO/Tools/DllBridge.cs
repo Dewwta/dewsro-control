@@ -35,9 +35,21 @@ public class DllBridge : IDisposable
 
     public void Dispose() => Stop();
 
+    public void RemoveClient(string accName)
+    {
+        if (!_clients.TryRemove(accName, out _))
+        {
+            Logger.Warn(this, $"Couldnt remove account after disconnect!");
+        }
+        
+    }
     public void SendToDll(string accountName, string eventType, object payload)
     {
+        if (accountName.Contains("PartyBot"))
+            return;
+        
         Logger.Debug(this, $"SendToDll called: account='{accountName}' type='{eventType}'");
+
         if (!_clients.TryGetValue(accountName.ToLowerInvariant(), out var writer))
         {
             Logger.Warn(this, $"No connected DLL client for account '{accountName}' — dropping '{eventType}'");

@@ -17,5 +17,8 @@
         public uint CharacterUID { get; set; }  // spawn UID, changes per session
         public uint CharacterID { get; set; }   // persistent DB ID
         public uint SessionKills = 0; // kills in session
+        public ulong CumulativeExp { get; set; } = 0;
+        public byte? PendingLevelReward { get; set; } = null;
+        public List<byte> UnclaimedRewards { get; set; } = new();
     }
 }

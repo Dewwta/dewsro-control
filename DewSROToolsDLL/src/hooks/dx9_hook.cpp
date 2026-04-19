@@ -16,6 +16,7 @@
 #include "../net/NetActions.h"
 #include "../net/LoginHook.h"
 #include "Logging/Logger.h"
+#include "../client/RewardWindow.h"
 
 static std::string FormatSeconds(int totalSeconds) {
     int h = totalSeconds / 3600;
@@ -25,7 +26,7 @@ static std::string FormatSeconds(int totalSeconds) {
     snprintf(buf, sizeof(buf), "%02d:%02d:%02d", h, m, s);
     return buf;
 }
-
+SoxOverlay g_soxOverlay;
 
 static bool initialized = false;
 static ImFont* g_fontWatermark = nullptr;
@@ -38,7 +39,7 @@ static bool showPlayerActionsWindow = false;
 static bool showSettingsWindow = false;
 
 static bool AnyWindowOpen() {
-    return showPlayerActionsWindow || showSettingsWindow;
+    return showPlayerActionsWindow || showSettingsWindow || g_rewardWindow.isOpen;
 }
 
 static HWND g_gameHwnd = nullptr;
@@ -262,6 +263,24 @@ static void RenderPlayerActions() {
         NetActions::SendSortRequest(SortType::Logical);
 
     ImGui::Spacing();
+
+    if (!g_bridge.unclaimedRewards.empty()) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("PENDING REWARDS");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        for (int lvl : g_bridge.unclaimedRewards) {
+            char btnLabel[64];
+            snprintf(btnLabel, sizeof(btnLabel), "Claim Level %d Reward", lvl);
+            if (ImGui::Button(btnLabel, ImVec2(-1, 28))) {
+                // re-request the reward options from proxy
+                // proxy will re-send level_reward for this level
+                g_bridge.Send("{\"type\":\"reward_reopen\",\"level\":" + std::to_string(lvl) + "}");
+            }
+        }
+    }
+
     ImGui::End();
 }
 static void RenderSettings() {
@@ -323,12 +342,18 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
         g_fontWatermark = io.Fonts->AddFontFromFileTTF(
             "C:\\Windows\\Fonts\\arial.ttf", 15.0f, &cfg);
 
-
+        // in hkPresent init block
+        g_soxOverlay.Load(device, "icon\\item\\etc\\icon_edge_rare.png");
         ImGui_ImplWin32_Init(params.hFocusWindow);
         ImGui_ImplDX9_Init(device);
 
         oWndProc = (WNDPROC)GetWindowLongPtrA(params.hFocusWindow, GWLP_WNDPROC);
         SetWindowLongPtrA(params.hFocusWindow, GWLP_WNDPROC, (LONG)hkWndProc);
+        g_rewardWindow.device = device;
+
+        auto& log = GetLogger();
+        log.Dbg("hkPresent", "g_soxOverlay address=" + std::to_string((size_t)&g_soxOverlay));
+        log.Dbg("hkPresent", "texture after load=" + std::to_string((size_t)g_soxOverlay.texture));
 
         initialized = true;
     }
@@ -346,7 +371,7 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
     
     if (showPlayerActionsWindow)    RenderPlayerActions();
     if (showSettingsWindow) RenderSettings();
-
+    g_rewardWindow.Render();
     ImGui::EndFrame();
     ImGui::Render();
     ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
@@ -356,10 +381,20 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
 
 HRESULT __stdcall hkReset(IDirect3DDevice9* device, D3DPRESENT_PARAMETERS* pp)
 {
+    auto& log = GetLogger();
+    log.Warn("hkReset", "Device reset fired - releasing textures");
+
     ImGui_ImplDX9_InvalidateDeviceObjects();
+    g_rewardWindow.ReleaseIcons();
+    g_soxOverlay.Release();
     HRESULT hr = oReset(device, pp);
     if (SUCCEEDED(hr))
+    {
         ImGui_ImplDX9_CreateDeviceObjects();
+        g_soxOverlay.Load(device, "icon\\item\\etc\\icon_edge_rare.png");
+        log.Dbg("hkReset", "texture after reload=" + std::to_string((size_t)g_soxOverlay.texture));
+        g_rewardWindow.device = device;
+    }
     return hr;
 }
 HRESULT __stdcall hkCreateDevice(

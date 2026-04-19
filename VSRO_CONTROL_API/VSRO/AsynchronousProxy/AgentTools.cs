@@ -110,6 +110,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     IsAfk = false,
                 };
 
+                var unclaimed = await DBConnect.GetUnclaimedRewardsAsync(charName);
+                e.Proxy.Session.UnclaimedRewards = unclaimed;
+
                 DllBridge.Instance.SendToDll(userName.userName!, "session_init", new
                 {
                     charName = charName,

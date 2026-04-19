@@ -5,7 +5,8 @@
 #include <iostream>
 #include "net/DllBridge.h"
 #include "Logging/Logger.h"
-
+#include "client/RewardWindow.h"
+#include <sstream>
 
 void RegisterAllHandlers() {
     g_bridge.RegisterHandler("login_ack", [](const std::string& _) {
@@ -53,6 +54,60 @@ void RegisterAllHandlers() {
         g_bridge.m_sessionState.sessionKills = g_bridge.ExtractInt(json, "sessionKills");
     });
 
+    g_bridge.RegisterHandler("level_reward", [](const std::string& json) {
+        int level = g_bridge.ExtractInt(json, "level");
+        std::vector<RewardOption> options;
+        auto& log = GetLogger();
+        // find the options array
+        auto arrStart = json.find("\"options\":[");
+        if (arrStart != std::string::npos) {
+            arrStart += 11; // skip past "options":[
+            auto arrEnd = json.find(']', arrStart);
+            std::string arr = json.substr(arrStart, arrEnd - arrStart);
+
+            // split into individual objects by }
+            size_t pos = 0;
+            while (pos < arr.size()) {
+                auto objStart = arr.find('{', pos);
+                auto objEnd = arr.find('}', objStart);
+                if (objStart == std::string::npos) break;
+
+                std::string obj = arr.substr(objStart, objEnd - objStart + 1);
+
+                RewardOption opt;
+                opt.code = g_bridge.ExtractStr(obj, "code");
+                opt.name = g_bridge.ExtractStr(obj, "name");
+                opt.plus = g_bridge.ExtractInt(obj, "plus");
+                opt.qty =  g_bridge.ExtractInt(obj, "qty");
+                opt.icon = g_bridge.ExtractStr(obj, "icon");
+                log.Dbg("level_reward", "icon path: '" + opt.icon + "'");
+                if (!opt.code.empty())
+                    options.push_back(opt);
+
+                pos = objEnd + 1;
+            }
+        }
+
+        g_rewardWindow.Open(level, std::move(options));
+    });
+
+    g_bridge.RegisterHandler("unclaimed_rewards", [](const std::string& json) {
+        g_bridge.unclaimedRewards.clear();
+        auto start = json.find('[');
+        auto end = json.find(']');
+        if (start == std::string::npos || end == std::string::npos) return;
+
+        std::string arr = json.substr(start + 1, end - start - 1);
+        if (arr.empty()) return;
+
+        std::stringstream ss(arr);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            try { g_bridge.unclaimedRewards.push_back(std::stoi(token)); }
+            catch (...) {}
+        }
+        });
+
 
 }
 
@@ -70,5 +125,6 @@ void Control::Initialize()
     RegisterAllHandlers();
     log.Info("Control::Initialize", "Registered g_bridge handlers.");
     Patcher::PatchAll();
+
 }
 

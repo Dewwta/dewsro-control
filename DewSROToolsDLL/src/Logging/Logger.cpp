@@ -3,6 +3,14 @@
 void Logger::Alloc() {
 	if (m_isAlloced) return;
 	AllocConsole();
+
+	HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+	DWORD mode;
+	GetConsoleMode(hIn, &mode);
+	mode &= ~ENABLE_QUICK_EDIT_MODE;
+	mode &= ~ENABLE_INSERT_MODE;
+	SetConsoleMode(hIn, mode);
+
 	m_consoleHwnd = GetConsoleWindow();
 	m_consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 

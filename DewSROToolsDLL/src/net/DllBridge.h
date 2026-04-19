@@ -45,6 +45,7 @@ public:
     PlayerState m_state;
     State m_sessionState;
     std::function<void(const std::string& type, const std::string& json)> OnEvent;
+    std::vector<int> unclaimedRewards;
 
     void SetIdentity(const std::string& username);
     void Connect();

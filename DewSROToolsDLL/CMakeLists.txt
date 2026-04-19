@@ -1,23 +1,35 @@
 cmake_minimum_required(VERSION 3.20)
-project(DewSROToolkit)
+project(DewSROToolkit LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 set(DXSDK_DIR "C:/Program Files (x86)/Microsoft DirectX SDK (June 2010)" CACHE PATH "DirectX SDK path")
+
+# -------------------------
+# DirectX SDK
+# -------------------------
 link_directories("${DXSDK_DIR}/Lib/x86")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -machine:x86")
-set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -machine:x86")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-invalid-offsetof")
-if(MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # -w suppresses ALL warnings
-    # -Wno-invalid-offsetof
-    add_compile_options(-w) 
+
+# -------------------------
+# Force x86 for MSVC properly
+# -------------------------
+if (MSVC)
+    add_compile_options(/arch:SSE2)
+    set(CMAKE_GENERATOR_PLATFORM Win32)
 endif()
 
+# -------------------------
+# Dependencies
+# -------------------------
 add_subdirectory(minhook)
+add_subdirectory(src/BSLib)
 
-add_subdirectory(src/BSLib) 
-
-add_library(DewSROToolkit SHARED
+# -------------------------
+# Source files
+# -------------------------
+set(SOURCES
     src/DllMain.cpp
     src/Control.cpp
 
@@ -60,18 +72,26 @@ add_library(DewSROToolkit SHARED
 
     # Kiero
     kiero/kiero.cpp
-)
+    "src/client/RewardWindow.cpp")
+
+add_library(DewSROToolkit SHARED ${SOURCES} "src/client/RewardWindow.h" "src/client/RewardWindow.cpp" "src/client/SoxOverlay.h")
+
+# -------------------------
+# Includes
+# -------------------------
 target_include_directories(DewSROToolkit PRIVATE
     src/
     kiero/
     imgui/
     imgui/backends/
     minhook/include/
-    BSLib
-
+    BSLib/
     "${DXSDK_DIR}/Include"
 )
-set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /NODEFAULTLIB:d3dx9dt.lib /DEFAULTLIB:d3dx9d.lib")
+
+# -------------------------
+# Link libs
+# -------------------------
 target_link_libraries(DewSROToolkit PRIVATE
     d3d9.lib
     d3dx9.lib
@@ -81,8 +101,17 @@ target_link_libraries(DewSROToolkit PRIVATE
     ws2_32
 )
 
-target_link_options(DewSROToolkit PRIVATE /DEF:${CMAKE_SOURCE_DIR}/src/exports.def)
+# -------------------------
+# Linker options
+# -------------------------
+target_link_options(DewSROToolkit PRIVATE
+    /DEF:${CMAKE_SOURCE_DIR}/src/exports.def
+    /MACHINE:X86
+)
 
+# -------------------------
+# Output name
+# -------------------------
 set_target_properties(DewSROToolkit PROPERTIES
     OUTPUT_NAME "DewSROToolkit"
 )

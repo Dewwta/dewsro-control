@@ -2,8 +2,8 @@ using CoreLib.Tools.Logging;
 using Microsoft.Data.SqlClient;
 using System.Data;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text;
-using System.Xml.Linq;
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Enums;
 using VSRO_CONTROL_API.VSRO.Tools;
@@ -14,7 +14,7 @@ namespace VSRO_CONTROL_API.VSRO
 
     public static class DBConnect
     {
-        #region - Properties -
+        #region - Properties - 
 
         // Not real - Test credentials.
         private static string _connectionString = string.Empty;
@@ -138,13 +138,30 @@ namespace VSRO_CONTROL_API.VSRO
                         
                     }
                 }
+
+                using (SqlConnection conn = new SqlConnection(_connectionString))
+                {
+                    await conn.OpenAsync();
+                    using (SqlCommand cmd = new SqlCommand(Constant.CreateLevelRewardsTable_q, conn))
+                    {
+                        int cout = await cmd.ExecuteNonQueryAsync();
+                    }
+                }
+
+                using (SqlConnection conn = new SqlConnection(_connectionString))
+                {
+                    await conn.OpenAsync();
+                    using (SqlCommand cmd = new SqlCommand(Constant.CreateUnclaimedRewardsTable_q, conn))
+                        await cmd.ExecuteNonQueryAsync();
+                }
+
                 return (true, "");
             }
             catch (Exception ex)
             {
                 msg = $"Error ocurred during DBConnect intialization!: {ex.Message}";
                 Logger.Error(typeof(DBConnect), msg);
-                return (true, msg);
+                return (false, msg);
             }
         }
 
@@ -1278,7 +1295,7 @@ namespace VSRO_CONTROL_API.VSRO
                 using (SqlConnection conn = new SqlConnection(_connectionString))
                 {
                     await conn.OpenAsync();
-                    using (SqlCommand cmd = new SqlCommand(Constant.AddSilkToUserByName_q, conn))
+                    using (SqlCommand cmd = new SqlCommand(Constant.AddSilkToUserByJID_q, conn))
                     {
                         cmd.Parameters.AddWithValue("@SILKAMOUNT", _silkAmount);
                         cmd.Parameters.AddWithValue("@JIDNUM", _jid);
@@ -1815,6 +1832,145 @@ namespace VSRO_CONTROL_API.VSRO
                 Logger.Error(typeof(DBConnect), msg);
                 return (false, msg);
             }
+        }
+
+        // Players
+        public static async Task<(bool success, string reason)> GiveItemToPlayer(string charName, string itemCodeName, int plus = 0, int qty = 1 , bool IsEquipment = false)
+        {
+            try
+            {
+                using (SqlConnection conn = new SqlConnection(_connectionString))
+                {
+                    await conn.OpenAsync();
+                    using (SqlCommand cmd = new SqlCommand(Constant.AddItemToCharacterByName_q, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@charName", charName);
+                        cmd.Parameters.AddWithValue("@itemCodeName", itemCodeName);
+                        cmd.Parameters.AddWithValue("@plus", plus);
+                        cmd.Parameters.AddWithValue("@qty", IsEquipment ? 1 : qty);
+                        Logger.Debug(typeof(DBConnect), $"charName: {charName} itemCodename: {itemCodeName} Plus: {plus} Qty: {qty}");
+                        await cmd.ExecuteNonQueryAsync();
+                        return (true, $"Added {itemCodeName} to {charName} successfully");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                string msg = $"FERROR: Error adding {itemCodeName} to character {charName}!: {ex.Message}";
+                Logger.Error(typeof(DBConnect), msg);
+                return (false, msg);
+            }
+        }
+        public static async Task<List<byte>> GetUnclaimedRewardsAsync(string charName)
+        {
+            var result = new List<byte>();
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                await conn.OpenAsync();
+                using var cmd = new SqlCommand(Constant.GetUnclaimedRewards_q, conn);
+                cmd.Parameters.AddWithValue("@CharName", charName);
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                    result.Add((byte)reader.GetByte(0));
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(typeof(DBConnect), $"GetUnclaimedRewards failed: {ex.Message}");
+            }
+            return result;
+        }
+
+        public static async Task<bool> AddUnclaimedRewardAsync(string charName, byte level)
+        {
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                await conn.OpenAsync();
+                using var cmd = new SqlCommand(Constant.AddUnclaimedReward_q, conn);
+                cmd.Parameters.AddWithValue("@CharName", charName);
+                cmd.Parameters.AddWithValue("@Level", level);
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(typeof(DBConnect), $"AddUnclaimedReward failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        public static async Task<bool> RemoveUnclaimedRewardAsync(string charName, byte level)
+        {
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                await conn.OpenAsync();
+                using var cmd = new SqlCommand(Constant.RemoveUnclaimedReward_q, conn);
+                cmd.Parameters.AddWithValue("@CharName", charName);
+                cmd.Parameters.AddWithValue("@Level", level);
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(typeof(DBConnect), $"RemoveUnclaimedReward failed: {ex.Message}");
+                return false;
+            }
+        }
+        public static async Task<bool> HasClaimedLevelRewardAsync(string charName, byte level)
+        {
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                await conn.OpenAsync();
+                using var cmd = new SqlCommand(Constant.HasClaimedLevelReward_q, conn);
+                cmd.Parameters.AddWithValue("@CharName", charName);
+                cmd.Parameters.AddWithValue("@Level", level);
+                int count = (int)await cmd.ExecuteScalarAsync();
+                return count > 0;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(typeof(DBConnect), $"HasClaimedLevelReward failed: {ex.Message}");
+                return true; // fail safe
+            }
+        }
+        public static async Task<bool> ClaimLevelRewardAsync(string charName, byte level)
+        {
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                await conn.OpenAsync();
+                using var cmd = new SqlCommand(Constant.ClaimLevelReward_q, conn);
+                cmd.Parameters.AddWithValue("@CharName", charName);
+                cmd.Parameters.AddWithValue("@Level", level);
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(typeof(DBConnect), $"ClaimLevelReward failed: {ex.Message}");
+                return false;
+            }
+        }
+        public static async Task<Dictionary<byte, ulong>> GetExpTableAsync()
+        {
+            var table = new Dictionary<byte, ulong>();
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                await conn.OpenAsync();
+                using var cmd = new SqlCommand(Constant.GetExpTable_q, conn);
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                    table[(byte)reader.GetByte(0)] = (ulong)reader.GetInt64(1);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(typeof(DBConnect), $"GetExpTable failed: {ex.Message}");
+            }
+            return table;
         }
 
         #endregion

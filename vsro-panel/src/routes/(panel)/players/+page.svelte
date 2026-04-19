@@ -83,7 +83,7 @@
 	}
 
 	// ── Delete characters ─────────────────────────────────────────────────────
-	let deleteJID         = '';
+	let deleteJID: number | null = null;
 	let deleteLoading     = false;
 	let deleteMsg         = '';
 	let deleteMsgType: 'success' | 'error' = 'success';
@@ -91,11 +91,10 @@
 	let confirmedJID      = 0;
 
 	function promptDelete() {
-		const jid = parseInt(deleteJID.trim(), 10);
-		if (!deleteJID.trim() || isNaN(jid) || jid <= 0) return;
-		confirmedJID   = jid;
-		confirmVisible = true;
-	}
+        if (deleteJID === null || isNaN(deleteJID) || deleteJID <= 0) return;
+        confirmedJID   = deleteJID;
+        confirmVisible = true;
+    }
 
 	function cancelDelete() {
 		confirmVisible = false;
@@ -109,7 +108,7 @@
 			const r   = await playersApi.truncateCharacters(confirmedJID);
 			deleteMsg     = r.message;
 			deleteMsgType = 'success';
-			deleteJID     = '';
+			deleteJID     = null;
 		} catch (e: any) {
 			deleteMsg     = e.message ?? 'Failed to delete characters.';
 			deleteMsgType = 'error';
@@ -280,7 +279,7 @@
 				{/if}
 				<SrButton
 					variant="danger"
-					disabled={!deleteJID.trim() || parseInt(deleteJID) <= 0}
+					disabled={deleteJID === null || deleteJID <= 0 || isNaN(deleteJID)}
 					loading={deleteLoading}
 					on:click={promptDelete}
 				>

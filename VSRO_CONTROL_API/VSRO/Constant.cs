@@ -6,6 +6,80 @@ namespace VSRO_CONTROL_API.VSRO
     public static class Constant
     {
         #region - SQL Queries -
+
+        public const string CreateUnclaimedRewardsTable_q = @"
+            IF NOT EXISTS (
+                SELECT 1
+                FROM SRO_VT_PROXY.sys.tables t
+                INNER JOIN SRO_VT_PROXY.sys.schemas s ON t.schema_id = s.schema_id
+                WHERE t.name = '_UnclaimedRewards' AND s.name = 'dbo'
+            )
+            BEGIN
+                CREATE TABLE SRO_VT_PROXY.dbo._UnclaimedRewards
+                (
+                    CharacterName NVARCHAR(64) NOT NULL,
+                    Level         TINYINT      NOT NULL,
+                    CreatedAt     DATETIME2    NOT NULL DEFAULT GETUTCDATE(),
+                    PRIMARY KEY (CharacterName, Level)
+                )
+            END";
+
+        public const string GetUnclaimedRewards_q = @"
+            SELECT Level
+            FROM SRO_VT_PROXY.dbo._UnclaimedRewards
+            WHERE CharacterName = @CharName
+            ORDER BY Level";
+
+        public const string AddUnclaimedReward_q = @"
+            IF NOT EXISTS (
+                SELECT 1 FROM SRO_VT_PROXY.dbo._UnclaimedRewards
+                WHERE CharacterName = @CharName AND Level = @Level
+            )
+            BEGIN
+                INSERT INTO SRO_VT_PROXY.dbo._UnclaimedRewards (CharacterName, Level)
+                VALUES (@CharName, @Level)
+            END";
+
+        public const string RemoveUnclaimedReward_q = @"
+            DELETE FROM SRO_VT_PROXY.dbo._UnclaimedRewards
+            WHERE CharacterName = @CharName AND Level = @Level";
+
+        public const string CreateLevelRewardsTable_q = @"
+            IF NOT EXISTS (
+                SELECT 1
+                FROM SRO_VT_PROXY.sys.tables t
+                INNER JOIN SRO_VT_PROXY.sys.schemas s ON t.schema_id = s.schema_id
+                WHERE t.name = '_LevelRewards' AND s.name = 'dbo'
+            )
+            BEGIN
+                CREATE TABLE SRO_VT_PROXY.dbo._LevelRewards
+                (
+                    CharacterName NVARCHAR(64) NOT NULL,
+                    Level         TINYINT      NOT NULL,
+                    ClaimedAt     DATETIME2    NOT NULL DEFAULT GETUTCDATE(),
+                    PRIMARY KEY (CharacterName, Level)
+                )
+            END";
+
+        public const string HasClaimedLevelReward_q = @"
+            SELECT COUNT(1)
+            FROM SRO_VT_PROXY.dbo._LevelRewards
+            WHERE CharacterName = @CharName AND Level = @Level";
+
+        public const string ClaimLevelReward_q = @"
+            INSERT INTO SRO_VT_PROXY.dbo._LevelRewards (CharacterName, Level, ClaimedAt)
+            VALUES (@CharName, @Level, GETUTCDATE())";
+
+        public const string GetExpTable_q = @"
+            SELECT Lvl, Exp_C
+            FROM SRO_VT_SHARD.dbo._RefLevel
+            ORDER BY Lvl";
+
+        public const string AddItemToCharacterByName_q = @"
+            USE SRO_VT_SHARD
+            INSERT INTO _ExeGameServer (Action_ID, CharName16, Param01, Param02, Param03, Param04)
+            VALUES (1, @charName, @itemCodeName, @qty, 0, @plus)"; // plus is 0 for non plus items.
+
         public const string GetIdsFromRefRegion = @"
             USE SRO_VT_SHARD
             SELECT wRegionID
@@ -19,7 +93,7 @@ namespace VSRO_CONTROL_API.VSRO
             FROM _RefRegion
             GROUP BY wRegionID, ContinentName
             ORDER BY wRegionID";
-        // --- Achievement Queries (SRO_VT_PROXY) ---
+
         public const string GetAchievementNames_q = @"
             USE SRO_VT_PROXY;
             SELECT AchievementName
@@ -482,8 +556,7 @@ namespace VSRO_CONTROL_API.VSRO
                 );
                 ";
 
-        // Known area prefixes that identify actual monsters.
-        // Run individually — some MOB_* entries are not monsters (e.g. MOB_ prefixed objects).
+
         public static readonly string[] MonsterAreaPrefixes = new string[]
         {
             "MOB_CH_",   // Jangan
@@ -766,8 +839,7 @@ namespace VSRO_CONTROL_API.VSRO
 
                  // ------------ Custom -------------
                  DEW_SORT = 0xE101,
-                 DEW_SESSION_TIME = 0xE102,
-                 DEW_TOTAL_TIME = 0xE103;
+                 DEW_CLAIM_REWARD = 0xE102;
 
         #endregion
 

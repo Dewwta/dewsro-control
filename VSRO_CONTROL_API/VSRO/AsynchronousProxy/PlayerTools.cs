@@ -1,5 +1,6 @@
 ﻿using CoreLib.Models;
 using CoreLib.Tools.Logging;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using System.Collections.Concurrent;
 using System.Text;
 using VSRO_CONTROL_API.Settings;
@@ -9,7 +10,7 @@ using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Tracking;
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Tools;
-using static System.Collections.Specialized.BitVector32;
+
 
 namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 {
@@ -113,6 +114,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     ulong expOffset = packet.ReadULong();
                     uint sExpOffset = packet.ReadUInt();
 
+                    
                     Logger.Debug("ChardataHandler", $"expOffset={expOffset} sExpOffset={sExpOffset}");
 
                     ulong remainGold = packet.ReadULong();
@@ -151,11 +153,21 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         RemainingSkillPoints = remainSkillPoint,
                     };
 
+                    if (Overseer.ExpTableCumulative.TryGetValue((byte)(curLevel - 1), out ulong baseExp))
+                        e.Proxy.Session.CumulativeExp = baseExp + expOffset;
+                    else
+                        e.Proxy.Session.CumulativeExp = expOffset; // level 1, no base
+
                     DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "session_sync", new
                     {
                         sessionSeconds = (int)e.Proxy.Session.AccumulatedPlayTime.TotalSeconds,
                         sessionKills = e.Proxy.Session.SessionKills,
                         isAfk = e.Proxy.Session.IsAfk ? 1 : 0  // int not bool
+                    });
+
+                    DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "unclaimed_rewards", new
+                    {
+                        levels = e.Proxy.Session.UnclaimedRewards.Select(b => (int)b).ToArray()
                     });
 
                     for (int i = 0; i < itemCount; i++)
@@ -357,6 +369,12 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     gold = e.Proxy.Session.PlayerStats.RemainingGold,
                 };
                 DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "char_init", payload);
+
+                if (e.Proxy.Session.UnclaimedRewards.Count > 0)
+                    DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "unclaimed_rewards", new
+                    {
+                        levels = e.Proxy.Session.UnclaimedRewards.Select(b => (int)b).ToArray()
+                    });
 
             });
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_STATS, async (sender, e) =>
@@ -1701,6 +1719,13 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             $"in {RegionResolver.Resolve((short)spawnInfo.RegionID)} " +
                             $"(refObjID={spawnInfo.RefObjID}, UID=0x{mobUID:X}) +{exp}exp +{sExp}sp");
 
+                        lock (proxy.Session!)
+                        {
+                            proxy.Session!.CumulativeExp += exp;
+                        }
+                        
+                        _ = Task.Run(() => PlayerTools.CheckLevelUp(proxy));
+
                         DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "kill_update", new
                         {
                             sessionKills = e.Proxy.Session.SessionKills
@@ -1786,8 +1811,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 {
                     byte moveType = packet.ReadByte();
 
-                    Logger.Debug("Movement",
-                        $"MOVE_TYPE = 0x{moveType:X2} | Remaining = {packet.RemainingRead()} bytes");
+                    //Logger.Debug("Movement",
+                    //    $"MOVE_TYPE = 0x{moveType:X2} | Remaining = {packet.RemainingRead()} bytes");
 
                     switch (moveType)
                     {
@@ -1800,10 +1825,10 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 short z = packet.ReadShort();
                                 short y = packet.ReadShort();
 
-                                Logger.Debug("Movement",
-                                    $"ABS MOVE | Sector=({sx},{sy}) Pos=({x},{y},{z})");
-                                Logger.Debug("Movement",
-                                    $"Hex Dump: {BitConverter.ToString(packet.GetBytes())}");
+                                //Logger.Debug("Movement",
+                                //    $"ABS MOVE | Sector=({sx},{sy}) Pos=({x},{y},{z})");
+                                //Logger.Debug("Movement",
+                                //    $"Hex Dump: {BitConverter.ToString(packet.GetBytes())}");
 
                                 break;
                             }
@@ -1813,10 +1838,10 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 byte mode = packet.ReadByte();
                                 ushort packed = packet.ReadUShort();
 
-                                Logger.Debug("Movement",
-                                    $"REL MOVE | Mode={mode} Packed=0x{packed:X4} ({packed})");
-                                Logger.Debug("Movement",
-                                    $"Hex Dump: {BitConverter.ToString(packet.GetBytes())}");
+                                //Logger.Debug("Movement",
+                                //    $"REL MOVE | Mode={mode} Packed=0x{packed:X4} ({packed})");
+                                //Logger.Debug("Movement",
+                                //    $"Hex Dump: {BitConverter.ToString(packet.GetBytes())}");
 
                                 break;
                             }
@@ -1926,7 +1951,112 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 });
             });
         }
+        public static void RegisterPlayerRewardHandler(Server _agentProxy)
+        {
+            _agentProxy.RegisterClientPacketHandler(Constant.DEW_CLAIM_REWARD, async (sender, e) =>
+            {
+                e.CancelTransfer = true;
+                var packet = e.Packet.Clone();
 
+                byte claimedLevel = packet.ReadByte();
+                byte qty = packet.ReadByte();
+                byte plus = packet.ReadByte();
+
+                byte codeLen = packet.ReadByte();
+                var codeChars = new byte[codeLen];
+                for (int i = 0; i < codeLen; i++)
+                    codeChars[i] = packet.ReadByte();
+                string itemCode = System.Text.Encoding.ASCII.GetString(codeChars);
+
+                var session = e.Proxy.Session;
+                if (session == null) return;
+
+                if (session.PendingLevelReward != claimedLevel)
+                {
+                    Logger.Warn("RewardClaim", $"Rejected claim from {session.CharacterName}: " +
+                                $"pending={session.PendingLevelReward} claimed={claimedLevel}");
+                    return;
+                }
+
+                if (!Overseer.LevelRewardOptions.TryGetValue(claimedLevel, out var options))
+                {
+                    Logger.Warn("RewardClaim", $"No reward options for level {claimedLevel}");
+                    return;
+                }
+
+                var chosen = options.FirstOrDefault(o => o.CodeName == itemCode && o.Plus == plus && o.Qty == qty);
+                if (chosen == null)
+                {
+                    Logger.Warn("RewardClaim", $"Invalid reward {itemCode} +{plus} x{qty} for level {claimedLevel}");
+                    return;
+                }
+
+                bool isEquipment = itemCode.Contains("_WEAPON_") || itemCode.Contains("_SHIELD_")
+                                || itemCode.Contains("_ARMOR_") || itemCode.Contains("_HELM_");
+
+                var result = await DBConnect.GiveItemToPlayer(
+                    session.CharacterName!, chosen.CodeName, chosen.Plus, chosen.Qty,
+                    isEquipment);
+
+                if (result.success)
+                {
+                    session.PendingLevelReward = null;
+                    session.UnclaimedRewards.Remove(claimedLevel);
+                    await DBConnect.RemoveUnclaimedRewardAsync(session.CharacterName!, claimedLevel);
+                    DllBridge.Instance.SendToDll(session.AccountName!, "unclaimed_rewards", new
+                    {
+                        levels = session.UnclaimedRewards.Select(b => (int)b).ToArray()
+                    });
+
+                    PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null,
+                        $"Reward claimed! {itemCode} has been added to your inventory.");
+
+                    Logger.Info("RewardClaim",
+                        $"{session.CharacterName} claimed {itemCode} x{qty} +{plus} for level {claimedLevel}");
+                }
+                else
+                {
+                    Logger.Error("RewardClaim", $"GiveItem failed for {session.CharacterName}: {result.reason}");
+                    PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null,
+                        "Something went wrong delivering your reward. Please contact an admin.");
+                }
+            });
+
+            DllBridge.Instance.RegisterHandler("reward_reopen", async (accountName, json) =>
+            {
+                var proxy = Overseer.GetProxyByAccount(accountName);
+                if (proxy?.Session == null) return;
+
+                byte level = (byte)json.GetProperty("level").GetInt32();
+
+                if (!proxy.Session.UnclaimedRewards.Contains(level)) return;
+
+                if (!Overseer.LevelRewardOptions.TryGetValue(level, out var options) || options.Count == 0)
+                    return;
+
+                proxy.Session.PendingLevelReward = level;
+
+                var codeNames = options.Select(o => o.CodeName);
+                var iconPaths = await DBConnect.GetItemIconPaths(codeNames);
+                Logger.Debug("OnPlayerLevelUp", $"Icon paths fetched: {iconPaths.Count} for codes: {string.Join(", ", codeNames)}");
+                foreach (var kvp in iconPaths)
+                    Logger.Debug("OnPlayerLevelUp", $"  {kvp.Key} -> {kvp.Value}");
+
+                DllBridge.Instance.SendToDll(accountName, "level_reward", new
+                {
+                    level,
+                    options = options.Select(o => new {
+                        code = o.CodeName,
+                        plus = o.Plus,
+                        qty = o.Qty,
+                        name = o.DisplayName,
+                        icon = iconPaths.TryGetValue(o.CodeName, out var path)
+                           ? path.Replace(".ddj", ".png").Replace("\\", "/")
+                           : ""
+                    }).ToArray()
+                });
+            });
+        }
         #endregion
 
         #region - Sorting -
@@ -2124,13 +2254,13 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 return SortResult.Aborted;
             }
 
-            // Snapshot current inventory slots (slot >= 13 = player inventory)
+            // Snapshot current
             var slots = proxy.Inventory.Slots
                 .Where(kvp => kvp.Key >= 13)
                 .OrderBy(kvp => kvp.Key)
                 .ToList();
 
-            // === STACK (fixed direction + token checks) ===
+            // Stack
             bool didStack = false;
             for (int i = 0; i < slots.Count; i++)
             {
@@ -2151,7 +2281,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                     ushort qty = (ushort)Math.Min(itemB.Stack, spaceInA);
 
-                    // FIXED: move FROM later stack TO earlier stack
                     bool moved = await SendMoveAndWait(proxy, slotB, slotA, qty, cancellationToken);
                     if (moved)
                     {
@@ -2166,7 +2295,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             }
             if (didStack) return SortResult.Continue;
 
-            // === PACK ===
+            // Pack
             int start = 13;
             for (int i = 0; i < slots.Count; i++)
             {
@@ -2181,8 +2310,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 }
             }
 
-            // === LOGICAL SORT ===
-            // Helper predicates (exactly as you described)
+            // Logical Sort
             bool IsPetScroll(string cn) => cn.StartsWith("ITEM_COS") && cn.EndsWith("SCROLL");
 
             bool IsSpecialScroll(string cn) => cn.Contains("REVERSE_RETURN_SCROLL") ||
@@ -2216,29 +2344,29 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             // Build ordered list exactly in the sequence you wanted
             var sorted = new List<KeyValuePair<byte, (int ItemID, string CodeName, int Stack, int MaxStack)>>();
 
-            // 1. Pet Scrolls
+            // Pet Scrolls
             sorted.AddRange(slots
                 .Where(s => IsPetScroll(s.Value.CodeName))
                 .OrderBy(s => s.Value.CodeName)
                 .ThenByDescending(s => s.Value.Stack));
 
-            // 2. Special scrolls
+            // Special scrolls
             sorted.AddRange(slots
                 .Where(s => IsSpecialScroll(s.Value.CodeName))
                 .OrderBy(s => s.Value.CodeName)
                 .ThenByDescending(s => s.Value.Stack));
 
-            // 3. One large HP stack (if any)
+            // One large HP stack (if any)
             if (largeHpCandidate.Key != 0)
                 sorted.Add(largeHpCandidate);
 
-            // 4. One large MP stack (if any)
+            // One large MP stack (if any)
             if (largeMpCandidate.Key != 0)
                 sorted.Add(largeMpCandidate);
 
             var placed = new HashSet<byte>(sorted.Select(s => s.Key));
 
-            // 5. Quest items (everything not already placed)
+            // Quest items (everything not already placed)
             sorted.AddRange(slots
                 .Where(s => IsQuestItem(s.Value.CodeName) && !placed.Contains(s.Key))
                 .OrderBy(s => s.Value.CodeName)
@@ -2246,7 +2374,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
             placed.UnionWith(sorted.Skip(placed.Count).Select(s => s.Key));
 
-            // 6. Growth / pet skill potions
+            // Growth / pet skill potions
             sorted.AddRange(slots
                 .Where(s => IsGrowthPotion(s.Value.CodeName) && !placed.Contains(s.Key))
                 .OrderBy(s => s.Value.CodeName)
@@ -2254,8 +2382,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
             placed.UnionWith(sorted.Skip(placed.Count).Select(s => s.Key));
 
-            // 7a. Everything else that is NOT a potion (equipment, weapons, etc.)
-            //     This group comes first in the final section
+            // Everything else that is NOT a potion
             sorted.AddRange(slots
                 .Where(s => !placed.Contains(s.Key) &&
                             !IsHpPotion(s.Value.CodeName) &&
@@ -2263,15 +2390,14 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 .OrderBy(s => s.Value.CodeName)
                 .ThenByDescending(s => s.Value.Stack));
 
-            // 7b. Deferred HP and MP potions (the rest of them)
-            //     These are pushed to the VERY END of the entire inventory
+            // Deferred HP and MP potions
             sorted.AddRange(slots
                 .Where(s => !placed.Contains(s.Key) &&
                             (IsHpPotion(s.Value.CodeName) || IsMpPotion(s.Value.CodeName)))
                 .OrderBy(s => s.Value.CodeName)
                 .ThenByDescending(s => s.Value.Stack));
 
-            // === FINAL MOVE TO TARGET SLOTS ===
+            // Final
             for (int i = 0; i < sorted.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -2354,17 +2480,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 }
             }
         }
-        private static async Task SaveSession(Proxy proxy)
-        {
-            var session = proxy.Session;
-            if (session == null) return;
-
-            Logger.Debug(typeof(Overseer),
-                $"Saving playtime for {session.CharacterName}: {session.AccumulatedPlayTime}");
-
-            // Example DB call
-            await DBConnect.AddPlayTimeAsync(session?.CharacterName, session.AccumulatedPlayTime);
-        }
+        
 
         #endregion
 
@@ -2427,7 +2543,100 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
             return pages;
         }
+        public static async Task CheckLevelUp(Proxy proxy)
+        {
+            var session = proxy.Session;
+            if (session?.PlayerStats == null)
+            {
+                Logger.Warn("LevelTracker", "CheckLevelUp: session or PlayerStats is null");
+                return;
+            }
 
+            while (true)
+            {
+                byte currentLevel;
+                byte nextLevel;
+                ulong threshold;
+                ulong currentExp;
+
+                lock (session)
+                {
+                    currentLevel = (byte)session.PlayerStats.CurrentLevel;
+                    nextLevel = (byte)(currentLevel + 1);
+                    currentExp = session.CumulativeExp;
+
+                    if (!Overseer.ExpTableCumulative.TryGetValue(currentLevel, out threshold))
+                    {
+                        Logger.Warn("LevelTracker", $"CheckLevelUp: no cumulative threshold for level {currentLevel}");
+                        return;
+                    }
+                    Logger.Debug("LevelTracker", $"CheckLevelUp: level={currentLevel} cumExp={currentExp} threshold={threshold}");
+
+                    if (session.CumulativeExp < threshold)
+                    {
+                        Logger.Debug("LevelTracker", $"CheckLevelUp: not enough exp ({currentExp} < {threshold}), done");
+                        return;
+                    }
+
+                    session.PlayerStats.CurrentLevel = nextLevel;
+                }
+
+                bool alreadyClaimed = await DBConnect.HasClaimedLevelRewardAsync(session.CharacterName!, nextLevel);
+                if (alreadyClaimed)
+                {
+                    Logger.Debug("LevelTracker", $"CheckLevelUp: level {nextLevel} already claimed, continuing");
+                    continue;
+                }
+
+                bool claimed = await DBConnect.ClaimLevelRewardAsync(session.CharacterName!, nextLevel);
+                if (!claimed)
+                {
+                    Logger.Debug("LevelTracker", $"CheckLevelUp: claim insert failed for level {nextLevel} (race), continuing");
+                    continue;
+                }
+
+                Logger.Info("LevelTracker", $"{session.CharacterName} reached level {nextLevel}");
+                await OnPlayerLevelUp(proxy, nextLevel);
+            }
+        }
+
+        private static async Task OnPlayerLevelUp(Proxy proxy, byte newLevel)
+        {
+            if (!Overseer.LevelRewardOptions.TryGetValue(newLevel, out var options) || options.Count == 0)
+                return;
+
+            var codeNames = options.Select(o => o.CodeName);
+            var iconPaths = await DBConnect.GetItemIconPaths(codeNames);
+
+            // Debug
+            Logger.Debug("OnPlayerLevelUp", $"Icon paths fetched: {iconPaths.Count} for codes: {string.Join(", ", codeNames)}");
+            foreach (var kvp in iconPaths)
+                Logger.Debug("OnPlayerLevelUp", $"  {kvp.Key} -> {kvp.Value}");
+
+            proxy.Session!.UnclaimedRewards.Add(newLevel);
+            await DBConnect.AddUnclaimedRewardAsync(proxy.Session.CharacterName!, newLevel);
+            proxy.Session!.PendingLevelReward = newLevel;
+
+            DllBridge.Instance.SendToDll(proxy.Session.AccountName!, "level_reward", new
+            {
+                level = newLevel,
+                options = options.Select(o => new {
+                    code = o.CodeName,
+                    plus = o.Plus,
+                    qty = o.Qty,
+                    name = o.DisplayName,
+                    icon = iconPaths.TryGetValue(o.CodeName, out var path)
+                           ? path.Replace(".ddj", ".png").Replace("\\", "/")
+                           : ""
+                }).ToArray()
+            });
+
+            if (proxy.Session.UnclaimedRewards.Count > 0)
+                DllBridge.Instance.SendToDll(proxy.Session.AccountName!, "unclaimed_rewards", new
+                {
+                    levels = proxy.Session.UnclaimedRewards.Select(b => (int)b).ToArray()
+                });
+        }
         #endregion
     }
 }
