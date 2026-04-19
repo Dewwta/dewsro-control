@@ -11,7 +11,7 @@ namespace VSRO_CONTROL_API.Controllers
     {
         public record AddNoticeRequest(string Subject, string Article, int ContentID = 22);
 
-        // GET api/notice?contentId=22  (public – no auth required)
+        // GET api/notice?contentId=22
         [HttpGet]
         [Microsoft.AspNetCore.Authorization.AllowAnonymous]
         public async Task<IActionResult> GetNotices([FromQuery] int contentId = 22)

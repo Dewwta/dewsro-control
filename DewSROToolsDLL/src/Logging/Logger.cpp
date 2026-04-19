@@ -19,7 +19,17 @@ void Logger::Alloc() {
 	freopen_s(&f, "CONOUT$", "w", stderr);
 	freopen_s(&f, "CONIN$", "r", stdin);
 
+
+	fopen_s(&m_logFile, "C:\\DewSROToolkit.log", "w");
+	if (m_logFile) setvbuf(m_logFile, nullptr, _IONBF, 0); // unbuffered
+
+
 	m_isAlloced = true;
+}
+
+void Logger::WriteToFile(const char* level, const std::string& loc, const std::string& msg) {
+	if (!m_logFile) return;
+	fprintf(m_logFile, "[%s] [%s] %s\n", level, loc.c_str(), msg.c_str());
 }
 
 void Logger::ToggleState() {
@@ -34,10 +44,9 @@ void Logger::SetState(bool enabled) {
 	ShowWindow(m_consoleHwnd, m_state ? SW_SHOW : SW_HIDE);
 }
 
-//Unsure but most my loggers are sync with a lock object, might be needed here because of socket operations logging?
 void Logger::Info(std::string loc, std::string msg) {
 	std::lock_guard<std::mutex> lock(m_logMutex);
-
+	WriteToFile("INFO", loc, msg);
 	SetConsoleTextAttribute(m_consoleHandle,
 		FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
 
@@ -48,7 +57,7 @@ void Logger::Info(std::string loc, std::string msg) {
 
 void Logger::Warn(std::string loc, std::string msg) {
 	std::lock_guard<std::mutex> lock(m_logMutex);
-
+	WriteToFile("WARN", loc, msg);
 	SetConsoleTextAttribute(m_consoleHandle,
 		FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
 
@@ -59,7 +68,7 @@ void Logger::Warn(std::string loc, std::string msg) {
 
 void Logger::Err(std::string loc, std::string msg) {
 	std::lock_guard<std::mutex> lock(m_logMutex);
-
+	WriteToFile("ERR", loc, msg);
 	SetConsoleTextAttribute(m_consoleHandle,
 		FOREGROUND_RED | FOREGROUND_INTENSITY);
 
@@ -70,7 +79,7 @@ void Logger::Err(std::string loc, std::string msg) {
 
 void Logger::Dbg(std::string loc, std::string msg) {
 	std::lock_guard<std::mutex> lock(m_logMutex);
-
+	WriteToFile("DBG", loc, msg);
 	SetConsoleTextAttribute(m_consoleHandle,
 		FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 
@@ -80,6 +89,6 @@ void Logger::Dbg(std::string loc, std::string msg) {
 }
 
 Logger& GetLogger() {
-	static Logger instance; // constructed once, thread-safe in C++11+
+	static Logger instance;
 	return instance;
 }

@@ -15,6 +15,14 @@ void DllBridge::SetIdentity(const std::string& username) {
     m_username = username;
 }
 
+void DllBridge::Reconnect(const std::string& username) {
+    m_connected = false;
+    m_started.store(false);
+
+    SetIdentity(username);
+    Connect();
+}
+
 void DllBridge::Connect() {
     if (m_username.empty()) return;
     if (m_started.exchange(true)) return;
@@ -63,7 +71,7 @@ void DllBridge::RunLoop() {
         }
         DWORD timeout = 1000; // 1000ms = 1 second
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
-        // this would also send the password in prod, not right now.
+        // this would also send the password in prod, not right now. im way too lazy
         Send("{\"type\":\"auth\",\"user\":\"" + m_username + "\"}");
         log.Info("DllBridge::RunLoop", "Sent user auth, waiting for ack...");
         m_connected = true;
@@ -96,7 +104,7 @@ void DllBridge::RunLoop() {
                 }
             }
             else if (bytes == 0) {
-                // Proxy closed the connection gracefully
+                // Proxy closed the connection
                 log.Err("DllBridge::Parse", "Client closed the connection");
                 m_connected = false;
                 
@@ -105,11 +113,11 @@ void DllBridge::RunLoop() {
                 // bytes are negative
                 int err = WSAGetLastError();
                 if (err != WSAETIMEDOUT) {
-                    // It's a real error (WSAECONNRESET), kill the loop to reconnect
+                    // it a real error -WSAECONNRESET-, kill the loop to reconnect
 
                     m_connected = false;
                 }
-                // If it IS WSAETIMEDOUT, do nothing
+                // if its WSAETIMEDOUT, do nothing
             }
         }
 
@@ -176,4 +184,11 @@ void DllBridge::Dispatch(const std::string& json) {
 
 void DllBridge::RegisterHandler(const std::string& type, BridgeHandler handler) {
     m_handlers[type] = handler;
+}
+
+
+void DllBridge::ClearSession() {
+    m_state = PlayerState{};
+    m_sessionState = State{};
+    unclaimedRewards.clear();
 }

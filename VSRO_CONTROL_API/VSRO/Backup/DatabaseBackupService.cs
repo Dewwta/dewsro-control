@@ -27,7 +27,6 @@ namespace VSRO_CONTROL_API.VSRO.Backup
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            // Small delay so the app is fully ready before the first auto-backup
             await Task.Delay(TimeSpan.FromMinutes(2), stoppingToken).ConfigureAwait(false);
 
             while (!stoppingToken.IsCancellationRequested)
@@ -108,7 +107,7 @@ namespace VSRO_CONTROL_API.VSRO.Backup
         {
             var settings   = SettingsLoader.Settings;
             var backupPath = settings?.Backup?.BackupPath ?? "";
-            var dbList     = (settings?.Backup?.BackupDatabases ?? "SRO_VT_ACCOUNT,SRO_VT_SHARD,SRO_VT_LOG")
+            var dbList     = (settings?.Backup?.BackupDatabases ?? "SRO_VT_ACCOUNT,SRO_VT_SHARD,SRO_VT_LOG,SRO_VT_PROXY")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
             var files = new List<BackupFileInfo>();

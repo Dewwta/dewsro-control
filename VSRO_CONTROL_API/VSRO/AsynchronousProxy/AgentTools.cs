@@ -44,25 +44,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
         #endregion
 
         public static HashSet<int> _regionIds = new HashSet<int>();
-        private static Dictionary<byte, List<short>> _regionsByMarker = new Dictionary<byte, List<short>>();
-
-        public static void BuildRegionIndex(IEnumerable<short> _regionIds)
-        {
-            _regionsByMarker.Clear();
-
-            foreach (var regionId in _regionIds)
-            {
-                byte marker = (byte)(regionId & 0xFF);
-
-                if (!_regionsByMarker.TryGetValue(marker, out var list))
-                {
-                    list = new List<short>();
-                    _regionsByMarker[marker] = list;
-                }
-
-                list.Add(regionId);
-            }
-        }
+        
         public static async Task Init()
         {
             try
@@ -146,6 +128,63 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 };
 
                 Logger.Info(typeof(Overseer), $"Player logged in: {e.Proxy.Session.CharacterName}");
+            });
+        }
+        
+        /// <summary>
+        /// Registers player logout handler.
+        /// Sends disconnect info to dll client.
+        /// </summary>
+        /// <param name="_agentProxy">Proxy object to act upon</param>
+        public static void RegisterPlayerLogoutHandler(Server _agentProxy)
+        {
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_COUNTDOWN, async (sender, e) =>
+            {
+                var proxy = e.Proxy;
+                var session = proxy.Session;
+                if (proxy.Session != null)
+                {
+                    DllBridge.Instance.SendToDll(session.AccountName!, "session_clear", new { });
+                }
+            });
+
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_COUNTDOWN_INTERRUPT, async (sender, e) =>
+            {
+                var proxy = e.Proxy;
+                var session = proxy.Session;
+                if (proxy.Session != null)
+                {
+                    DllBridge.Instance.SendToDll(session.AccountName!, "session_init", new
+                    {
+                        charName = session.CharacterName,
+                        jid = session.JID,
+                        accName = session.AccountName
+                    });
+
+                    DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "session_sync", new
+                    {
+                        sessionSeconds = (int)e.Proxy.Session.AccumulatedPlayTime.TotalSeconds,
+                        sessionKills = e.Proxy.Session.SessionKills,
+                        isAfk = e.Proxy.Session.IsAfk ? 1 : 0  // int not bool
+                    });
+
+                    DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "unclaimed_rewards", new
+                    {
+                        levels = e.Proxy.Session.UnclaimedRewards.Select(b => (int)b).ToArray()
+                    });
+
+                    var payload = new
+                    {
+                        hp = e.Proxy.Session.PlayerStats.CurrentHP,
+                        mp = e.Proxy.Session.PlayerStats.CurrentMP,
+                        sessionKills = e.Proxy.Session.SessionKills,
+                        unusedStatPoints = e.Proxy.Session.PlayerStats.UnusedStatPoints,
+                        currentLevel = e.Proxy.Session.PlayerStats.CurrentLevel,
+                        gold = e.Proxy.Session.PlayerStats.RemainingGold,
+                    };
+                    DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "char_init", payload);
+
+                }
             });
         }
         

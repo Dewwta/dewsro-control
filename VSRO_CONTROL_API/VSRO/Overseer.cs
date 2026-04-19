@@ -1072,6 +1072,7 @@ namespace VSRO_CONTROL_API.VSRO
                         if (session != null && !string.IsNullOrEmpty(session.CharacterName))
                         {
                             DllBridge.Instance.RemoveClient(session.AccountName!);
+                            
                             await DBConnect.AddPlayTimeAsync(session.CharacterName, session.AccumulatedPlayTime);
                             session.AccumulatedPlayTime = TimeSpan.Zero; // prevent double-save safety net
 
@@ -1138,6 +1139,7 @@ namespace VSRO_CONTROL_API.VSRO
             AgentTools.RegisterSpawnTrackerImproved(AgentProxy);
             AgentTools.RegisterTargetTracker(AgentProxy);
             AgentTools.RegisterCharacterUIDTracker(AgentProxy);
+            AgentTools.RegisterPlayerLogoutHandler(AgentProxy);
 
             // Character Inventories
             PlayerTools.RegisterChatCommandHandler(AgentProxy);

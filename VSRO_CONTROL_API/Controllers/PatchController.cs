@@ -192,8 +192,6 @@ namespace VSRO_CONTROL_API.Controllers
             return result.Success ? Ok(new { message = result.Message }) : BadRequest(new { message = result.Message });
         }
 
-        // ── Node INI (Cert Server) ────────────────────────────────────────────────
-
         private NodeIniHelper? GetNodeIniHelper(out IActionResult? error)
         {
             error = null;
@@ -265,7 +263,6 @@ namespace VSRO_CONTROL_API.Controllers
             return Ok(new { message = $"INI files patched successfully.{compileMsg}" });
         }
 
-        // Reuse the PE parsing logic from GameServerPatcher
         private static long CalculateVAToFileOffset(string exePath)
         {
             using var fs = new FileStream(exePath, FileMode.Open, FileAccess.Read);

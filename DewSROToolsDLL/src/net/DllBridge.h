@@ -46,7 +46,8 @@ public:
     State m_sessionState;
     std::function<void(const std::string& type, const std::string& json)> OnEvent;
     std::vector<int> unclaimedRewards;
-
+    void ClearSession();
+    void Reconnect(const std::string& username);
     void SetIdentity(const std::string& username);
     void Connect();
     void Send(const std::string& msg);

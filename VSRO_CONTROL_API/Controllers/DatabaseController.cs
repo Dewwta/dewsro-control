@@ -12,8 +12,6 @@ namespace VSRO_CONTROL_API.Controllers
     {
         public record QueryRequest(string Sql);
 
-        // ── Saved queries storage ─────────────────────────────────────────────
-
         private static readonly string _savedQueriesPath =
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "configs", "saved-queries.json");
 

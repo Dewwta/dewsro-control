@@ -30,8 +30,6 @@ namespace VSRO_CONTROL_API.Controllers
             {
                 search = search.Trim();
 
-                // Build display-name map if the textdata file is configured, so users can
-                // search by either code name ("QNO_CH_SMITH_1") or display name ("Weapon Dealer").
                 Dictionary<string, string>? nameMap = null;
                 string? refPath = settings.QuestTextdataReferencePath;
                 if (!string.IsNullOrWhiteSpace(refPath) && System.IO.File.Exists(refPath))
@@ -85,10 +83,6 @@ namespace VSRO_CONTROL_API.Controllers
             if (body?.Missions == null || body.Missions.Count == 0)
                 return BadRequest(new { message = "No missions provided." });
 
-            // Parse BEFORE updating so we have the exact SN codes from the Lua for textdata sync.
-            // The SN code is embedded directly in each LuaSetMissionData call and is the authoritative
-            // textdata key — do NOT derive it from the quest name, as single-mission quests omit the
-            // index suffix (e.g. "SN_CON_QNO_CH_SMITH_2" not "SN_CON_QNO_CH_SMITH_2_01").
             var parsed = QuestParser.ParseFile(
                 System.IO.Path.Combine(settings.QuestLuaRootPath, "Quest", $"@SN_{questName}.lua"));
             if (parsed == null)
@@ -101,7 +95,6 @@ namespace VSRO_CONTROL_API.Controllers
             if (!ok)
                 return NotFound(new { message = $"Quest file for '{questName}' not found." });
 
-            // Update textdata counts using the SN code extracted directly from the Lua
             string textdataStatus = "";
             string? refPath = settings.QuestTextdataReferencePath;
 

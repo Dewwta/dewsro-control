@@ -59,7 +59,6 @@
             0x70, 0x00, 0x74, 0x00,
         };
 
-        // and here, we, go
         public static void Encrypt(string path)
         {
             try

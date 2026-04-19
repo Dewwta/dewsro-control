@@ -60,7 +60,7 @@ namespace VSRO_CONTROL_API.Controllers
         }
 
         // GET api/live/sessions/{connectionId}/inventory
-        // Returns full inventory (equipment + bag + pets) with display names and icon URLs.
+        // Returns full inventory with display names and icon URLs.
         [HttpGet("sessions/{connectionId:int}/inventory")]
         public async Task<IActionResult> GetInventory(int connectionId)
         {
@@ -72,7 +72,7 @@ namespace VSRO_CONTROL_API.Controllers
 
             var inv = proxy.Inventory;
 
-            // Collect every unique code name so we can batch-query icon paths
+            // collect every unique code name to batch-query icon paths
             var allCodeNames = inv.Equipment.Values.Select(v => v.CodeName)
                 .Concat(inv.Slots.Values.Select(v => v.CodeName))
                 .Concat(inv.Pets.Values
@@ -124,8 +124,6 @@ namespace VSRO_CONTROL_API.Controllers
 
             return Ok(dto);
         }
-
-        // ── Helpers ────────────────────────────────────────────────────────────
 
         private static LiveInventoryItemDTO BuildItem(
             byte slot,

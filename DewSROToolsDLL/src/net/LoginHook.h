@@ -13,16 +13,12 @@ static bool __fastcall hk_Login(void* thisPtr, void* edx,
 {
     auto& log = GetLogger();
     if (username) {
-        g_bridge.SetIdentity(username);
-        g_bridge.Connect();
-        LPCSTR connMsg = "Connecting with ";
-        std::string msg = std::string(connMsg).append(username).c_str();
-        log.Info("login_hook", msg);
+        log.Info("login_hook", std::string("Connecting with ").append(username));
+        g_bridge.Reconnect(username);
     }
     else {
         log.Err("login_hook", "Couldn't retrieve username for dll bridge connection!");
     }
-
     return o_Login(thisPtr, username, password, shardId, a5);
 }
 

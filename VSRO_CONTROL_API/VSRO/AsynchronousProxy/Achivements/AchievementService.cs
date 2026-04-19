@@ -98,7 +98,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
     }
 
     /// <summary>
-    /// DTO for API responses — merges definition + progress.
+    /// DTO for API responses
     /// </summary>
     public class AchievementStatus
     {

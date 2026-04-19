@@ -4,7 +4,7 @@
 #include <cstddef>
 
 #define CLASSLINK_LOOP_BEGIN(cls) \
-    for (CClassLink<cls>::s->cursor = CClassLink<cls>::s->begin; CClassLink<cls>::s->cursor != 0; /* no auto increment */) { \
+    for (CClassLink<cls>::s->cursor = CClassLink<cls>::s->begin; CClassLink<cls>::s->cursor != 0;) { \
         cls *obj = CClassLink<cls>::s->cursor->container();
 
 

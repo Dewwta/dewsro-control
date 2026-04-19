@@ -13,8 +13,6 @@ namespace VSRO_CONTROL_API.Controllers
         private static readonly string ManifestPath = Path.Combine(ClientsDir, "manifest.json");
         private const int MaxClients = 5;
 
-        // ── Upload ────────────────────────────────────────────────────────────
-
         [HttpPost("upload")]
         [DisableRequestSizeLimit]
         [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
@@ -26,7 +24,6 @@ namespace VSRO_CONTROL_API.Controllers
             if (string.IsNullOrWhiteSpace(version))
                 return BadRequest(new { message = "Version string is required." });
 
-            // Strip anything that could escape the clients directory
             var safeVersion = version.Trim()
                 .Replace(" ", "").Replace("/", "").Replace("\\", "")
                 .Replace("..", "").Replace(":", "");
@@ -69,8 +66,6 @@ namespace VSRO_CONTROL_API.Controllers
             return Ok(new { message = $"Client v{safeVersion} uploaded successfully.", fileName });
         }
 
-        // ── Latest (public) ───────────────────────────────────────────────────
-
         [HttpGet("latest")]
         public IActionResult GetLatest()
         {
@@ -83,8 +78,6 @@ namespace VSRO_CONTROL_API.Controllers
             return Ok(BuildEntry(latest));
         }
 
-        // ── List (admin) ──────────────────────────────────────────────────────
-
         [RequireAdmin]
         [HttpGet("list")]
         public IActionResult List()
@@ -92,8 +85,6 @@ namespace VSRO_CONTROL_API.Controllers
             var manifest = LoadManifest().OrderByDescending(e => e.UploadedAt);
             return Ok(manifest.Select(BuildEntry));
         }
-
-        // ── Delete (admin) ────────────────────────────────────────────────────
 
         [RequireAdmin]
         [HttpDelete("{fileName}")]
@@ -116,8 +107,6 @@ namespace VSRO_CONTROL_API.Controllers
             return Ok(new { message = $"Client v{entry.Version} deleted." });
         }
 
-        // ── Download (requires login, supports range / resume) ───────────────
-
         [RequireAuth]
         [HttpGet("download/{fileName}")]
         public IActionResult Download(string fileName)
@@ -130,8 +119,6 @@ namespace VSRO_CONTROL_API.Controllers
 
             return PhysicalFile(filePath, "application/zip", safe, enableRangeProcessing: true);
         }
-
-        // ── Helpers ───────────────────────────────────────────────────────────
 
         private object BuildEntry(ClientEntry e) => new
         {

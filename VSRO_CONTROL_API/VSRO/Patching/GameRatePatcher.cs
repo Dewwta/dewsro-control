@@ -19,10 +19,9 @@
             using var fs = new FileStream(_gamePath, FileMode.Open, FileAccess.ReadWrite);
 
             ApplyFloatPatch(fs, 0x860C80, expRate, "EXP_RATE");
-            ApplyFloatPatch(fs, 0x860C84, spRate, "SP_RATE"); // example offset
+            ApplyFloatPatch(fs, 0x860C84, spRate, "SP_RATE");
         }
 
-        // CORE PATCH METHOD (SAFE + IDEMPOTENT)
         private void ApplyFloatPatch(FileStream fs, long offset, float value, string label)
         {
             byte[] newBytes = BitConverter.GetBytes(value);
@@ -32,14 +31,12 @@
             byte[] currentBytes = new byte[4];
             fs.Read(currentBytes, 0, 4);
 
-            // ✔️ IDENTITY CHECK (prevents double patch side effects)
             if (AreEqual(currentBytes, newBytes))
             {
                 Console.WriteLine($"[SKIP] {label} already patched.");
                 return;
             }
 
-            // backup original once
             if (!_originalBackup.ContainsKey(offset))
             {
                 _originalBackup[offset] = currentBytes;
@@ -51,7 +48,6 @@
             Console.WriteLine($"[OK] Patched {label} → {value}");
         }
 
-        // RESTORE ORIGINALS (optional but VERY useful)
         public void Restore()
         {
             using var fs = new FileStream(_gamePath, FileMode.Open, FileAccess.Write);

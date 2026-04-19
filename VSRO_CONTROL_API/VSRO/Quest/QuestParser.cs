@@ -13,7 +13,7 @@ namespace VSRO_CONTROL_API.VSRO.Quest
     {
         public int    MissionIndex { get; set; }
         public string Type         { get; set; } = ""; // "Kill" | "Gather"
-        public string SnCode       { get; set; } = ""; // e.g. SN_CON_QNO_CH_GENARAL_3_01
+        public string SnCode       { get; set; } = ""; // SN_CON_QNO_CH_GENARAL_3_01
 
         // Kill fields
         public string? MonsterName  { get; set; }
@@ -32,8 +32,6 @@ namespace VSRO_CONTROL_API.VSRO.Quest
         public string           FileName  { get; set; } = "";
         public List<QuestMission> Missions { get; set; } = new();
     }
-
-    // ── Update request types ──────────────────────────────────────────────────
 
     public class MobDropUpdate
     {
@@ -55,9 +53,6 @@ namespace VSRO_CONTROL_API.VSRO.Quest
 
     public static class QuestParser
     {
-        // LuaSetMissionData[_EX](QUESTID, idx, MISSION_TYPE_KILL_MONSTER, "SN_...", 1, "MOB_NAME", 1, CLASS, COUNT, ...)
-        // _EX is optional — some quests use LuaSetMissionData, others use LuaSetMissionData_EX
-        // Groups: (1)idx  (2)snCode  (3)mobName  (4)class  (5)killCount
         private static readonly Regex KillRx = new(
             @"LuaSetMissionData(?:_EX)?\(\s*QUESTID\s*,\s*(\d+)\s*,\s*MISSION_TYPE_KILL_MONSTER\s*," +
             @"\s*""([^""]+)""\s*,\s*\d+\s*,\s*""([^""]+)""\s*,\s*\d+\s*,\s*(\w+)\s*,\s*(\d+)",
@@ -65,7 +60,7 @@ namespace VSRO_CONTROL_API.VSRO.Quest
 
         // LuaSetCollectionItemMissionData[_EX](QUESTID, idx, MISSION_TYPE_GATHER_ITEM_FROM_MONSTER,
         //   "SN_...", N, "NPC_...", 1, COUNT, "ITEM_...", "MOB_A", CHANCE, "MOB_B", CHANCE ...)
-        // _EX is optional — some quests omit it
+        // _EX is optional
         // Groups: (1)idx  (2)snCode  (3)collectCount  (4)itemName  (5)mobTail
         private static readonly Regex GatherRx = new(
             @"LuaSetCollectionItemMissionData(?:_EX)?\(\s*QUESTID\s*,\s*(\d+)\s*,\s*MISSION_TYPE_GATHER_ITEM_FROM_MONSTER\s*," +
@@ -76,8 +71,6 @@ namespace VSRO_CONTROL_API.VSRO.Quest
         private static readonly Regex MobPairRx = new(
             @"""([^""]+)""\s*,\s*(\d+(?:\.\d+)?)",
             RegexOptions.Compiled);
-
-        // ── Public API ────────────────────────────────────────────────────────
 
         /// <summary>
         /// Parses all quest lua files in the Quest subdirectory of questLuaRoot.
@@ -196,8 +189,6 @@ namespace VSRO_CONTROL_API.VSRO.Quest
             return true;
         }
 
-        // ── Private helpers ───────────────────────────────────────────────────
-
         private static string ExtractQuestName(string content, string fileName)
         {
             // Try to extract from: QUESTID = LuaGetQuestID("QUEST_NAME")
@@ -213,7 +204,6 @@ namespace VSRO_CONTROL_API.VSRO.Quest
         private static string FindFilePath(string questLuaRoot, string questName)
         {
             string questDir = Path.Combine(questLuaRoot, "Quest");
-            // Try exact match: @SN_{questName}.lua
             string candidate = Path.Combine(questDir, $"@SN_{questName}.lua");
             if (File.Exists(candidate)) return candidate;
 
@@ -230,8 +220,7 @@ namespace VSRO_CONTROL_API.VSRO.Quest
 
         private static string ApplyKillCount(string content, int missionIndex, int newCount)
         {
-            // Matches both LuaSetMissionData and LuaSetMissionData_EX.
-            // Trailing group captures one or more ", arg" pairs to the closing paren,
+            // trailing group captures one or more ", arg" pairs to the closing paren,
             // handling both ", 1, 1)" (_EX) and ", 0)" (non-EX) endings.
             var rx = new Regex(
                 $@"(LuaSetMissionData(?:_EX)?\(\s*QUESTID\s*,\s*{missionIndex}\s*,\s*MISSION_TYPE_KILL_MONSTER\s*," +

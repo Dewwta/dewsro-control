@@ -26,15 +26,15 @@ void RewardWindow::Render() {
         + 8.0f
         + 1.0f            // separator
         + 8.0f
-        + SLOT_H          // icon row (no labels)
+        + SLOT_H          // icon row
         + 10.0f           // spacing before sep
         + 1.0f            // separator
         + 8.0f
-        + 20.0f           // selected-name line (always reserved)
+        + 20.0f           // selected-name line
         + 6.0f
-        + CLAIM_BTN_H     // Claim Reward (shown or greyed)
+        + CLAIM_BTN_H     // claim Reward
         + 4.0f
-        + CLAIM_BTN_H     // Claim Later  (always)
+        + CLAIM_BTN_H     // claim Later
         + 24.0f;          // bottom pad
 
     ImGuiIO& io = ImGui::GetIO();
@@ -58,7 +58,6 @@ void RewardWindow::Render() {
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
-    // ── Header ────────────────────────────────────────────────────────────
     ImGui::Spacing();
     ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f),
         "Congratulations! You reached level %d!", level);
@@ -68,7 +67,6 @@ void RewardWindow::Render() {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // ── Slot row ──────────────────────────────────────────────────────────
     const float rowStartY = ImGui::GetCursorScreenPos().y;
     const float rowStartX = ImGui::GetCursorScreenPos().x;
 
@@ -93,7 +91,7 @@ void RewardWindow::Render() {
             dl->AddRect(slotTL, slotBR, IM_COL32(60, 70, 90, 180), 4.0f, 0, 1.0f);
         }
 
-        // Icon / placeholder
+        // icon / placeholder
         if (hasItem) {
             IDirect3DTexture9* tex = GetIcon(options[i].icon);
             SealType seal = GetSealType(options[i].code);
@@ -118,7 +116,6 @@ void RewardWindow::Render() {
                 IM_COL32(55, 60, 75, 200), glyph);
         }
 
-        // Click/hover button
         ImGui::SetCursorScreenPos(slotTL);
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1, 1, 1, hasItem ? 0.07f : 0.0f));
@@ -127,7 +124,6 @@ void RewardWindow::Render() {
         bool clicked = ImGui::Button(btnId, ImVec2(SLOT_W, SLOT_H));
         ImGui::PopStyleColor(3);
 
-        // Record the click index — don't mutate selectedIndex yet
         if (clicked && hasItem)
             clickedIndex = i;
 
@@ -165,10 +161,9 @@ void RewardWindow::Render() {
     // recompute after mutation
     const bool hasSelection = (selectedIndex >= 0 && selectedIndex < (int)options.size());
 
-    // Advance cursor past slot row
     ImGui::SetCursorScreenPos(ImVec2(rowStartX, rowStartY + SLOT_H));
 
-    // Bottom Bar
+    // bottom Bar
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
@@ -191,8 +186,8 @@ void RewardWindow::Render() {
     ImGui::Spacing();
 
     const float btnW = (WIN_W - WIN_PADDING * 2.0f - 4.0f) * 0.5f;
-
-    // Claim Reward — only enabled when something is selected
+    
+    // Claim
     if (!hasSelection) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.30f, 0.10f, 0.4f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.10f, 0.30f, 0.10f, 0.4f));

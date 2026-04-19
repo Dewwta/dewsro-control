@@ -18,7 +18,6 @@ namespace VSRO_CONTROL_API.VSRO.Quest
         {
             if (!File.Exists(referencePath)) return false;
 
-            // Auto-detect encoding from BOM — VSRO textdata is often UTF-16LE
             Encoding enc;
             string   content;
             using (var sr = new StreamReader(referencePath, Encoding.GetEncoding(1252), detectEncodingFromByteOrderMarks: true))
@@ -27,9 +26,6 @@ namespace VSRO_CONTROL_API.VSRO.Quest
                 enc     = sr.CurrentEncoding;
             }
 
-            // Handles both:  "Collect 2 Item (%d)"  and  "2 Item (%d)"  (no leading verb)
-            // No trailing $ — file uses \r\n and $ in multiline mode matches before \n,
-            // but [^\r\n]+ stops before \r leaving a gap, so $ never matches on Windows line endings.
             var rx = new Regex(
                 $@"^(1\t{Regex.Escape(snCode)}\t+(?:[A-Za-z]+[ \t]+)?)(\d+)([ \t][^\r\n]+)",
                 RegexOptions.Multiline);

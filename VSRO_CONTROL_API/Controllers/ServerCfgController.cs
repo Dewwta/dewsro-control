@@ -12,7 +12,7 @@ namespace VSRO_CONTROL_API.Controllers
         private static readonly string GameBlock  = "SR_GameServer";
         private static readonly string ShardBlock = "SR_ShardManager";
 
-        // GET api/server-cfg/rates — public, used by the about page
+        // GET api/server-cfg/rates
         [AllowAnonymous]
         [HttpGet("rates")]
         public IActionResult GetRates()
@@ -32,7 +32,7 @@ namespace VSRO_CONTROL_API.Controllers
             ));
         }
 
-        // PUT api/server-cfg/rates — admin only, writes back to server.cfg
+        // PUT api/server-cfg/rates — admin only
         [RequireAdmin]
         [HttpPut("rates")]
         public async Task<IActionResult> UpdateRates([FromBody] ServerRates req)
@@ -62,7 +62,7 @@ namespace VSRO_CONTROL_API.Controllers
             }
         }
 
-        // PUT api/server-cfg/certification-ip — admin only, updates all Certification IPs
+        // PUT api/server-cfg/certification-ip
         [RequireAdmin]
         [HttpPut("certification-ip")]
         public async Task<IActionResult> UpdateCertificationIP([FromBody] UpdateIpRequest req)

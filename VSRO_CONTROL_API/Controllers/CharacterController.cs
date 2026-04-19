@@ -88,8 +88,6 @@ namespace VSRO_CONTROL_API.Controllers
             return Ok(snapshot);
         }
 
-        // ── Helpers ───────────────────────────────────────────────────────────
-
         /// <summary>
         /// Builds a CharacterSnapshot from a live proxy connection.
         /// SavedAt is set to UtcNow to signal this is a real-time reading.

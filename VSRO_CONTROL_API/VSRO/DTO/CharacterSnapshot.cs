@@ -24,10 +24,10 @@ namespace VSRO_CONTROL_API.VSRO.DTO
         public ulong Gold { get; set; }
         public uint SkillPoints { get; set; }
 
-        // Inventory (slot index -> item)
+
         public Dictionary<byte, SnapshotItem> Equipment { get; set; } = new();
         public Dictionary<byte, SnapshotItem> Slots { get; set; } = new();
-        // Pet UID (hex string) -> slot index -> item
+
         public Dictionary<string, Dictionary<byte, SnapshotItem>> Pets { get; set; } = new();
     }
 

@@ -8,15 +8,12 @@ using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Enums;
 using VSRO_CONTROL_API.VSRO.Tools;
 
-
 namespace VSRO_CONTROL_API.VSRO
 {
-
     public static class DBConnect
     {
         #region - Properties - 
 
-        // Not real - Test credentials.
         private static string _connectionString = string.Empty;
 
         /// <summary>Returns an unopened SqlConnection using the configured credentials, targeting the specified catalog.</summary>
@@ -180,7 +177,6 @@ namespace VSRO_CONTROL_API.VSRO
 
                     using (SqlCommand cmd = new SqlCommand(Constant.GetItemCodeNameByRefId_q, conn))
                     {
-                        // FIX: Cast the uint to a standard int so SQL Server accepts it
                         cmd.Parameters.AddWithValue("@ItemID", (int)_refItemId);
 
                         var result = await cmd.ExecuteScalarAsync();
@@ -224,7 +220,6 @@ namespace VSRO_CONTROL_API.VSRO
                                 T3 = Convert.ToByte(reader["TypeID3"]),
                                 T4 = Convert.ToByte(reader["TypeID4"]),
 
-                                // NOTE: assuming you added this field to your class
                                 MaxStack = reader["MaxStack"] != DBNull.Value
                                     ? Convert.ToUInt16(reader["MaxStack"]) // Use UInt16 (ushort)
                                     : (ushort)1
@@ -336,17 +331,17 @@ namespace VSRO_CONTROL_API.VSRO
             {
                 using (SqlConnection conn = new SqlConnection(_connectionString))
                 {
-                    await conn.OpenAsync(); // Open connection asynchronously
+                    await conn.OpenAsync();
 
                     using (SqlCommand cmd = new SqlCommand(Constant.GetItemDurability_q, conn))
                     {
                         cmd.Parameters.AddWithValue("@ITEMCODE", _itemCodeName);
 
-                        using (SqlDataReader reader = await cmd.ExecuteReaderAsync()) // Execute asynchronously
+                        using (SqlDataReader reader = await cmd.ExecuteReaderAsync()) 
                         {
-                            while (await reader.ReadAsync()) // Read each row asynchronously
+                            while (await reader.ReadAsync())
                             {
-                                // Add data to the temporary list
+                                
 #pragma warning disable CS8620 // Argument cannot be used for parameter due to differences in the nullability of reference types.
                                 items.Add((reader["CodeName128"].ToString(),
                                            reader["Dur_L"].ToString(),
@@ -487,8 +482,6 @@ namespace VSRO_CONTROL_API.VSRO
                 using (SqlConnection conn = new SqlConnection(_connectionString))
                 {
                     await conn.OpenAsync();
-
-                    
 
                     using (SqlCommand cmd = new SqlCommand(Constant.GetAccountJIDByCharName_q, conn))
                     {
@@ -672,8 +665,6 @@ namespace VSRO_CONTROL_API.VSRO
                 return (false, null, msg);
             }
         }
-
-
 
         public static async Task<(bool success, LoginResponseObject? obj, string reason)> AuthenticateUserAccount(string _username, string _password)
         {
@@ -986,8 +977,6 @@ namespace VSRO_CONTROL_API.VSRO
 
         #region - Achievements -
 
-        // --- Achievements ---
-
         public static async Task<bool> InitAchievementTable()
         {
             try
@@ -1008,7 +997,6 @@ namespace VSRO_CONTROL_API.VSRO
                 return false;
             }
         }
-
         public static async Task<(long progress, bool completed)> GetAchievementProgress(
             string charName, string achievementName)
         {
@@ -1041,7 +1029,6 @@ namespace VSRO_CONTROL_API.VSRO
                 return (0, false);
             }
         }
-
         public static async Task<List<(string name, long progress, bool completed, DateTime? completedAt)>>
             GetAllAchievementsForChar(string charName)
         {
@@ -1250,7 +1237,6 @@ namespace VSRO_CONTROL_API.VSRO
                         affectedRows = await cmd.ExecuteNonQueryAsync();
 
                     }
-                    // Use the reason field to send the contents back here.
                     return (affectedRows > 0, message);
                 }
             }
@@ -1725,10 +1711,8 @@ namespace VSRO_CONTROL_API.VSRO
                         cmd.Parameters.AddWithValue("@szIPEnd", ip);
                         cmd.Parameters.AddWithValue("@szGM", szGM ? "Yes" : "No");
 
-                        // since it's NOT NULL, you MUST provide it
                         cmd.Parameters.AddWithValue("@dIssueDate", DateTime.Now);
 
-                        // nullable column → safe to pass DBNull
                         cmd.Parameters.AddWithValue("@szISP", DBNull.Value);
 
                         int affectedRows = await cmd.ExecuteNonQueryAsync();
@@ -1775,7 +1759,7 @@ namespace VSRO_CONTROL_API.VSRO
                             return (false, msg);
                         }
 
-                        msg = $"Updated region '{areaName}' → {(enabled ? "Enabled" : "Disabled")}";
+                        msg = $"Updated region '{areaName}' -> {(enabled ? "Enabled" : "Disabled")}";
                         Logger.Info(typeof(DBConnect), msg);
                         return (true, msg);
                     }
@@ -1977,7 +1961,6 @@ namespace VSRO_CONTROL_API.VSRO
 
         #region - Textdata Generate -
 
-        // ALL TEXTDATA LOGIC INCLUDING GETTERS SHOULD BE HERE
         public static async Task<(bool success, string reason)> DumpAllData()
         {
             TextdataGenerationRunning = true;
@@ -2384,7 +2367,6 @@ namespace VSRO_CONTROL_API.VSRO
 
                 if (reader.FieldCount == 0)
                 {
-                    // Non-SELECT (INSERT/UPDATE/DELETE) — reader won't have rows
                     int affected = reader.RecordsAffected;
                     return new QueryResult([], [], affected, null);
                 }
@@ -2566,7 +2548,6 @@ namespace VSRO_CONTROL_API.VSRO
             var list = codeNames.Where(c => !string.IsNullOrEmpty(c)).Distinct().ToList();
             if (list.Count == 0) return result;
 
-            // Build parameterised IN-list
             var paramNames = list.Select((_, i) => $"@p{i}").ToList();
             string sql = string.Format(Constant.GetItemIconPaths_q, string.Join(",", paramNames));
 

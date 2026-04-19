@@ -37,7 +37,7 @@ struct RewardWindow
         if (Contains(code, "_A_RARE")) return SealType::Star;
         if (Contains(code, "_B_RARE")) return SealType::Moon;
         if (Contains(code, "_C_RARE")) return SealType::Sun;
-        return SealType::None; // has RARE but no A/B/C — edge case
+        return SealType::None;
     }
 
     IDirect3DTexture9* GetIcon(const std::string& path) {
@@ -49,7 +49,7 @@ struct RewardWindow
         std::string fullPath = "icon/" + path;
         IDirect3DTexture9* tex = nullptr;
         D3DXCreateTextureFromFileA(device, fullPath.c_str(), &tex);
-        iconCache[path] = tex; // cache even if null so we don't retry
+        iconCache[path] = tex;
         return tex;
     }
 

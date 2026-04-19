@@ -4,46 +4,45 @@
 		<Count>20</Count>
 		<MonsterCodeName>MOB_CH_BANDIT</MonsterCodeName>
 	</Achievement>
-	
+
 	<!-- MONSTER HUNTER ACH:01 -->
-	 
-	<Achievement name="Monster Hunter Lvl 1" desc="Kill 500 monsters" type="kill">
-		<Count>500</Count>
+
+	<Achievement name="Monster Hunter Lvl 1" desc="Kill 100 monsters" type="kill">
+		<Count>100</Count>
 		<!-- Overall -->
 	</Achievement>
 
-	<Achievement name="Monster Hunter Lvl 2" desc="Kill 2,000 monsters" type="kill">
-		<Count>2000</Count>
+	<Achievement name="Monster Hunter Lvl 2" desc="Kill 1,000 monsters" type="kill">
+		<Count>1000</Count>
 		<!-- Overall -->
 	</Achievement>
 
-	<Achievement name="Monster Hunter Lvl 3" desc="Kill 5,000 monsters" type="kill">
+	<Achievement name="Monster Hunter Lvl 3" desc="Kill 2,500 monsters" type="kill">
+		<Count>2500</Count>
+		<!-- Overall -->
+	</Achievement>
+
+	<Achievement name="Monster Hunter Lvl 4" desc="Kill 5,000 monsters" type="kill">
 		<Count>5000</Count>
 		<!-- Overall -->
 	</Achievement>
 
-	<Achievement name="Monster Hunter Lvl 4" desc="Kill 10,000 monsters" type="kill">
+	<Achievement name="Monster Hunter Lvl 5" desc="Kill 10,000 monsters" type="kill">
 		<Count>10000</Count>
 		<!-- Overall -->
 	</Achievement>
 
-	<Achievement name="Monster Hunter Lvl 5" desc="Kill 25,000 monsters" type="kill">
+	<Achievement name="Monster Hunter Lvl 6" desc="Kill 25,000 monsters" type="kill">
 		<Count>25000</Count>
 		<!-- Overall -->
 	</Achievement>
 
-	<Achievement name="Monster Hunter Lvl 6" desc="Kill 100,000 monsters" type="kill">
-		<Count>100000</Count>
+	<Achievement name="Monster Hunter Lvl 7" desc="Kill 50,000 monsters" type="kill">
+		<Count>50000</Count>
 		<!-- Overall -->
 	</Achievement>
 
-	<Achievement name="Monster Hunter Lvl 7" desc="Kill 1,000,000 monsters" type="kill">
-		<Count>1000000</Count>
-		<!-- Overall -->
-	</Achievement>
-	
 	<Achievement name="First Blood" desc="Kill your first monster!" type="kill">
 		<Count>1</Count>
 	</Achievement>
-	
 </Achievements>

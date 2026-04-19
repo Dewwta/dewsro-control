@@ -162,7 +162,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     {
                         sessionSeconds = (int)e.Proxy.Session.AccumulatedPlayTime.TotalSeconds,
                         sessionKills = e.Proxy.Session.SessionKills,
-                        isAfk = e.Proxy.Session.IsAfk ? 1 : 0  // int not bool
+                        isAfk = e.Proxy.Session.IsAfk ? 1 : 0
                     });
 
                     DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "unclaimed_rewards", new
@@ -253,8 +253,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             {
                                 if (itemInfo.item.T3 == 1) // Pet items
                                 {
-                                    // Dont ask me how this works, i got incredibly lucky and im still questioning it.
-                                    // This does NOT match ANY of the documentation for this packet.
                                     byte state = packet.ReadByte(); // (1 = Never Summoned (Not Active), 2 = Summoned (Not Active), 3 = Alive (Actually Active, 4 = Dead (The only correct value from the docs.)
                                     Logger.Debug("PetHandler:Chardata", $"STATE={state}");
                                     if (state != 1)
@@ -333,7 +331,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         uint refItemId = packet.ReadUInt();
                         var itemInfo = await DBConnect.GetItemRecord(refItemId);
 
-                        // Still need to consume the equipment bytes regardless
+                        // fuck this data in particular
                         packet.ReadByte(); packet.ReadULong(); packet.ReadUInt();
                         byte magParamNum = packet.ReadByte();
                         for (int j = 0; j < magParamNum; j++) { packet.ReadUInt(); packet.ReadUInt(); }
@@ -374,7 +372,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "unclaimed_rewards", new
                     {
                         levels = e.Proxy.Session.UnclaimedRewards.Select(b => (int)b).ToArray()
-                    });
+                });
 
             });
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_STATS, async (sender, e) =>
@@ -389,11 +387,11 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     uint PhyAtkMax = packet.ReadUInt();
                     uint MagAtkMin = packet.ReadUInt();
                     uint MagAtkMax = packet.ReadUInt();
-
                     ushort PhyDef = packet.ReadUShort();
                     ushort MagDef = packet.ReadUShort();
                     ushort HitRate = packet.ReadUShort();
                     ushort ParryRate = packet.ReadUShort();
+                    // end unused
 
                     uint MaxHP = packet.ReadUInt();
                     uint MaxMP = packet.ReadUInt();
@@ -416,8 +414,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             maxMp = e.Proxy.Session.PlayerStats.MaxMP,
                         };
                         DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "stat_init", payload);
-
-
                     }
                     else
                     {
@@ -482,7 +478,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                                 bool dstExists = dst.ItemID != 0;
 
-                                // ---- STACK
+                                // STACK
                                 if (!sourceIsEquip && !destIsEquip &&
                                     dstExists &&
                                     dst.ItemID == src.ItemID &&
@@ -505,7 +501,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                     return;
                                 }
 
-                                // ---- SWAP
+                                // SWAP
                                 if (dstExists)
                                 {
                                     if (sourceIsEquip)
@@ -520,15 +516,14 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 }
                                 else
                                 {
-                                    // ---- MOVE ONLY
+                                    // MOVE
                                     if (destIsEquip)
-                                        inv.Equipment[destSlot] = src;   // keep full item intact
+                                        inv.Equipment[destSlot] = src;
                                     else
                                         inv.Slots[destSlot] = src;
 
-                                    // FIX: DO NOT overwrite with empty struct
                                     if (sourceIsEquip)
-                                        inv.Equipment.TryRemove(sourceSlot, out _);   // or leave as empty-slot behavior
+                                        inv.Equipment.TryRemove(sourceSlot, out _);
                                     else
                                         inv.Slots.TryRemove(sourceSlot, out _);
                                 }
@@ -557,7 +552,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 if (!itemInfo.success) break;
 
                                 ushort finalStack = 1;
-                                if (itemInfo.item.T2 == 1) // Equipment — skip all equipment bytes
+                                if (itemInfo.item.T2 == 1) // Equipment
                                 {
                                     packet.ReadByte(); packet.ReadULong(); packet.ReadUInt();
                                     byte mag = packet.ReadByte();
@@ -805,8 +800,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                                 if (inv.Slots.TryGetValue(playerSlot, out var item))
                                 {
-                                    // Store in the correct pet based on slot range
-                                    // Try specified pet first, fall back to any pet that has nearby slots
+                                    // Store in the correct pet
                                     uint targetPet = petUID;
                                     if (!inv.Pets.ContainsKey(petUID))
                                     {
@@ -836,7 +830,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 byte destSlot = packet.ReadByte();
                                 ushort qty = packet.ReadUShort();
 
-                                // Find the pet inventory (may be under a different UID)
+                                // Find the pet inventory
                                 ConcurrentDictionary<byte, (int ItemID, string CodeName, int Stack, int MaxStack)>? petInv = null;
                                 foreach (var pet in inv.Pets)
                                 {
@@ -892,7 +886,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                                 if (inv.Slots.TryGetValue(playerSlot, out var item))
                                 {
-                                    // If there's already an avatar in that slot, swap it back to inventory
+                                    // If there's already an avatar in that slot, swap it back
                                     if (inv.Avatars.TryGetValue(avatarSlot, out var oldAvatar))
                                         inv.Slots[playerSlot] = oldAvatar;
                                     else
@@ -992,7 +986,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                     $"Mall buy: tab={mallTab} slot={mallSlot} qty={quantity} → slots [{string.Join(",", toSlots)}]");
 
                                 // Mall items can't be resolved from ShopLookup (different system)
-                                // Mark slots as needing identification
                                 foreach (var slot in toSlots)
                                 {
                                     inv.Slots[slot] = (0, "MALL_PENDING", quantity, 1);
@@ -1002,13 +995,10 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                         case ItemMovement.GameServerToInventory:    // 0x0E
                             {
-                                ushort slot = packet.ReadUShort();     // Why is slot a ushort? no idea
-
-                                uint padding = packet.ReadUInt();      // 00 00 00 00
-
-                                uint itemObjId = packet.ReadUInt();    // unique item ID
-
-                                ushort quantity = packet.ReadUShort(); // stack
+                                ushort slot = packet.ReadUShort();     // 2 bytes: 10 00
+                                uint padding = packet.ReadUInt();      // 4 bytes: 00 00 00 00
+                                uint itemObjId = packet.ReadUInt();    // 4 bytes: 3F 24 00 00
+                                byte quantity = packet.ReadByte();     // 1 byte:  01
 
                                 var res = await DBConnect.GetItemRecord(itemObjId);
                                 if (res.success)
@@ -1023,7 +1013,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                     Logger.Warn("GameServerToInventory:ItemMoveHandler",
                                         $"Item record failed for uid {itemObjId} (slot {slot})");
 
-                                    // Fallback: still mark the slot so inventory doesn't desync
                                     inv.Slots[(byte)slot] = ((int)itemObjId, $"UNKNOWN_{itemObjId}", quantity, 500);
                                 }
                                 break;
@@ -2064,6 +2053,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 });
             });
         }
+        
         #endregion
 
         #region - Sorting -
@@ -2105,14 +2095,13 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             movePacket.WriteUShort(qty);
             proxy.Server.Send(movePacket);
 
-            // Delay now respects the token
             var completed = await Task.WhenAny(
                 tcs.Task,
                 Task.Delay(timeoutMs, cancellationToken));
 
             proxy.PendingMoves.Remove(source);
 
-            // If we were cancelled while waiting, just bail
+            // just bail
             if (cancellationToken.IsCancellationRequested)
                 return false;
 
@@ -2639,6 +2628,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     levels = proxy.Session.UnclaimedRewards.Select(b => (int)b).ToArray()
                 });
         }
+
         #endregion
     }
 }

@@ -39,10 +39,11 @@ public class DllBridge : IDisposable
     {
         if (!_clients.TryRemove(accName, out _))
         {
-            Logger.Warn(this, $"Couldnt remove account after disconnect!");
+            Logger.Debug(this, $"Couldnt remove account after disconnect! Not an error.");
         }
         
     }
+
     public void SendToDll(string accountName, string eventType, object payload)
     {
         if (accountName.Contains("PartyBot"))
@@ -83,6 +84,7 @@ public class DllBridge : IDisposable
                 _ = HandleClientAsync(client, ct);
             }
             catch (OperationCanceledException) { break; }
+            catch (SocketException) { }    // listener closed mid-accept
             catch (Exception ex) { Logger.Info(this, $"Listener error: {ex.Message}"); }
         }
     }
@@ -119,6 +121,8 @@ public class DllBridge : IDisposable
             }
         }
         catch (OperationCanceledException) { }
+        catch (IOException) { }        // normal TCP drop / stream closed
+        catch (SocketException) { }    // connection reset by peer
         catch (Exception ex) { Logger.Info(this, $"Client error: {ex.Message}"); }
         finally
         {

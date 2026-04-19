@@ -36,8 +36,8 @@ void Patcher::PatchAll() {
 	log.Info("Patcher::PatchAll", "Patched zoom limit check");
 
 	uint8_t level = 20;
-	WriteMemoryValue<uint8_t>(0x00645688 + 1, level); // Show message
-	WriteMemoryValue<uint8_t>(0x00797E21 + 1, level); // Unlock action
+	WriteMemoryValue<uint8_t>(0x00645688 + 1, level);
+	WriteMemoryValue<uint8_t>(0x00797E21 + 1, level);
 	log.Info("Patcher::PatchAll", "Patched resurrection max level");
 
 	// Background sight range

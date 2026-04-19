@@ -11,7 +11,7 @@
 void RegisterAllHandlers() {
     g_bridge.RegisterHandler("login_ack", [](const std::string& _) {
         auto& log = GetLogger();
-        log.Dbg("Control_Handler::login_ack", "Proxy connection acknowledged");
+        log.Info("Control_Handler::login_ack", "Proxy connection acknowledged");
     });
 
     g_bridge.RegisterHandler("session_init", [](const std::string& json) {
@@ -20,7 +20,7 @@ void RegisterAllHandlers() {
         g_bridge.m_state.accJID = g_bridge.ExtractInt(json, "jid");
         g_bridge.m_state.accName = g_bridge.ExtractStr(json, "accName");
         
-        log.Dbg("Control_Handler::session_init", "Character loaded: " + g_bridge.m_state.charName);
+        log.Info("Control_Handler::session_init", "Character loaded: " + g_bridge.m_state.charName);
     });
 
     g_bridge.RegisterHandler("char_init", [](const std::string& json) {
@@ -31,7 +31,7 @@ void RegisterAllHandlers() {
         g_bridge.m_state.unusedStatPoints = g_bridge.ExtractInt(json, "unusedStatPoints");
         g_bridge.m_state.currentLevel = g_bridge.ExtractInt(json, "currentLevel");
         g_bridge.m_state.gold = g_bridge.ExtractUint64(json, "gold");
-        log.Dbg("Control_Handler::char_init", "Character date received.");
+        log.Info("Control_Handler::char_init", "Character date received.");
     });
 
     g_bridge.RegisterHandler("stat_init", [](const std::string& json) {
@@ -40,7 +40,7 @@ void RegisterAllHandlers() {
         g_bridge.m_state.maxMp = g_bridge.ExtractInt(json, "maxMp");
         g_bridge.m_state.strength = g_bridge.ExtractInt(json, "strength");
         g_bridge.m_state.intelligence = g_bridge.ExtractInt(json, "intelligence");
-        log.Dbg("Control_Handler::stat_init", "Stats received.");
+        log.Info("Control_Handler::stat_init", "Stats received.");
     });
 
     g_bridge.RegisterHandler("session_sync", [](const std::string& json) {
@@ -105,8 +105,13 @@ void RegisterAllHandlers() {
             try { g_bridge.unclaimedRewards.push_back(std::stoi(token)); }
             catch (...) {}
         }
-        });
+    });
 
+    g_bridge.RegisterHandler("session_clear", [](const std::string& _) {
+        auto& log = GetLogger();
+        log.Info("Control_Handler::session_clear", "Session cleared");
+        g_bridge.ClearSession();
+    });
 
 }
 

@@ -16,7 +16,6 @@ namespace VSRO_CONTROL_API.VSRO.ServerCfg
     /// </summary>
     public class ServerCfgParser
     {
-        // ── Singleton ─────────────────────────────────────────────────────────
 
         public static ServerCfgParser? Instance { get; private set; }
 
@@ -26,11 +25,9 @@ namespace VSRO_CONTROL_API.VSRO.ServerCfg
             Logger.Info(typeof(ServerCfgParser), $"Loaded server.cfg from: {filePath}");
         }
 
-        // ── Instance ──────────────────────────────────────────────────────────
 
         private readonly string _filePath;
 
-        // block (case-insensitive) → key (case-insensitive) → raw value string
         private Dictionary<string, Dictionary<string, string>> _data =
             new(StringComparer.OrdinalIgnoreCase);
 
@@ -41,8 +38,6 @@ namespace VSRO_CONTROL_API.VSRO.ServerCfg
             _filePath = filePath;
             Reload();
         }
-
-        // ── Parse ─────────────────────────────────────────────────────────────
 
         public void Reload()
         {
@@ -80,7 +75,7 @@ namespace VSRO_CONTROL_API.VSRO.ServerCfg
                     continue;
                 }
 
-                // Key-value — only at depth 1 (direct child of a top-level block)
+                // Key-value
                 if (blockStack.Count == 1)
                 {
                     var parts = stripped.Split(new[] { ' ', '\t' }, 2, StringSplitOptions.RemoveEmptyEntries);
@@ -91,8 +86,6 @@ namespace VSRO_CONTROL_API.VSRO.ServerCfg
 
             lock (_lock) { _data = next; }
         }
-
-        // ── Read ──────────────────────────────────────────────────────────────
 
         /// <summary>Returns the raw string value for a key inside a block, or null.</summary>
         public string? Get(string block, string key)
@@ -107,8 +100,6 @@ namespace VSRO_CONTROL_API.VSRO.ServerCfg
             var raw = Get(block, key);
             return int.TryParse(raw, out var n) ? n : fallback;
         }
-
-        // ── Write ─────────────────────────────────────────────────────────────
 
         /// <summary>
         /// Rewrites a single key's value inside the specified block on disk,
@@ -185,8 +176,6 @@ namespace VSRO_CONTROL_API.VSRO.ServerCfg
             Reload();
         }
 
-        // ── Helpers ───────────────────────────────────────────────────────────
-
         private static string StripComment(string s)
         {
             var idx = s.IndexOf("//", StringComparison.Ordinal);
@@ -202,7 +191,6 @@ namespace VSRO_CONTROL_API.VSRO.ServerCfg
             // Leading whitespace
             var indent = original[..(original.Length - original.TrimStart().Length)];
 
-            // Trailing comment (if any), including its leading whitespace on this line
             var noIndent    = original.TrimStart();
             var commentIdx  = noIndent.IndexOf("//", StringComparison.Ordinal);
             var tailComment = commentIdx >= 0

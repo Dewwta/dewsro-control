@@ -67,7 +67,7 @@ namespace VSRO_CONTROL_API.Controllers
                 if (_req.Password.Length < 8)
                     return BadRequest(new { message = "Password must be at least 8 characters" });
 
-                // Invite code validation
+                // invite code validate
                 if (string.IsNullOrWhiteSpace(_req.InviteCode))
                     return BadRequest(new { message = "An invite code is required to create an account." });
                 if (!VSRO.InviteCodeStore.TryConsume(_req.InviteCode))
@@ -81,7 +81,7 @@ namespace VSRO_CONTROL_API.Controllers
                     return BadRequest(msg);
                 }
 
-                // Fetch the newly created user to get the real JID before updating profile fields
+                // fetch the newly created user to get the real JID before updating profile fields
                 var userLookup = await DBConnect.GetUserAccountByUsername(_req.Username);
                 if (userLookup.success && userLookup.user != null)
                 {

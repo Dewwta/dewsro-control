@@ -14,7 +14,7 @@ namespace VSRO_CONTROL_API.Controllers
     [RequireAdmin]
     public class ServerController : ControllerBase
     {
-        // GET api/server/public-status — no auth required, safe for public pages
+        // GET api/server/public-status
         [AllowAnonymous]
         [HttpGet("public-status")]
         public IActionResult GetPublicStatus()
@@ -195,7 +195,6 @@ namespace VSRO_CONTROL_API.Controllers
                 if (Overseer.opcodeLogHandlers.ContainsKey(op))
                     return BadRequest(new { message = $"Opcode 0x{op:X4} is already being logged." });
 
-                // Create the handler and keep a reference so we can unregister it later
                 Server.PacketTransferEventHandler handler = (sender, e) =>
                 {
                     byte[] data = e.Packet.GetBytes();

@@ -15,6 +15,8 @@ public:
 	void Err(std::string loc, std::string msg);
 	void Dbg(std::string loc, std::string msg);
 private:
+	void WriteToFile(const char* level, const std::string& loc, const std::string& msg);
+	FILE* m_logFile = nullptr;
 	bool m_state = false;
 	bool m_isAlloced = false;
 	std::vector<std::string> m_logs;

@@ -23,8 +23,6 @@ namespace VSRO_CONTROL_API.VSRO.Patching
             _backupDir = Path.Combine(Path.GetDirectoryName(exePath)!, "patch_backups");
         }
 
-        // ── Patch Methods ─────────────────────────────────────────────────────
-
         /// <summary>
         /// Changes the maximum player level (1-254).
         /// Patches two offsets that enforce the level cap.
@@ -144,13 +142,6 @@ namespace VSRO_CONTROL_API.VSRO.Patching
             byte[] countBytes = BitConverter.GetBytes((uint)limit);
             uint cmpValue = (uint)((long)limit * 0x1D0);
             byte[] cmpBytes = BitConverter.GetBytes(cmpValue);
-
-            // Virtual addresses of the OPERAND bytes (not the instruction start):
-            // MOV EAX, <count>         → VA 0x0054D60A (instruction at 0x0054D609, operand at +1)
-            // MOV [ESI+20], <count>    → VA 0x0054D61F (instruction at 0x0054D61C, operand at +3)
-            // PUSH <count>             → VA 0x0054D655 (instruction at 0x0054D654, operand at +1)
-            // MOV [EAX], <count>       → VA 0x0054D664 (instruction at 0x0054D662, operand at +2)
-            // CMP EBX, <cmpValue>      → VA 0x0054D6DA (instruction at 0x0054D6D8, operand at +2)
 
             // Default 50k values for verification
             byte[] default50kCount = BitConverter.GetBytes((uint)50000);     // 50 C3 00 00
