@@ -1,4 +1,5 @@
-﻿using Microsoft.Data.SqlClient;
+﻿using CoreLib.Tools.Logging;
+using Microsoft.Data.SqlClient;
 
 namespace VSRO_CONTROL_API.VSRO.Tools
 {
@@ -17,7 +18,7 @@ namespace VSRO_CONTROL_API.VSRO.Tools
             }
             catch (Exception ex)
             {
-
+                Logger.Error("DBConnectionTest", ex.Message);
                 return Task.FromResult(false);
             }
         }

@@ -26,7 +26,6 @@ namespace CoreLib.Tools.Logging
         // History
         private static List<string> logHistory = new List<string>();
 
-        // Mutating bools for threads
         private static bool _saveInProgress;
         private static bool _cleanupInProgress;
 
@@ -116,6 +115,7 @@ namespace CoreLib.Tools.Logging
 
         private static void Log_Out(object obj, string level, string msg)
         {
+            if (!_hasInit) return;
             string name = obj switch
             {
                 null => "Unknown",
@@ -179,6 +179,7 @@ namespace CoreLib.Tools.Logging
         }
         private static void Log_Raw(object obj, string level, string msg)
         {
+            if (!_hasInit) return;
             string name;
 
             // If it's a Type object, use its Name directly
@@ -418,7 +419,6 @@ namespace CoreLib.Tools.Logging
                 _cleanupInProgress = false;
             }
         }
-
         public static void ForceSave()
         {
             SaveLogs(null);

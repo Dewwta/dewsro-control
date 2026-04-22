@@ -230,22 +230,50 @@ static void RenderPlayerActions() {
             snprintf(goldBuf, sizeof(goldBuf), "%llu", g);
         ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "%s", goldBuf);
     }
+
     ImGui::Spacing();
     ImGui::TextDisabled("INVENTORY");
     ImGui::Separator();
     ImGui::Spacing();
+
     float avail = ImGui::GetContentRegionAvail().x;
     float gap = ImGui::GetStyle().ItemSpacing.x;
-    float btnW = (avail - gap * 2.0f) / 3.0f;
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.25f, 0.45f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.35f, 0.60f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.08f, 0.18f, 0.35f, 1.0f));
-    if (ImGui::Button("By Type", ImVec2(btnW, 24))) NetActions::SendSortRequest(SortType::ByType);
-    ImGui::SameLine();
-    if (ImGui::Button("By Name", ImVec2(btnW, 24))) NetActions::SendSortRequest(SortType::ByName);
-    ImGui::SameLine();
-    if (ImGui::Button("Logical", ImVec2(btnW, 24))) NetActions::SendSortRequest(SortType::Logical);
-    ImGui::PopStyleColor(3);
+    float labelCol = 42.0f;
+    float btnW = (avail - labelCol - gap * 3.0f) / 3.0f;
+
+    if (ImGui::BeginTable("SortTable", 4, ImGuiTableFlags_None))
+    {
+        ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, labelCol);
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Logical", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        // Player row
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0); ImGui::TextDisabled("Player");
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.25f, 0.45f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.35f, 0.60f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.08f, 0.18f, 0.35f, 1.0f));
+        ImGui::TableSetColumnIndex(1); if (ImGui::Button("T##ps", ImVec2(-1, 22))) NetActions::SendSortRequest(SortType::ByType, SortTarget::Player);
+        ImGui::TableSetColumnIndex(2); if (ImGui::Button("N##ps", ImVec2(-1, 22))) NetActions::SendSortRequest(SortType::ByName, SortTarget::Player);
+        ImGui::TableSetColumnIndex(3); if (ImGui::Button("L##ps", ImVec2(-1, 22))) NetActions::SendSortRequest(SortType::Logical, SortTarget::Player);
+        ImGui::PopStyleColor(3);
+
+        // Pet row
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0); ImGui::TextDisabled("Pet");
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.38f, 0.25f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.52f, 0.35f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.08f, 0.25f, 0.16f, 1.0f));
+        ImGui::TableSetColumnIndex(1); if (ImGui::Button("T##pt", ImVec2(-1, 22))) NetActions::SendSortRequest(SortType::ByType, SortTarget::Pet);
+        ImGui::TableSetColumnIndex(2); if (ImGui::Button("N##pt", ImVec2(-1, 22))) NetActions::SendSortRequest(SortType::ByName, SortTarget::Pet);
+        ImGui::TableSetColumnIndex(3); if (ImGui::Button("L##pt", ImVec2(-1, 22))) NetActions::SendSortRequest(SortType::Logical, SortTarget::Pet);
+        ImGui::PopStyleColor(3);
+
+        ImGui::EndTable();
+    }
+
     if (!g_bridge.unclaimedRewards.empty())
     {
         ImGui::Spacing();
@@ -333,7 +361,6 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
         return oPresent(device, pSrcRect, pDestRect, hDestWindow, pDirtyRegion);
     if (!initialized)
     {
-        Settings::Load();
         D3DDEVICE_CREATION_PARAMETERS params;
         device->GetCreationParameters(&params);
         g_gameHwnd = params.hFocusWindow;

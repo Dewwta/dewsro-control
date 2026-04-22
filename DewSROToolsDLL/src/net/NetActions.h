@@ -12,19 +12,27 @@ enum class SortType : BYTE
     Logical = 0x03
 };
 
+enum class SortTarget : BYTE
+{
+    Player = 0x00,
+    Pet = 0x01,
+    Storage = 0x02
+};
+
 class NetActions
 {
 public:
-    static void SendSortRequest(SortType sortType) {
+    static void SendSortRequest(SortType sortType, SortTarget target) {
         NEWMSG(DEW_SORT)
             pReq << (BYTE)sortType;
+            pReq << (BYTE)target;
         SENDMSG()
     }
 
     static void SendRewardClaim(int level, const std::string& itemCode, int qty = 1, int plus = 0) {
         NEWMSG(DEW_CLAIM_REWARD)
             pReq << (BYTE)level;
-        pReq << (BYTE)qty;
+        pReq << (WORD)qty;
         pReq << (BYTE)plus;
         pReq << (BYTE)itemCode.size();
         for (char c : itemCode)

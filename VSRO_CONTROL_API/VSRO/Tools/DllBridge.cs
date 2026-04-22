@@ -9,14 +9,15 @@ public class DllBridge : IDisposable
 {
     public static readonly DllBridge Instance = new();
     private readonly Dictionary<string, Func<string, JsonElement, Task>> _handlers = new();
-    public void RegisterHandler(string type, Func<string, JsonElement, Task> handler)
-    => _handlers[type] = handler;
+    public void RegisterHandler(string type, Func<string, JsonElement, Task> handler) => _handlers[type] = handler;
 
     private TcpListener _listener;
     private CancellationTokenSource _cts;
     private static readonly ConcurrentDictionary<string, StreamWriter> _clients = new();
 
+#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable.
     private DllBridge() { } // private so nobody calls new
+#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable.
 
     public async Task StartAsync()
     {
@@ -49,7 +50,7 @@ public class DllBridge : IDisposable
         if (accountName.Contains("PartyBot"))
             return;
         
-        //Logger.Debug(this, $"SendToDll called: account='{accountName}' type='{eventType}'");
+        Logger.Debug(this, $"SendToDll called: account='{accountName}' type='{eventType}'");
 
         if (!_clients.TryGetValue(accountName.ToLowerInvariant(), out var writer))
         {
@@ -121,9 +122,10 @@ public class DllBridge : IDisposable
             }
         }
         catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { } // proxt disposes deliberately, can be noisy, silencing it
         catch (IOException) { }        // normal TCP drop / stream closed
         catch (SocketException) { }    // connection reset by peer
-        catch (Exception ex) { Logger.Info(this, $"Client error: {ex.Message}"); }
+        catch (Exception ex) { Logger.Error(this, $"Client error: {ex.Message}"); }
         finally
         {
             if (accountName != null) _clients.TryRemove(accountName, out _);

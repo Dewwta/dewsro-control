@@ -1,6 +1,4 @@
-﻿using CoreLib.Models;
-using CoreLib.Tools.Logging;
-using Microsoft.AspNetCore.Mvc.ModelBinding;
+﻿using CoreLib.Tools.Logging;
 using System.Collections.Concurrent;
 using System.Text;
 using VSRO_CONTROL_API.Settings;
@@ -359,7 +357,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                 var payload = new
                 {
-                    hp = e.Proxy.Session.PlayerStats.CurrentHP,
+                    hp = e.Proxy.Session!.PlayerStats!.CurrentHP,
                     mp = e.Proxy.Session.PlayerStats.CurrentMP,
                     sessionKills = e.Proxy.Session.SessionKills,
                     unusedStatPoints = e.Proxy.Session.PlayerStats.UnusedStatPoints,
@@ -826,9 +824,17 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         case ItemMovement.PetToPet:                 // 0x10
                             {
                                 uint petUID = packet.ReadUInt();
-                                byte srcSlot = packet.ReadByte();
-                                byte destSlot = packet.ReadByte();
+                                byte srcSlot = (byte)(packet.ReadByte() + 1);
+                                byte destSlot = (byte)(packet.ReadByte() + 1);
                                 ushort qty = packet.ReadUShort();
+
+                                // Resolve pending move
+                                if (e.Proxy.PendingMoves.TryGetValue(srcSlot, out var tcs))
+                                {
+                                    e.Proxy.PendingMoves.Remove(srcSlot);
+                                    tcs.TrySetResult(true);
+                                }
+
 
                                 // Find the pet inventory
                                 ConcurrentDictionary<byte, (int ItemID, string CodeName, int Stack, int MaxStack)>? petInv = null;
@@ -886,7 +892,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                                 if (inv.Slots.TryGetValue(playerSlot, out var item))
                                 {
-                                    // If there's already an avatar in that slot, swap it back
                                     if (inv.Avatars.TryGetValue(avatarSlot, out var oldAvatar))
                                         inv.Slots[playerSlot] = oldAvatar;
                                     else
@@ -1018,7 +1023,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 break;
                             }
 
-                        case ItemMovement.InventoryToGameServer: // 0x0F
+                        case ItemMovement.InventoryToGameServer:    // 0x0F
                             {
 
                                 byte playerSlot = packet.ReadByte(); // 2F
@@ -1549,6 +1554,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 {
                     var packet = e.Packet;
                     int size = packet.RemainingRead();
+                    var session = e.Proxy.Session;
 
                     if (size == 10)
                     {
@@ -1559,6 +1565,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         packet.ReadByte();
 
                         e.Proxy.Session!.PlayerStats!.RemainingGold = gold;
+                        DllBridge.Instance.SendToDll(session.AccountName!, "gold_update", new { remainGold = gold });
                         Logger.Debug("GoldUpdateHandler", $"Gold → {gold}");
                     }
                     else if (size == 6)
@@ -1686,7 +1693,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                 if (!e.Proxy.SpawnedObjects.TryGetValue(mobUID, out var spawnInfo))
                 {
-                    Logger.Warn("KillTracker", $"Missing refObjID for UID=0x{mobUID:X}");
+                    Logger.Debug("KillTracker", $"Missing refObjID for UID=0x{mobUID:X}, most likely NPC.");
                     return;
                 }
 
@@ -1700,7 +1707,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                     if (e.Proxy.Session != null)
                     {
-                        Interlocked.Increment(ref e.Proxy.Session.SessionKills); // Not a bug fix, but techincally more correct here.
+                        Interlocked.Increment(ref e.Proxy.Session.SessionKills);
+                        
                         await proxy.Session!.AchievementLock.WaitAsync();
                         try
                         {
@@ -1710,10 +1718,17 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         {
                             proxy.Session!.AchievementLock.Release();
                         }
+                        
                         Logger.Debug("KillTracker",
                             $"{proxy.Session?.CharacterName} killed mob {GameObjectNameResolver.Resolve(result.codeName)} " +
                             $"in {RegionResolver.Resolve((short)spawnInfo.RegionID)} " +
                             $"(refObjID={spawnInfo.RefObjID}, UID=0x{mobUID:X}) +{exp}exp +{sExp}sp");
+
+                        if (UniqueKillResolver.Resolve(result.codeName))
+                        {
+                            Interlocked.Increment(ref proxy.Session!.SessionUniqueKills);
+                            await UniqueKillResolver.OnUniqueKill(proxy, result.codeName);
+                        }
 
                         lock (proxy.Session!)
                         {
@@ -1870,81 +1885,185 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 var packet = e.Packet.Clone();
                 var type = packet.ReadByte();
 
-                // This is for later. :3
-                // var target = packet.ReadByte();
-
-                e.Proxy.IsSorting = true;
+                
                 string sortMode = "type";
-                if (type == 0x01) // type
+
+                switch (type)
                 {
-                    sortMode = "type";
-                }
-                else if (type == 0x02) // name
-                {
-                    sortMode = "name";
-                }
-                else if (type == 0x03) // logical
-                {
-                    sortMode = "logical";
-                }
-                else
-                {
-                    PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Usage: !sort [name|type]");
-                    return;
+                    case 0x01:
+                        sortMode = "type";
+                        break;
+                    case 0x02:
+                        sortMode = "name";
+                        break;
+                    case 0x03:
+                        sortMode = "logical";
+                        break;
+                    default:
+                        PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Usage: !sort [name|type]");
+                        return;
                 }
 
-                _ = Task.Run(async () =>
+                byte target = packet.ReadByte(); // target is 0x00 -> player | 0x01 -> Pickpet | 0x02 -> Storage etc.
+                
+                void SortPlayer()
                 {
-                    try
+                    if (e.Proxy.IsSorting)
                     {
-                        using var cts = new CancellationTokenSource();
-                        e.Proxy.ActiveSortCts = cts;
-                        PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sorting started...");
+                        PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort already in progress.");
+                        return;
+                    }
+                    e.Proxy.IsSorting = true;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var cts = new CancellationTokenSource();
+                            e.Proxy.ActiveSortCts = cts;
+                            PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sorting started...");
 
-                        int safety = 0;
-                        
-                        while (safety <= 300)
+                            int safety = 0;
+
+                            while (safety <= 300)
+                            {
+
+                                var result = sortMode == "logical"
+                                    ? await SortInventoryLogical(e.Proxy, cts.Token)
+                                    : await SortInventoryStep(e.Proxy, sortMode, cts.Token);
+
+                                if (result == SortResult.Completed)
+                                {
+                                    PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort complete.");
+                                    return;
+                                }
+
+                                if (result == SortResult.Aborted)
+                                {
+                                    return;
+                                }
+
+                                await Task.Delay(150, cts.Token);
+                                safety++;
+                            }
+
+                            PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort timed out.");
+
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // normal shutdown
+                        }
+                        catch (Exception ex)
                         {
 
-                            var result = sortMode == "logical" ? await SortInventoryStep(e.Proxy, sortMode, cts.Token) : await SortInventoryLogical(e.Proxy, cts.Token);
-                            
-
-                            if (result == SortResult.Completed)
-                            {
-                                PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort complete.");
-                                return;
-                            }
-
-                            if (result == SortResult.Aborted)
-                            {
-                                return;
-                            }
-
-                            await Task.Delay(150, cts.Token);
-                            safety++;
+                            Logger.Error(typeof(Overseer), $"Sort error: {ex}");
+                            PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort failed! You must teleport before sorting.");
                         }
-
-                        PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort timed out.");
-
-                    }
-                    catch (OperationCanceledException)
+                        finally
+                        {
+                            e.Proxy.IsSorting = false;
+                            e.Proxy.ActiveSortCts?.Cancel();
+                            e.Proxy.ActiveSortCts?.Dispose();
+                            e.Proxy.ActiveSortCts = null;
+                            
+                        }
+                        return;
+                    });
+                }
+                void SortPet()
+                {
+                    if (e.Proxy.IsSorting)
                     {
-                        // normal shutdown
+                        PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort already in progress.");
+                        return;
                     }
-                    catch (Exception ex)
-                    {
+                    e.Proxy.IsSorting = true;
 
-                        Logger.Error(typeof(Overseer), $"Sort error: {ex}");
-                        PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort failed! You must teleport before sorting.");
-                    }
-                    finally
+                    var pickPet = e.Proxy.Inventory.Pets.FirstOrDefault(p => !p.Value.IsAttackPet);
+                    if (pickPet.Value == null)
                     {
                         e.Proxy.IsSorting = false;
-                        e.Proxy.ActiveSortCts?.Cancel();
-                        e.Proxy.ActiveSortCts?.Dispose();
-                        e.Proxy.ActiveSortCts = null;
+                        PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "No pick pet active.");
+                        return;
                     }
-                });
+
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var cts = new CancellationTokenSource();
+                            e.Proxy.ActiveSortCts = cts;
+                            PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sorting started...");
+
+                            int safety = 0;
+
+                            while (safety <= 300)
+                            {
+
+                                var result = await SortPetInventoryStep(e.Proxy, pickPet.Key, sortMode, cts.Token);
+
+
+                                if (result == SortResult.Completed)
+                                {
+                                    PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort complete.");
+                                    return;
+                                }
+
+                                if (result == SortResult.Aborted)
+                                {
+                                    return;
+                                }
+
+                                await Task.Delay(150, cts.Token);
+                                safety++;
+                            }
+
+                            PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort timed out.");
+
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // normal shutdown
+                        }
+                        catch (Exception ex)
+                        {
+
+                            Logger.Error(typeof(Overseer), $"Sort error: {ex}");
+                            PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort failed! You must teleport before sorting.");
+                        }
+                        finally
+                        {
+                            e.Proxy.IsSorting = false;
+                            e.Proxy.ActiveSortCts?.Cancel();
+                            e.Proxy.ActiveSortCts?.Dispose();
+                            e.Proxy.ActiveSortCts = null;
+
+                        }
+                        return;
+                    });
+
+                }
+                void SortStorage()
+                {
+                    if (e.Proxy.IsSorting)
+                    {
+                        PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, "Sort already in progress.");
+                        return;
+                    }
+                }
+
+                switch (target)
+                {
+                    case 0x00:
+                        SortPlayer();
+                        break;
+                    case 0x01:
+                        SortPet();
+                        break;
+                    case 0x02:
+                        SortStorage();
+                        break;
+                }
             });
         }
         public static void RegisterPlayerRewardHandler(Server _agentProxy)
@@ -1955,7 +2074,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 var packet = e.Packet.Clone();
 
                 byte claimedLevel = packet.ReadByte();
-                byte qty = packet.ReadByte();
+                ushort qty = packet.ReadByte();
                 byte plus = packet.ReadByte();
 
                 byte codeLen = packet.ReadByte();
@@ -2053,34 +2172,40 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 });
             });
         }
-        
+
         #endregion
 
         #region - Sorting -
-        private static async Task<bool> SendPetMoveAndWait(Proxy proxy, byte source, byte dest, ushort qty, int timeoutMs = 3000)
-        {
-            var tcs = new TaskCompletionSource<bool>();
 
+        private static async Task<bool> SendPetMoveAndWait(Proxy proxy, uint petUID, byte source, byte dest, ushort qty, CancellationToken cancellationToken = default, int timeoutMs = 3000)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var tcs = new TaskCompletionSource<bool>();
             proxy.PendingMoves[source] = tcs;
 
             var movePacket = new Packet(Constant.CLIENT_ITEM_MOVE);
             movePacket.WriteByte(16);
-            movePacket.WriteByte(source);
-            movePacket.WriteByte(dest);
+            movePacket.WriteUInt(petUID);
+            movePacket.WriteByte((byte)(source - 1));
+            movePacket.WriteByte((byte)(dest - 1));
             movePacket.WriteUShort(qty);
             proxy.Server.Send(movePacket);
 
-            var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
+            var completed = await Task.WhenAny(
+                tcs.Task,
+                Task.Delay(timeoutMs, cancellationToken));
 
             proxy.PendingMoves.Remove(source);
+
+            if (cancellationToken.IsCancellationRequested)
+                return false;
 
             if (completed == tcs.Task)
                 return tcs.Task.Result;
 
             return false;
         }
-
-
         private static async Task<bool> SendMoveAndWait(Proxy proxy, byte source, byte dest, ushort qty, CancellationToken cancellationToken = default, int timeoutMs = 3000)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -2112,7 +2237,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
         }
 
         /// <summary>
-        /// Sorts inventory by type and name.
+        /// Sorts player inventory by type and name.
         /// </summary>
         /// <param name="proxy"></param>
         /// <param name="sortMode"></param>
@@ -2221,7 +2346,108 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
             return SortResult.Completed;
         }
+        
+        /// <summary>
+        /// Sorts pet inventory by type and name
+        /// </summary>
+        /// <param name="proxy"></param>
+        /// <param name="petUID"></param>
+        /// <param name="sortMode"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
+        public static async Task<SortResult> SortPetInventoryStep(Proxy proxy, uint petUID, string sortMode = "type", CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
 
+            if (!proxy.Inventory.Pets.TryGetValue(petUID, out var petInv))
+                return SortResult.Aborted;
+
+            if (petInv.Inventory.IsEmpty)
+                return SortResult.Aborted;
+
+            var slots = petInv.Inventory
+                .OrderBy(kvp => kvp.Key)
+                .ToList();
+
+            // === STACK ===
+            bool didStack = false;
+            for (int i = 0; i < slots.Count; i++)
+            {
+                var (slotA, itemA) = slots[i];
+                if (itemA.MaxStack <= 1) continue;
+                if (itemA.Stack >= itemA.MaxStack) continue;
+
+                for (int j = i + 1; j < slots.Count; j++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var (slotB, itemB) = slots[j];
+                    if (itemB.ItemID != itemA.ItemID) continue;
+                    if (itemB.Stack <= 0) continue;
+
+                    int spaceInA = itemA.MaxStack - itemA.Stack;
+                    if (spaceInA <= 0) break;
+
+                    ushort qty = (ushort)Math.Min(itemB.Stack, spaceInA);
+
+                    bool moved = await SendPetMoveAndWait(proxy, petUID, slotB, slotA, qty, cancellationToken);
+                    if (moved)
+                    {
+                        didStack = true;
+                        itemA = (itemA.ItemID, itemA.CodeName, itemA.Stack + qty, itemA.MaxStack);
+                        slots[i] = new KeyValuePair<byte, (int, string, int, int)>(slotA, itemA);
+
+                        itemB = (itemB.ItemID, itemB.CodeName, itemB.Stack - qty, itemB.MaxStack);
+                        slots[j] = new KeyValuePair<byte, (int, string, int, int)>(slotB, itemB);
+                    }
+                }
+            }
+            if (didStack) return SortResult.Continue;
+
+            // === PACK ===
+            const byte start = 1;
+            for (int i = 0; i < slots.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                byte expectedSlot = (byte)(start + i);
+                var (slot, item) = slots[i];
+                if (slot != expectedSlot)
+                {
+                    await SendPetMoveAndWait(proxy, petUID, slot, expectedSlot, (ushort)item.Stack, cancellationToken);
+
+                    return SortResult.Continue;
+                }
+            }
+
+            // === SORT ===
+            var sorted = sortMode == "name"
+                ? slots
+                    .OrderBy(s => GameObjectNameResolver.Resolve(s.Value.CodeName))
+                    .ThenBy(s => s.Value.CodeName)
+                    .ThenByDescending(s => s.Value.Stack)
+                    .ToList()
+                : slots
+                    .OrderBy(s => s.Value.CodeName)
+                    .ThenByDescending(s => s.Value.Stack)
+                    .ToList();
+
+            for (int i = 0; i < sorted.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                byte targetSlot = (byte)(start + i);
+                var (currentSlot, item) = sorted[i];
+
+                if (currentSlot != targetSlot)
+                {
+                    await SendPetMoveAndWait(proxy, petUID, currentSlot, targetSlot, (ushort)item.Stack, cancellationToken);
+                    return SortResult.Continue;
+                }
+            }
+
+            return SortResult.Completed;
+        }
 
         /// <summary>
         /// Logical sort should be as follows:
@@ -2598,6 +2824,10 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
         private static async Task OnPlayerLevelUp(Proxy proxy, byte newLevel)
         {
+            // Level up
+            DllBridge.Instance.SendToDll(proxy.Session!.AccountName!, "lvl_update", new { lvl = (int)newLevel });
+
+            // Reward logic and stuff
             if (!Overseer.LevelRewardOptions.TryGetValue(newLevel, out var options) || options.Count == 0)
                 return;
 

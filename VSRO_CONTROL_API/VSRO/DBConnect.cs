@@ -2,7 +2,6 @@ using CoreLib.Tools.Logging;
 using Microsoft.Data.SqlClient;
 using System.Data;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 using System.Text;
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Enums;

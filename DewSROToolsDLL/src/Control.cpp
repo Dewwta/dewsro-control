@@ -7,6 +7,7 @@
 #include "Logging/Logger.h"
 #include "client/RewardWindow.h"
 #include <sstream>
+#include "Settings.h"
 
 void RegisterAllHandlers() {
     g_bridge.RegisterHandler("login_ack", [](const std::string& _) {
@@ -15,12 +16,9 @@ void RegisterAllHandlers() {
     });
 
     g_bridge.RegisterHandler("session_init", [](const std::string& json) {
-        auto& log = GetLogger();
         g_bridge.m_state.charName = g_bridge.ExtractStr(json, "charName");
         g_bridge.m_state.accJID = g_bridge.ExtractInt(json, "jid");
         g_bridge.m_state.accName = g_bridge.ExtractStr(json, "accName");
-        
-        log.Info("Control_Handler::session_init", "Character loaded: " + g_bridge.m_state.charName);
     });
 
     g_bridge.RegisterHandler("char_init", [](const std::string& json) {
@@ -35,12 +33,10 @@ void RegisterAllHandlers() {
     });
 
     g_bridge.RegisterHandler("stat_init", [](const std::string& json) {
-        auto& log = GetLogger();
         g_bridge.m_state.maxHp = g_bridge.ExtractInt(json, "maxHp");
         g_bridge.m_state.maxMp = g_bridge.ExtractInt(json, "maxMp");
         g_bridge.m_state.strength = g_bridge.ExtractInt(json, "strength");
         g_bridge.m_state.intelligence = g_bridge.ExtractInt(json, "intelligence");
-        log.Info("Control_Handler::stat_init", "Stats received.");
     });
 
     g_bridge.RegisterHandler("session_sync", [](const std::string& json) {
@@ -57,7 +53,6 @@ void RegisterAllHandlers() {
     g_bridge.RegisterHandler("level_reward", [](const std::string& json) {
         int level = g_bridge.ExtractInt(json, "level");
         std::vector<RewardOption> options;
-        auto& log = GetLogger();
 
         auto arrStart = json.find("\"options\":[");
         if (arrStart != std::string::npos) {
@@ -79,7 +74,6 @@ void RegisterAllHandlers() {
                 opt.plus = g_bridge.ExtractInt(obj, "plus");
                 opt.qty =  g_bridge.ExtractInt(obj, "qty");
                 opt.icon = g_bridge.ExtractStr(obj, "icon");
-                log.Dbg("level_reward", "icon path: '" + opt.icon + "'");
                 if (!opt.code.empty())
                     options.push_back(opt);
 
@@ -108,9 +102,16 @@ void RegisterAllHandlers() {
     });
 
     g_bridge.RegisterHandler("session_clear", [](const std::string& _) {
-        auto& log = GetLogger();
-        log.Info("Control_Handler::session_clear", "Session cleared");
         g_bridge.ClearSession();
+    });
+
+    g_bridge.RegisterHandler("gold_update", [](const std::string& json) {
+        g_bridge.m_state.gold = g_bridge.ExtractInt(json, "remainGold");
+        
+    });
+
+    g_bridge.RegisterHandler("lvl_update", [](const std::string& json) {
+        g_bridge.m_state.currentLevel = g_bridge.ExtractInt(json, "lvl");
     });
 
 }
@@ -121,9 +122,8 @@ void Control::Initialize()
 
     log.Alloc();
     log.SetState(true);
-
+    Settings::Load();
     dx9_hook::init();
-    
     log.Info("Control::Initialize", "Initialzed d3d9_hook.");
 
     RegisterAllHandlers();

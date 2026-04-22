@@ -3,7 +3,6 @@
 #include <ws2tcpip.h>
 #include <Windows.h>
 #include "DllBridge.h"
-#include <iostream>
 #include "Logging/Logger.h"
 
 DllBridge g_bridge;
@@ -31,10 +30,11 @@ void DllBridge::Connect() {
 
 void DllBridge::Send(const std::string& msg) {
     if (!m_socket) return;
+    auto& log = GetLogger();
     std::string line = msg + "\n";
     if (send((SOCKET)(size_t)m_socket, line.c_str(), (int)line.size(), 0) == SOCKET_ERROR) {
         m_connected = false;
-        std::cout << "Error connecting client to proxy socket" << std::endl;
+        log.Warn("DllBridge::Send", "Error connecting client to proxy socket");
     }
 }
 
@@ -174,7 +174,7 @@ uint64_t DllBridge::ExtractUint64(const std::string& json, const std::string& ke
 void DllBridge::Dispatch(const std::string& json) {
     std::string type = ExtractStr(json, "type");
     auto& log = GetLogger();
-    log.Dbg("DllBridge::Dispatch", "type='" + type + "' json=" + json);
+    log.Info("DllBridge::Dispatch", "type='" + type + "' json=" + json);
     auto it = m_handlers.find(type);
     if (it != m_handlers.end())
         it->second(json);

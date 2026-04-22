@@ -144,11 +144,12 @@ namespace VSRO_CONTROL_API.VSRO
                 new("ITEM_COS_P_BROWNIE_SCROLL",        DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_BROWNIE_SCROLL")),
                 new("ITEM_COS_P_MYOWON_SCROLL",         DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_MYOWON_SCROLL")),
             },
+
             // Level 10
             [10] = new()
             {
-                new("ITEM_ETC_HP_POTION_03",                Qty: 250,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_HP_POTION_03")),
-                new("ITEM_ETC_MP_POTION_03",                Qty: 250,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_MP_POTION_03")),
+                new("ITEM_ETC_HP_POTION_02",                Qty: 250,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_HP_POTION_02")),
+                new("ITEM_ETC_MP_POTION_02",                Qty: 250,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_MP_POTION_02")),
                 new("ITEM_MALL_REVERSE_RETURN_SCROLL",      Qty: 25,   DisplayName: GameObjectNameResolver.Resolve("ITEM_MALL_REVERSE_RETURN_SCROLL")),
                 new("ITEM_MALL_RETURN_SCROLL_HIGH_SPEED",   Qty: 25,   DisplayName: GameObjectNameResolver.Resolve("ITEM_MALL_RETURN_SCROLL_HIGH_SPEED")),
                 new("ITEM_MALL_MOVE_SPEED_UP_100",          Qty: 25,   DisplayName: GameObjectNameResolver.Resolve("ITEM_MALL_MOVE_SPEED_UP_100")),
@@ -156,11 +157,12 @@ namespace VSRO_CONTROL_API.VSRO
                 new("ITEM_COS_P_FLUTE_WHITE",               DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_FLUTE_WHITE")),
 
             },
+
             // Level 20
             [20] = new()
             {
-                new("ITEM_ETC_HP_POTION_03",                        Qty: 250,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_HP_POTION_03")),
-                new("ITEM_ETC_MP_POTION_03",                        Qty: 250,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_MP_POTION_03")),
+                new("ITEM_ETC_HP_POTION_03",                        Qty: 350,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_HP_POTION_03")),
+                new("ITEM_ETC_MP_POTION_03",                        Qty: 350,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_MP_POTION_03")),
                 new("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_04",      Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_04")),
                 new("ITEM_ETC_ARCHEMY_MAGICSTONE_HP_04",            Qty: 3,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_HP_04")),
             },
@@ -169,30 +171,30 @@ namespace VSRO_CONTROL_API.VSRO
             [40] = new()
             {
                 new("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_05",      Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_05")),
-                new("ITEM_ETC_ARCHEMY_MAGICSTONE_STR_05",           Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_STR_05")),
-                new("ITEM_ETC_ARCHEMY_MAGICSTONE_INT_05",           Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_INT_05")),
-                new("ITEM_ETC_ARCHEMY_MAGICSTONE_SOLID_05",         Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_SOLID_05")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_HR_05",             Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_HR_05")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_ER_05",             Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_ER_05")),
+                new("ITEM_ETC_ARCHEMY_MAGICSTONE_STR_05",           DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_STR_05")),
+                new("ITEM_ETC_ARCHEMY_MAGICSTONE_INT_05",           DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_INT_05")),
+                new("ITEM_ETC_ARCHEMY_MAGICSTONE_SOLID_05",         DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_SOLID_05")),
+                new("ITEM_ETC_ARCHEMY_ATTRSTONE_HR_05",             DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_HR_05")),
+                new("ITEM_ETC_ARCHEMY_ATTRSTONE_ER_05",             DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_ER_05")),
             },
 
             // Level 60
             [60] = new()
             {
-                new("ITEM_COS_P_FLUTE_SILK",                        DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_FLUTE_SILK")),
-                new("ITEM_COS_P_FLUTE_WHITE",                       DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_FLUTE_WHITE")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B",   Qty: 2,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B",    Qty: 2,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B")),
+                new("ITEM_PET2_SCROLL_ASS_DRAGON_A",                DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_ASS_DRAGON_A")),
+                new("ITEM_PET2_SCROLL_ASS_GRYPHON_A",               DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_ASS_GRYPHON_A")),
+                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B",   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B")),
+                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B",    DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B")),
             },
 
             // Level 80
             [80] = new()
             {
-                new("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_12",      Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_12")),
-                new("ITEM_ETC_ARCHEMY_MAGICSTONE_LUCK_15",          Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_LUCK_15")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_CRITICAL_12",       Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_CRITICAL_12")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_MA_12",             Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_MA_12")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_PA_12",             Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_PA_12")),
+                new("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_12",      DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_12")),
+                new("ITEM_ETC_ARCHEMY_MAGICSTONE_LUCK_15",          DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_LUCK_15")),
+                new("ITEM_ETC_ARCHEMY_ATTRSTONE_CRITICAL_12",       DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_CRITICAL_12")),
+                new("ITEM_ETC_ARCHEMY_ATTRSTONE_MA_12",             DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_MA_12")),
+                new("ITEM_ETC_ARCHEMY_ATTRSTONE_PA_12",             DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_PA_12")),
             },
 
             // Level 100
@@ -209,11 +211,11 @@ namespace VSRO_CONTROL_API.VSRO
             // Level 110
             [110] = new()
             {
-                new("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_15",      Qty: 10,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_15")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B",   Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B",    Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ACCESSARY_B",Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ACCESSARY_B")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_MAINT_12",          Qty: 10,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_MAINT_12")),
+                new("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_15",          DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_15")),
+                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B",       DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B")),
+                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B",        DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B")),
+                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ACCESSARY_B",    DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ACCESSARY_B")),
+                new("ITEM_ETC_ARCHEMY_ATTRSTONE_MAINT_12",              DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_MAINT_12")),
             },
 
             // Level 115
