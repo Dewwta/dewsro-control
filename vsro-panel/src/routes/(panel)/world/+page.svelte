@@ -57,9 +57,11 @@
 		'FORT_HT_AREA':   'Hotan Fortress Zone',
 		'FORT_CT_AREA':   'Constantinople Fortress Zone',
 		'FORT_SK_AREA':   'Samarkand Fortress Zone',
-		'FORT_BJ_AREA':   'Fort BJ Zone',  // ← fill in if known
-		'FORT_HM_AREA':   'Fort HM Zone',  // ← fill in if known
-		'FORT_ER_AREA':   'Fort ER Zone',  // ← fill in if known
+		'FORT_BJ_AREA':   'Fort BJ Zone',
+		'FORT_HM_AREA':   'Fort HM Zone',
+		'FORT_ER_AREA':   'Fort ER Zone',
+        
+        // Secret
         'CHINA_SYSTEM':   'Secret'
 	};
 

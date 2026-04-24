@@ -93,6 +93,10 @@ public:
         GetPrivateProfileStringA("General", "Settings_Keybind", "Z", settingsKeyBuf, sizeof(settingsKeyBuf), p);
         showSettingsKey = StringToVK(settingsKeyBuf);
 
+        char achKeyBuf[8] = { 0 };
+        GetPrivateProfileStringA("General", "Achievements_Keybind", "F7", achKeyBuf, sizeof(achKeyBuf), p);
+        showAchKey = StringToVK(achKeyBuf);
+
         Settings::Save();
 
     }
@@ -111,13 +115,17 @@ public:
 
         WritePrivateProfileStringA("General", "Settings_Keybind",
             VKToString(showSettingsKey).c_str(), p);
-    }
 
+        WritePrivateProfileStringA("General", "Achievements_Keybind",
+            VKToString(showAchKey).c_str(), p);
+    }
+    
     static bool keepFocused;
     static bool showFPSCounter;
     static bool showWatermark;
     static int  showPlayerActionsKey;
     static int  showSettingsKey;
+    static int  showAchKey;
 
 private:
     static std::string GetSettingsPath()
@@ -142,3 +150,4 @@ inline bool Settings::showFPSCounter = true;
 inline bool Settings::showWatermark = true;
 inline int  Settings::showPlayerActionsKey = 'Z';
 inline int  Settings::showSettingsKey = 'F';
+inline int  Settings::showAchKey = VK_F7;

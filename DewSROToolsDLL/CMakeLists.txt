@@ -72,9 +72,9 @@ set(SOURCES
 
     # Kiero
     kiero/kiero.cpp
-    "src/client/RewardWindow.cpp")
+    "src/client/RewardWindow.cpp" "src/client/AchievementWindow.cpp")
 
-add_library(DewSROToolkit SHARED ${SOURCES} "src/client/RewardWindow.h" "src/client/RewardWindow.cpp" "src/client/SoxOverlay.h")
+add_library(DewSROToolkit SHARED ${SOURCES} "src/client/RewardWindow.h" "src/client/RewardWindow.cpp" "src/client/SoxOverlay.h"  "src/client/AchievementWindow.h" "src/client/AchievementWindow.cpp")
 
 # -------------------------
 # Includes

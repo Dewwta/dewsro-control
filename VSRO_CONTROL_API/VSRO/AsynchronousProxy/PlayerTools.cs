@@ -853,13 +853,31 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 {
                                     petInv.TryGetValue(destSlot, out var dst);
 
-                                    if (dst.ItemID != 0)
+                                    if (dst.ItemID != 0 && dst.ItemID == src.ItemID && dst.MaxStack > 1)
                                     {
+                                        // Stack merge
+                                        int total = dst.Stack + qty; // use qty from packet, not src.Stack
+                                        if (total <= dst.MaxStack)
+                                        {
+                                            petInv[destSlot] = (dst.ItemID, dst.CodeName, total, dst.MaxStack);
+                                            petInv.TryRemove(srcSlot, out _);
+                                        }
+                                        else
+                                        {
+                                            int remainder = total - dst.MaxStack;
+                                            petInv[destSlot] = (dst.ItemID, dst.CodeName, dst.MaxStack, dst.MaxStack);
+                                            petInv[srcSlot] = (src.ItemID, src.CodeName, remainder, src.MaxStack);
+                                        }
+                                    }
+                                    else if (dst.ItemID != 0)
+                                    {
+                                        // Swap
                                         petInv[destSlot] = src;
                                         petInv[srcSlot] = dst;
                                     }
                                     else
                                     {
+                                        // Move to empty slot
                                         petInv[destSlot] = src;
                                         petInv.TryRemove(srcSlot, out _);
                                     }
@@ -1962,10 +1980,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         finally
                         {
                             e.Proxy.IsSorting = false;
-                            e.Proxy.ActiveSortCts?.Cancel();
-                            e.Proxy.ActiveSortCts?.Dispose();
+                            try { e.Proxy.ActiveSortCts?.Cancel(); } catch (ObjectDisposedException) { }
+                            try { e.Proxy.ActiveSortCts?.Dispose(); } catch (ObjectDisposedException) { }
                             e.Proxy.ActiveSortCts = null;
-                            
                         }
                         return;
                     });
@@ -2034,10 +2051,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         finally
                         {
                             e.Proxy.IsSorting = false;
-                            e.Proxy.ActiveSortCts?.Cancel();
-                            e.Proxy.ActiveSortCts?.Dispose();
+                            try { e.Proxy.ActiveSortCts?.Cancel(); } catch (ObjectDisposedException) { }
+                            try { e.Proxy.ActiveSortCts?.Dispose(); } catch (ObjectDisposedException) { }
                             e.Proxy.ActiveSortCts = null;
-
                         }
                         return;
                     });
@@ -2172,7 +2188,36 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 });
             });
         }
+        public static void RegisterAchievementHandler(Server _agentProxy)
+        {
+            _agentProxy.RegisterClientPacketHandler(Constant.DEW_ACHIEVEMENTS, async (sender, e) =>
+            {
+                e.CancelTransfer = true;
+                var session = e.Proxy.Session;
+                if (session == null) return;
 
+                var allDefs = AchievementLoader.Definitions?.Achievements ?? new();
+                var dbProgress = await DBConnect.GetAllAchievementsForChar(session.CharacterName!);
+                var progressLookup = dbProgress.ToDictionary(p => p.name, p => p);
+
+                var payload = allDefs.Select(def =>
+                {
+                    progressLookup.TryGetValue(def.Name, out var p);
+                    return new
+                    {
+                        name = def.Name,
+                        desc = def.Description,
+                        type = def.Type,
+                        goal = def.Count,
+                        progress = p.progress,
+                        completed = p.completed,
+                        completedAt = p.completedAt?.ToString("yyyy-MM-dd") ?? ""
+                    };
+                }).ToArray();
+
+                DllBridge.Instance.SendToDll(session.AccountName!, "achievements", new { items = payload });
+            });
+        }
         #endregion
 
         #region - Sorting -

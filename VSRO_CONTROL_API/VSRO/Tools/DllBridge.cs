@@ -107,6 +107,11 @@ public class DllBridge : IDisposable
                 var doc = JsonDocument.Parse(line);
                 var type = doc.RootElement.GetProperty("type").GetString();
 
+                if (string.IsNullOrWhiteSpace(line) || line[0] != '{')
+                {
+                    Logger.Debug("DllBridge", $"Skipping non-JSON line");
+                    continue;
+                }
                 // Intercept auth to bind the writer.
                 if (type == "auth")
                 {

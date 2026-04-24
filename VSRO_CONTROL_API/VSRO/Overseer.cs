@@ -1064,11 +1064,8 @@ namespace VSRO_CONTROL_API.VSRO
                         }
 
                         if (proxy.ActiveSortCts != null)
-                        {
                             proxy.ActiveSortCts?.Cancel();
-                            proxy.ActiveSortCts?.Dispose();
-                            proxy.ActiveSortCts = null;
-                        }
+                        
 
                         
                         if (session != null && !string.IsNullOrEmpty(session.CharacterName))
@@ -1157,7 +1154,8 @@ namespace VSRO_CONTROL_API.VSRO
             PlayerTools.RegisterClientMovementHandler(AgentProxy);
             PlayerTools.RegisterClientSortHandler(AgentProxy);
             PlayerTools.RegisterPlayerRewardHandler(AgentProxy);
-
+            PlayerTools.RegisterAchievementHandler(AgentProxy);
+            //RegisterExploitFilter(AgentProxy, GatewayProxy);
             // Activity Time
             ushort[] activityOpcodes =
             {
@@ -1186,7 +1184,54 @@ namespace VSRO_CONTROL_API.VSRO
             StartAgentMonitor();
             Logger.Info(typeof(Overseer), $"Started auto services");
         }
+        public static void RegisterExploitFilter(Server agentProxy, Server gatewayProxy)
+        {
+            ushort[] hardBlock = {
+                0x7777, // AGENTCRASH
+                0x631D, // SAMPLELAG  
+                0x1005, // SRFUCKER
+                0x2005, // T46TOOL
+                0x200A, // SRDOS4
+                0xA003, // AGENTBLOCK
+                0x7501, // NESTOR
+                0x4444,
+                0x0000
+            };
 
+            // Unknown exploit opcodes
+            ushort[] suspicious = {
+                0x1001, 0x1002, 0x1003, 0x1004, 0x1006, 0x1007,
+                0x2311, 0x2206, 0x2209, 0x220A, 0x220E, 0x220F,
+                0x6003, 0x6005, 0x6006, 0x6105, 0x620D, 0x6300,
+                0x6110, 0x6207, 0x6308, 0x6312, 0x6303, 0x6905,
+                0x6912, 0x6315, 0x6902, 0xA006, 0xA008, 0xA306,
+                0xA208, 0xA200, 0xA203
+            };
+
+            foreach (var opcode in hardBlock)
+            {
+                var captured = opcode;
+                agentProxy.RegisterClientPacketHandler(captured, (sender, e) =>
+                {
+                    e.CancelTransfer = true;
+                    Logger.Warn("ExploitFilter",
+                        $"Blocked exploit packet 0x{captured:X4} from {e.Proxy.Session?.CharacterName ?? "unknown"}");
+                });
+            }
+
+            foreach (var opcode in suspicious)
+            {
+                var captured = opcode;
+                agentProxy.RegisterClientPacketHandler(captured, (sender, e) =>
+                {
+                    // just observe
+                    Logger.Warn("ExploitFilter",
+                        $"Suspicious opcode 0x{captured:X4} from {e.Proxy.Session?.CharacterName ?? "unknown"} " +
+                        $"(not blocked - monitoring)");
+                });
+            }
+        }
+        
         #endregion
 
         #region - Tasks -

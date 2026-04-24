@@ -2,6 +2,7 @@
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Enums;
 using VSRO_CONTROL_API.VSRO;
+using VSRO_CONTROL_API.VSRO.AsynchronousProxy;
 
 namespace VSRO_CONTROL_API.VSRO.Tools
 {
@@ -10,18 +11,42 @@ namespace VSRO_CONTROL_API.VSRO.Tools
 
         public static readonly List<string> names = new()
         {
-            "MOB_CH_TIGERWOMAN", // Could end with _L2 and _L3
+            "MOB_CH_TIGERWOMAN_L1", // Could end with _L2 and _L3
+            "MOB_CH_TIGERWOMAN_L2",
+            "MOB_CH_TIGERWOMAN_L3",
+            "MOB_CH_TIGERWOMAN",
             "MOB_EU_KERBEROS",
+            "MOB_EU_KERBEROS_L1",
+            "MOB_EU_KERBEROS_L2",
+            "MOB_EU_KERBEROS_L3",
             "MOB_AM_IVY",
-            "MOB_QT_01_IVY",
+            "MOB_AM_IVY_L1",
+            "MOB_AM_IVY_L2",
+            "MOB_AM_IVY_L3",
             "MOB_OA_URUCHI",
-            "MOB_GNGWC_URUCHI",
-            "MOB_GNGWC_ISYUTARU",
+            "MOB_OA_URUCHI_L1",
+            "MOB_OA_URUCHI_L2",
+            "MOB_OA_URUCHI_L3",
             "MOB_KK_ISYUTARU",
+            "MOB_KK_ISYUTARU_L1",
+            "MOB_KK_ISYUTARU_L2",
+            "MOB_KK_ISYUTARU_L3",
             "MOB_TQ_BLACKSNAKE",
+            "MOB_TQ_BLACKSNAKE_L1",
+            "MOB_TQ_BLACKSNAKE_L2",
+            "MOB_TQ_BLACKSNAKE_L3",
             "MOB_TK_BONELORD",
+            "MOB_TK_BONELORD_L1",
+            "MOB_TK_BONELORD_L2",
+            "MOB_TK_BONELORD_L3",
             "MOB_RM_TAHOMET",
-            "MOB_RM_ROC"
+            "MOB_RM_TAHOMET_L1",
+            "MOB_RM_TAHOMET_L2",
+            "MOB_RM_TAHOMET_L3",
+            "MOB_RM_ROC",
+            "MOB_RM_ROC_L1",
+            "MOB_RM_ROC_L2",
+            "MOB_RM_ROC_L3"
         };
 
         // i will make this better i promise lol
@@ -665,7 +690,9 @@ namespace VSRO_CONTROL_API.VSRO.Tools
             },
 
         };
-        
+
+        private static readonly Random _rand = new Random();
+
         /// <summary>
         /// Returns true if the codename is a unique monster
         /// Otherwise returns false
@@ -686,18 +713,24 @@ namespace VSRO_CONTROL_API.VSRO.Tools
             return false;
         }
 
+        
         public static async Task OnUniqueKill(Proxy proxy, string codename)
         {
             if (proxy == null) return;
             if (string.IsNullOrEmpty(codename)) return;
 
-            if (_rewards.TryGetValue(codename, out var uniqueReward))
-            {
-                Random rand = new Random();
-                var randomItem = uniqueReward.Reward.ElementAt(rand.Next(_rewards.Count()));
+            if (!names.Contains(codename)) return;
 
-                await DBConnect.GiveItemToPlayer(proxy.Session!.CharacterName!, randomItem.ItemCodename, randomItem.Plus, randomItem.Quantity, true);
-            }
+            // Strip _L1/_L2/_L3 suffix to find the base reward entry
+            string baseKey = codename;
+            if (baseKey.EndsWith("_L1") || baseKey.EndsWith("_L2") || baseKey.EndsWith("_L3"))
+                baseKey = baseKey[..^3];
+
+            if (!_rewards.TryGetValue(baseKey, out var uniqueReward)) return;
+
+            var randomItem = uniqueReward.Reward[_rand.Next(uniqueReward.Reward.Count)];
+            await DBConnect.GiveItemToPlayer(proxy.Session!.CharacterName!, randomItem.ItemCodename, randomItem.Plus, randomItem.Quantity, true);
+            PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null, $"You received {GameObjectNameResolver.Resolve(randomItem.ItemCodename)} for killing {GameObjectNameResolver.Resolve(baseKey)}");
         }
     }
 }

@@ -14,6 +14,7 @@
 #include "../net/LoginHook.h"
 #include "Logging/Logger.h"
 #include "../client/RewardWindow.h"
+#include "../client/AchievementWindow.h"
 
 static std::string FormatSeconds(int totalSeconds) {
     int h = totalSeconds / 3600;
@@ -34,8 +35,9 @@ static Present_t oPresent = nullptr;
 
 static bool showPlayerActionsWindow = false;
 static bool showSettingsWindow = false;
+static bool showAchWindow = false;
 static bool AnyWindowOpen() {
-    return showPlayerActionsWindow || showSettingsWindow || g_rewardWindow.isOpen;
+    return showPlayerActionsWindow || showSettingsWindow || g_rewardWindow.isOpen || g_achWindow.isOpen;
 }
 
 static HWND g_gameHwnd = nullptr;
@@ -236,6 +238,8 @@ static void RenderPlayerActions() {
     ImGui::Separator();
     ImGui::Spacing();
 
+    ImGui::BeginDisabled(!hasPlayer);
+
     float avail = ImGui::GetContentRegionAvail().x;
     float gap = ImGui::GetStyle().ItemSpacing.x;
     float labelCol = 42.0f;
@@ -273,6 +277,8 @@ static void RenderPlayerActions() {
 
         ImGui::EndTable();
     }
+
+    ImGui::EndDisabled();
 
     if (!g_bridge.unclaimedRewards.empty())
     {
@@ -359,6 +365,7 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
 {
     if (s_deviceLost)
         return oPresent(device, pSrcRect, pDestRect, hDestWindow, pDirtyRegion);
+
     if (!initialized)
     {
         D3DDEVICE_CREATION_PARAMETERS params;
@@ -368,6 +375,7 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
         SetupImGuiStyle();
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+
         // Load watermark
         ImFontConfig cfg;
         cfg.OversampleH = 3;
@@ -385,15 +393,25 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
     }
     if (GetAsyncKeyState(Settings::showPlayerActionsKey) & 1) showPlayerActionsWindow = !showPlayerActionsWindow;
     if (GetAsyncKeyState(Settings::showSettingsKey) & 1) showSettingsWindow = !showSettingsWindow;
+    if (GetAsyncKeyState(Settings::showAchKey) & 1) {
+        if (g_achWindow.isOpen) {
+            g_achWindow.Close();
+        }
+        else {
+            NetActions::SendAchievementsRequest();
+        }
+    }
+        
     ImGui_ImplDX9_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
-    if (Settings::showWatermark) RenderWatermark("V1.199 BETA - @Dewwta");
+    if (Settings::showWatermark) RenderWatermark("V1.201 BETA - @Dewwta");
     if (Settings::showFPSCounter) RenderFPS();
 
     if (showPlayerActionsWindow) RenderPlayerActions();
     if (showSettingsWindow) RenderSettings();
     g_rewardWindow.Render();
+    g_achWindow.Render();
     ImGui::EndFrame();
     ImGui::Render();
     ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());

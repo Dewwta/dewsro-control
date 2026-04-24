@@ -8,6 +8,7 @@
 #include "client/RewardWindow.h"
 #include <sstream>
 #include "Settings.h"
+#include "client/AchievementWindow.h"
 
 void RegisterAllHandlers() {
     g_bridge.RegisterHandler("login_ack", [](const std::string& _) {
@@ -114,6 +115,45 @@ void RegisterAllHandlers() {
         g_bridge.m_state.currentLevel = g_bridge.ExtractInt(json, "lvl");
     });
 
+    // In RegisterAllHandlers()
+    g_bridge.RegisterHandler("achievements", [](const std::string& json) {
+        std::vector<AchievementEntry> entries;
+
+        auto arrStart = json.find("\"items\":[");
+        if (arrStart == std::string::npos) return;
+        arrStart += 9;
+        auto arrEnd = json.rfind(']');
+        if (arrEnd == std::string::npos) return;
+
+        std::string arr = json.substr(arrStart, arrEnd - arrStart);
+        size_t pos = 0;
+        while (pos < arr.size())
+        {
+            auto objStart = arr.find('{', pos);
+            if (objStart == std::string::npos) break;
+            // find matching closing brace
+            int depth = 0; size_t objEnd = objStart;
+            for (size_t k = objStart; k < arr.size(); k++) {
+                if (arr[k] == '{') depth++;
+                else if (arr[k] == '}') { if (--depth == 0) { objEnd = k; break; } }
+            }
+            std::string obj = arr.substr(objStart, objEnd - objStart + 1);
+
+            AchievementEntry e;
+            e.name = g_bridge.ExtractStr(obj, "name");
+            e.desc = g_bridge.ExtractStr(obj, "desc");
+            e.type = g_bridge.ExtractStr(obj, "type");
+            e.goal = (long long)g_bridge.ExtractInt(obj, "goal");
+            e.progress = (long long)g_bridge.ExtractInt(obj, "progress");
+            e.completed = g_bridge.ExtractInt(obj, "completed") != 0;
+            e.completedAt = g_bridge.ExtractStr(obj, "completedAt");
+            if (!e.name.empty()) entries.push_back(e);
+
+            pos = objEnd + 1;
+        }
+
+        g_achWindow.Open(std::move(entries));
+        });
 }
 
 void Control::Initialize()
@@ -121,7 +161,7 @@ void Control::Initialize()
     auto& log = GetLogger();
 
     log.Alloc();
-    log.SetState(true);
+    log.SetState(false);
     Settings::Load();
     dx9_hook::init();
     log.Info("Control::Initialize", "Initialzed d3d9_hook.");

@@ -7,6 +7,7 @@
             this.PArray = new uint[18];
             this.SBoxes = new uint[4, 256];
         }
+
         private uint S(uint x, int i)
         {
             if (i < 0 || i > 3)
@@ -80,12 +81,10 @@
             xr = num;
         }
 
-
         public void Initialize(byte[] key_ptr)
         {
             this.Initialize(key_ptr, 0, key_ptr.Length);
         }
-
 
         public void Initialize(byte[] key_ptr, int offset, int length)
         {
@@ -144,7 +143,6 @@
             return length;
         }
 
-
         public byte[] Encode(byte[] stream)
         {
             return this.Encode(stream, 0, stream.Length);
@@ -178,7 +176,6 @@
             return this.Decode(stream, 0, stream.Length);
         }
 
-
         public byte[] Decode(byte[] stream, int offset, int length)
         {
             if (length % 8 != 0 || length == 0)
@@ -197,7 +194,6 @@
             }
             return array;
         }
-
 
         private static uint[] bf_P = new uint[]
         {
@@ -220,7 +216,6 @@
             2450970073U,
             2306472731U
         };
-
 
         private static uint[,] bf_S = new uint[,]
         {
@@ -1259,6 +1254,7 @@
         };
 
         private uint[] PArray;
+
         private uint[,] SBoxes;
     }
 }

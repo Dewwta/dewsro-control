@@ -7,8 +7,6 @@
 
 #define SendMsg(x) reinterpret_cast<void (__cdecl *)(CMsgStreamBuffer&)>(0x008418D0)(x)
 
-#include "IClientNet.h"
-
 class CClientNet : public IClientNet
 {
 public:
