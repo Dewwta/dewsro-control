@@ -110,21 +110,27 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                 e.Proxy.OnPlaytimeHourReached += async (p, session) =>
                 {
-                    if (session == null || string.IsNullOrWhiteSpace(session.CharacterName))
-                        return;
-
-                    Logger.Debug(p, $"{session.CharacterName} reached {session.RewardedHours} hours");
-
-                    if (SettingsLoader.Settings?.Proxy?.SilkAmountPerHours is int amount)
+                    try
                     {
-                        var result = await DBConnect.AddSilkToUserByJID(session.JID, amount);
 
-                        if (result.success)
+                        Logger.Debug(p, $"{session.CharacterName} reached {session.RewardedHours} hours");
+
+                        if (SettingsLoader.Settings?.Proxy?.SilkAmountPerHours is int amount)
                         {
-                            Logger.Debug(p, $"Added silk to user ID {session.JID}. Silk given: {amount}. Session Time: {session.AccumulatedPlayTime}");
-                            PlayerTools.SendToProxyChat(p, PlayerTools.ChatType.General, "FoxProxy", $"You have been rewarded {amount} silk! Session time: {session.AccumulatedPlayTime}");
+                            var result = await DBConnect.AddSilkToUserByJID(session.JID, amount);
+
+                            if (result.success)
+                            {
+                                Logger.Debug(p, $"Added silk to user ID {session.JID}. Silk given: {amount}. Session Time: {session.AccumulatedPlayTime}");
+                                PlayerTools.SendToProxyChat(p, PlayerTools.ChatType.Notice, null, $"You have been rewarded {amount} silk! Session time: {session.AccumulatedPlayTime}");
+                            }
                         }
                     }
+                    catch (Exception)
+                    {
+                        // Nothing for this piece of shit handler
+                    }
+
                 };
 
                 Logger.Info(typeof(Overseer), $"Player logged in: {e.Proxy.Session.CharacterName}");

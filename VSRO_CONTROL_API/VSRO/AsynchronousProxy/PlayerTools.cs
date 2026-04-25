@@ -112,7 +112,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     ulong expOffset = packet.ReadULong();
                     uint sExpOffset = packet.ReadUInt();
 
-                    
                     Logger.Debug("ChardataHandler", $"expOffset={expOffset} sExpOffset={sExpOffset}");
 
                     ulong remainGold = packet.ReadULong();
@@ -121,7 +120,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                     Logger.Debug("ChardataHandler", $"gold={remainGold} skill={remainSkillPoint} stat={remainStatPoint}");
 
-                    // --- THE MISSING STATS (Bridge between Stats and Inventory) ---
                     byte remainHwanCount = packet.ReadByte(); // Zerk gauge bubbles
                     uint gatherExp = packet.ReadUInt();       // Academy Exp
                     uint hp = packet.ReadUInt();              // Current HP
@@ -156,12 +154,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     else
                         e.Proxy.Session.CumulativeExp = expOffset; // level 1, no base
 
-                    DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "session_sync", new
-                    {
-                        sessionSeconds = (int)e.Proxy.Session.AccumulatedPlayTime.TotalSeconds,
-                        sessionKills = e.Proxy.Session.SessionKills,
-                        isAfk = e.Proxy.Session.IsAfk ? 1 : 0
-                    });
+                    
 
                     DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "unclaimed_rewards", new
                     {
@@ -249,30 +242,31 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             }
                             else if (itemInfo.item.T2 == 2) // COS
                             {
-                                if (itemInfo.item.T3 == 1) // Pet items
+                                if (itemInfo.item.T3 == 1)
                                 {
-                                    byte state = packet.ReadByte(); // (1 = Never Summoned (Not Active), 2 = Summoned (Not Active), 3 = Alive (Actually Active, 4 = Dead (The only correct value from the docs.)
+                                    byte state = packet.ReadByte();
                                     Logger.Debug("PetHandler:Chardata", $"STATE={state}");
-                                    if (state != 1)
+
+                                    uint cosObjId = packet.ReadUInt();
+                                    ushort nameLen = packet.ReadUShort();
+                                    for (int s = 0; s < nameLen; s++)
+                                        packet.ReadByte();
+
+                                    if (itemInfo.item.T4 == 2) // AbilityPet
+                                        packet.ReadUInt(); // SecondsToRentEndTime
+
+                                    byte unk02 = packet.ReadByte();
+                                    Logger.Debug("PetHandler:Chardata", $"unk02={unk02} remaining_after_unk02={packet.RemainingRead()}");
+                                    if (unk02 != 0)
                                     {
-                                        uint cosObjId = packet.ReadUInt();   // RefObjID
-                                        ushort nameLen = packet.ReadUShort();
-                                        for (int s = 0; s < nameLen; s++)
+                                        int extraBytes = (itemInfo.item.T4 == 2) ? 14 : 9;
+                                        Logger.Debug("PetHandler:Chardata", $"reading {extraBytes} extra bytes");
+                                        for (int x = 0; x < extraBytes; x++)
                                             packet.ReadByte();
-
-                                        if (itemInfo.item.T4 == 2) // AbilityPet
-                                            packet.ReadUInt();     // SecondsToRentEndTime
-
-                                        byte unk02 = packet.ReadByte();
-                                        if (unk02 != 0)
-                                        {
-                                            int extraBytes = (itemInfo.item.T4 == 2) ? 14 : 16;
-                                            for (int x = 0; x < extraBytes; x++)
-                                                packet.ReadByte();
-                                        }
-
-                                        finalStack = 1;
+                                        Logger.Debug("PetHandler:Chardata", $"remaining_after_extra={packet.RemainingRead()}");
                                     }
+
+                                    finalStack = 1;
                                 }
                                 else if (itemInfo.item.T3 == 2) // Transport
                                 {
@@ -288,10 +282,14 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 finalStack = packet.ReadUShort();
 
                                 string code = itemInfo.item.CodeName;
-                               
-                                if (code.Contains("ATTRSTONE") || code.Contains("MAGICSTONE"))
+
+                                if (code.Contains("ATTRSTONE"))
                                 {
                                     packet.ReadByte(); // AssimilationProbability
+                                }
+                                else if (code.Contains("MAGICSTONE"))
+                                {
+                                    Logger.Info("ALCHandler:Chardata", "Magic stone skipped");
                                 }
                                 else if (itemInfo.item.T3 == 14) // Cards
                                 {
@@ -355,6 +353,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         $"CRASH parsing CHARDATA: {ex.Message}\n{ex.StackTrace}");
                 }
 
+                var savedPlaytime = await DBConnect.GetPlayTimeAsync(e.Proxy.Session!.CharacterName!);
+                e.Proxy.Session.TotalPlayTime = TimeSpan.FromSeconds(savedPlaytime.seconds);
+
                 var payload = new
                 {
                     hp = e.Proxy.Session!.PlayerStats!.CurrentHP,
@@ -365,12 +366,19 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     gold = e.Proxy.Session.PlayerStats.RemainingGold,
                 };
                 DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "char_init", payload);
-
+                DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "session_sync", new
+                {
+                    sessionSeconds = (int)e.Proxy.Session.AccumulatedPlayTime.TotalSeconds,
+                    sessionKills = e.Proxy.Session.SessionKills,
+                    totalSeconds = (int)e.Proxy.Session.TotalPlayTime.TotalSeconds,
+                    isAfk = e.Proxy.Session.IsAfk ? 1 : 0
+                });
                 if (e.Proxy.Session.UnclaimedRewards.Count > 0)
                     DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "unclaimed_rewards", new
                     {
                         levels = e.Proxy.Session.UnclaimedRewards.Select(b => (int)b).ToArray()
                 });
+                
 
             });
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_STATS, async (sender, e) =>
@@ -573,6 +581,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 }
 
                                 inv.Slots[slot] = ((int)refItemId, itemInfo.item.CodeName, finalStack, itemInfo.item.MaxStack);
+                                await AchievementService.OnItemPickup(e.Proxy.Session?.CharacterName!, itemInfo.item.CodeName, e.Proxy);
                                 Logger.Debug("ItemMoveHandler", $"Picked up {itemInfo.item.CodeName} x{finalStack} → slot {slot}");
                                 break;
                             }
@@ -685,6 +694,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                     if (!inv.Pets.ContainsKey(petUID))
                                         inv.Pets[petUID] = new();
                                     inv.Pets[petUID].Inventory[slot] = ((int)refItemId, itemInfo.item.CodeName, finalStack, itemInfo.item.MaxStack);
+                                    await AchievementService.OnItemPickup(e.Proxy.Session?.CharacterName!, itemInfo.item.CodeName, e.Proxy);
                                     Logger.Debug("ItemMoveHandler", $"Pet picked up {itemInfo.item.CodeName} x{finalStack} → pet 0x{petUID:X} slot {slot}");
                                 }
                                 break;
@@ -743,6 +753,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                         inv.Pets[petUID] = new();
 
                                     inv.Pets[petUID].Inventory[slot] = ((int)refItemId, itemInfo.item.CodeName, finalStack, itemInfo.item.MaxStack);
+                                    await AchievementService.OnItemPickup(e.Proxy.Session?.CharacterName!, itemInfo.item.CodeName, e.Proxy);
                                     Logger.Debug("ItemMoveHandler", $"Pet picked up {itemInfo.item.CodeName} x{finalStack} → pet 0x{petUID:X} slot {slot}");
                                 }
 
@@ -1566,7 +1577,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
         }
         public static void RegisterGoldUpdateHandler(Server _agentProxy)
         {
-            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_NEW_GOLD_AMOUNT, (sender, e) =>
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_NEW_GOLD_AMOUNT, async (sender, e) =>
             {
                 try
                 {
@@ -1584,7 +1595,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                         e.Proxy.Session!.PlayerStats!.RemainingGold = gold;
                         DllBridge.Instance.SendToDll(session.AccountName!, "gold_update", new { remainGold = gold });
+                        await AchievementService.OnGoldChanged(e.Proxy.Session!.CharacterName, (long)gold, e.Proxy);
                         Logger.Debug("GoldUpdateHandler", $"Gold → {gold}");
+
                     }
                     else if (size == 6)
                     {
@@ -1721,40 +1734,49 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 _ = Task.Run(async () =>
                 {
                     var result = await DBConnect.GetMonsterCodeName(spawnInfo.RefObjID);
-                    if (result.codeName.StartsWith("NPC")) return;
-
+                    
                     if (e.Proxy.Session != null)
                     {
-                        Interlocked.Increment(ref e.Proxy.Session.SessionKills);
-                        
-                        await proxy.Session!.AchievementLock.WaitAsync();
-                        try
-                        {
-                            await AchievementService.OnMonsterKill(proxy.Session!.CharacterName!, result.codeName, proxy);
-                        }
-                        finally
-                        {
-                            proxy.Session!.AchievementLock.Release();
-                        }
-                        
-                        Logger.Debug("KillTracker",
-                            $"{proxy.Session?.CharacterName} killed mob {GameObjectNameResolver.Resolve(result.codeName)} " +
-                            $"in {RegionResolver.Resolve((short)spawnInfo.RegionID)} " +
-                            $"(refObjID={spawnInfo.RefObjID}, UID=0x{mobUID:X}) +{exp}exp +{sExp}sp");
-
-                        if (UniqueKillResolver.Resolve(result.codeName))
-                        {
-                            Interlocked.Increment(ref proxy.Session!.SessionUniqueKills);
-                            await UniqueKillResolver.OnUniqueKill(proxy, result.codeName);
-                        }
-
                         lock (proxy.Session!)
                         {
                             proxy.Session!.CumulativeExp += exp;
                         }
                         
+                        Interlocked.Increment(ref e.Proxy.Session.SessionKills);
+                        
+                        await proxy.Session!.AchievementLock.WaitAsync();
+                        try
+                        {
+                            if (!result.codeName.StartsWith("NPC"))
+                            {
+                                await AchievementService.OnMonsterKill(proxy.Session!.CharacterName!, result.codeName, proxy);
+
+                            }
+
+                        }
+                        finally
+                        {
+                            proxy.Session!.AchievementLock.Release();
+                        }
+
+                        if (!result.codeName.StartsWith("NPC"))
+                        {
+                            Logger.Debug("KillTracker",
+                            $"{proxy.Session?.CharacterName} killed mob {GameObjectNameResolver.Resolve(result.codeName)} " +
+                            $"in {RegionResolver.Resolve((short)spawnInfo.RegionID)} " +
+                            $"(refObjID={spawnInfo.RefObjID}, UID=0x{mobUID:X}) +{exp}exp +{sExp}sp");
+                        }
+                            
+
+                        if (UniqueKillResolver.Resolve(result.codeName) && !result.codeName.StartsWith("NPC"))
+                        {
+                            Interlocked.Increment(ref proxy.Session!.SessionUniqueKills);
+                            await UniqueKillResolver.OnUniqueKill(proxy, result.codeName);
+                        }
+
                         _ = Task.Run(() => PlayerTools.CheckLevelUp(proxy));
 
+                        
                         DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "kill_update", new
                         {
                             sessionKills = e.Proxy.Session.SessionKills
@@ -2090,7 +2112,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 var packet = e.Packet.Clone();
 
                 byte claimedLevel = packet.ReadByte();
-                ushort qty = packet.ReadByte();
+                ushort qty = packet.ReadUShort();
                 byte plus = packet.ReadByte();
 
                 byte codeLen = packet.ReadByte();
@@ -2156,14 +2178,25 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             DllBridge.Instance.RegisterHandler("reward_reopen", async (accountName, json) =>
             {
                 var proxy = Overseer.GetProxyByAccount(accountName);
-                if (proxy?.Session == null) return;
+                if (proxy?.Session == null)
+                {
+                    Logger.Error("reward_reopen", $"Session null {accountName}");
+                    return;
+                }
 
                 byte level = (byte)json.GetProperty("level").GetInt32();
 
-                if (!proxy.Session.UnclaimedRewards.Contains(level)) return;
+                if (!proxy.Session.UnclaimedRewards.Contains(level))
+                {
+                    Logger.Error("reward_reopen", $"UNCLAIMED REWARDS DOESNT CONTAIN ANYTHING");
+                    return;
+                }
 
                 if (!Overseer.LevelRewardOptions.TryGetValue(level, out var options) || options.Count == 0)
+                {
+                    Logger.Error("reward_reopen", $"Options dont exist");
                     return;
+                }
 
                 proxy.Session.PendingLevelReward = level;
 
@@ -2218,6 +2251,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 DllBridge.Instance.SendToDll(session.AccountName!, "achievements", new { items = payload });
             });
         }
+        
         #endregion
 
         #region - Sorting -
@@ -2744,6 +2778,11 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 {
                     session.AccumulatedPlayTime += TimeSpan.FromSeconds(1);
                     proxy.CheckPlaytimeReward(session);
+
+                    long totalMinutes = (long)(session.TotalPlayTime + session.AccumulatedPlayTime).TotalMinutes;
+                    await AchievementService.OnPlaytimeTick(session.CharacterName!, totalMinutes, proxy);
+
+
                 }
             }
         }

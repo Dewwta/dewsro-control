@@ -215,6 +215,12 @@ static void RenderPlayerActions() {
             ImGui::Text("[AFK]");
             ImGui::PopStyleColor();
         }
+
+        std::string totalTimeStr = FormatSeconds(ss.totalSeconds + ss.sessionSeconds + elapsed);
+        ImGui::TextDisabled("Total");
+        ImGui::SameLine(labelCol);
+        ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f), "%s", totalTimeStr.c_str());
+
         ImGui::TextDisabled("Kills");
         ImGui::SameLine(labelCol);
         ImGui::TextColored(ImVec4(0.9f, 0.55f, 0.55f, 1.0f), "%d", ss.sessionKills);

@@ -1,71 +1,59 @@
 #include "AchievementWindow.h"
 #include "imgui.h"
+#include <algorithm>
+#include <cmath>
 
 AchievementWindow g_achWindow;
 
-static constexpr int   COLS = 5;
-static constexpr float CELL_W = 100.0f;
-static constexpr float ICON_SZ = 52.0f;
-static constexpr float BAR_H = 6.0f;
-static constexpr float LABEL_H = 32.0f;   // two lines of text under icon
-static constexpr float CELL_H = ICON_SZ + BAR_H + 4.0f + LABEL_H + 8.0f;
-static constexpr float WIN_W = 16.0f + COLS * (CELL_W + 8.0f) - 8.0f + 16.0f;
-static constexpr float WIN_H = 460.0f;
-static constexpr float DETAIL_W = 320.0f;
-static constexpr float DETAIL_H = 200.0f;
+static constexpr float CELL_W = 95.0f;
+static constexpr float CELL_GAP = 8.0f;
+static constexpr float ICON_SZ = 48.0f;
+static constexpr float BAR_H = 5.0f;
+static constexpr float LABEL_H = 28.0f;
+static constexpr float CELL_H = ICON_SZ + BAR_H + 6.0f + LABEL_H + 10.0f;
+static constexpr float WIN_PAD = 12.0f;
+static constexpr float DETAIL_H = 140.0f;
+static constexpr float FONT_SCALE = 0.78f;
 
 static void DrawAchIcon(ImDrawList* dl, ImVec2 tl, float sz, bool completed)
 {
     ImVec2 br(tl.x + sz, tl.y + sz);
-    ImU32 bgCol = completed
-        ? IM_COL32(30, 70, 30, 220)
-        : IM_COL32(25, 28, 45, 200);
-    ImU32 borderCol = completed
-        ? IM_COL32(80, 200, 80, 220)
-        : IM_COL32(55, 60, 80, 180);
-
+    ImU32 bgCol = completed ? IM_COL32(30, 70, 30, 220) : IM_COL32(25, 28, 45, 200);
+    ImU32 borderCol = completed ? IM_COL32(80, 200, 80, 220) : IM_COL32(55, 60, 80, 180);
     dl->AddRectFilled(tl, br, bgCol, 6.0f);
     dl->AddRect(tl, br, borderCol, 6.0f, 0, completed ? 2.0f : 1.0f);
 
     if (completed)
     {
-        // Simple checkmark
-        float cx = tl.x + sz * 0.5f;
-        float cy = tl.y + sz * 0.5f;
+        float cx = tl.x + sz * 0.5f, cy = tl.y + sz * 0.5f;
         float s = sz * 0.22f;
-        ImVec2 p0(cx - s, cy);
-        ImVec2 p1(cx - s * 0.2f, cy + s * 0.9f);
-        ImVec2 p2(cx + s, cy - s * 0.7f);
-        dl->AddPolyline(&p0, 3, IM_COL32(80, 220, 80, 255), 0, 2.5f);
+        ImVec2 pts[3] = {
+            { cx - s,        cy              },
+            { cx - s * 0.2f, cy + s * 0.9f  },
+            { cx + s,        cy - s * 0.7f  }
+        };
+        dl->AddPolyline(pts, 3, IM_COL32(80, 220, 80, 255), 0, 2.5f);
     }
     else
     {
-        // Lock body
-        float lx = tl.x + sz * 0.35f;
-        float ly = tl.y + sz * 0.46f;
-        float lw = sz * 0.30f;
-        float lh = sz * 0.26f;
+        float lx = tl.x + sz * 0.35f, ly = tl.y + sz * 0.46f;
+        float lw = sz * 0.30f, lh = sz * 0.26f;
         float arc = sz * 0.13f;
-        dl->AddRectFilled(ImVec2(lx, ly), ImVec2(lx + lw, ly + lh),
-            IM_COL32(120, 120, 140, 200), 2.0f);
-        // shackle arc (approximate with lines)
-        dl->AddCircle(ImVec2(lx + lw * 0.5f, ly), arc,
-            IM_COL32(120, 120, 140, 200), 12, 2.0f);
+        dl->AddRectFilled({ lx, ly }, { lx + lw, ly + lh }, IM_COL32(120, 120, 140, 200), 2.0f);
+        dl->AddCircle({ lx + lw * 0.5f, ly }, arc, IM_COL32(120, 120, 140, 200), 12, 2.0f);
     }
 }
 
-static void DrawProgressBar(ImDrawList* dl, ImVec2 tl, float w, float frac,
-    ImVec4 bgCol, ImVec4 fillCol)
+static void DrawBar(ImDrawList* dl, ImVec2 tl, float w, float frac,
+    ImVec4 bg, ImVec4 fill)
 {
+    auto toU32 = [](ImVec4 c) {
+        return IM_COL32((int)(c.x * 255), (int)(c.y * 255), (int)(c.z * 255), (int)(c.w * 255));
+        };
     ImVec2 br(tl.x + w, tl.y + BAR_H);
-    dl->AddRectFilled(tl, br,
-        IM_COL32((int)(bgCol.x * 255), (int)(bgCol.y * 255), (int)(bgCol.z * 255), 200), 3.0f);
+    dl->AddRectFilled(tl, br, toU32(bg), 3.0f);
     if (frac > 0.0f)
-    {
-        ImVec2 fillBr(tl.x + w * frac, br.y);
-        dl->AddRectFilled(tl, fillBr,
-            IM_COL32((int)(fillCol.x * 255), (int)(fillCol.y * 255), (int)(fillCol.z * 255), 230), 3.0f);
-    }
+        dl->AddRectFilled(tl, { tl.x + w * frac, br.y }, toU32(fill), 3.0f);
 }
 
 void AchievementWindow::Render()
@@ -76,10 +64,12 @@ void AchievementWindow::Render()
     ImGui::SetNextWindowPos(
         ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
         ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(WIN_W, WIN_H), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(570.0f, 460.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(300.0f, 200.0f), ImVec2(900.0f, 800.0f));
     ImGui::SetNextWindowBgAlpha(0.97f);
 
     ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoCollapse |
         ImGuiWindowFlags_NoSavedSettings;
 
     int done = 0;
@@ -89,9 +79,15 @@ void AchievementWindow::Render()
 
     if (!ImGui::Begin(title, &isOpen, flags)) { ImGui::End(); return; }
 
-    ImGui::BeginChild("##ach_grid", ImVec2(0, showDetail ? WIN_H - DETAIL_H - 60.0f : 0),
-        false, ImGuiWindowFlags_None);
+    float winW = ImGui::GetContentRegionAvail().x;
+    int   cols = std::max(1, (int)((winW + CELL_GAP) / (CELL_W + CELL_GAP)));
+    float actualCellW = (winW - (cols - 1) * CELL_GAP) / (float)cols;
 
+    float gridH = ImGui::GetContentRegionAvail().y
+        - (showDetail ? DETAIL_H + 8.0f : 0.0f);
+
+    ImGui::BeginChild("##ach_grid", ImVec2(0, gridH), false,
+        ImGuiWindowFlags_HorizontalScrollbar);
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
     int col = 0;
@@ -100,86 +96,96 @@ void AchievementWindow::Render()
         const auto& e = entries[i];
         const bool  selected = (detailIndex == i);
 
-        if (col > 0) ImGui::SameLine(0.0f, 8.0f);
+        if (col > 0) ImGui::SameLine(0.0f, CELL_GAP);
 
         ImVec2 cellTL = ImGui::GetCursorScreenPos();
+        float  cw = actualCellW;
 
         // Cell background
-        ImU32 cellBg = selected
-            ? IM_COL32(40, 55, 80, 220)
-            : IM_COL32(20, 22, 35, 180);
-        ImU32 cellBorder = selected
-            ? IM_COL32(100, 160, 255, 220)
-            : IM_COL32(45, 50, 70, 160);
-        dl->AddRectFilled(cellTL, ImVec2(cellTL.x + CELL_W, cellTL.y + CELL_H), cellBg, 5.0f);
-        dl->AddRect(cellTL, ImVec2(cellTL.x + CELL_W, cellTL.y + CELL_H), cellBorder, 5.0f, 0,
+        ImU32 cellBg = selected ? IM_COL32(40, 55, 80, 220) : IM_COL32(20, 22, 35, 180);
+        ImU32 cellBdr = selected ? IM_COL32(100, 160, 255, 220) : IM_COL32(45, 50, 70, 160);
+        dl->AddRectFilled(cellTL, { cellTL.x + cw, cellTL.y + CELL_H }, cellBg, 5.0f);
+        dl->AddRect(cellTL, { cellTL.x + cw, cellTL.y + CELL_H }, cellBdr, 5.0f, 0,
             selected ? 2.0f : 1.0f);
 
-        // Icon centred in cell
-        float iconX = cellTL.x + (CELL_W - ICON_SZ) * 0.5f;
+        // Icon centred
+        float iconX = cellTL.x + (cw - ICON_SZ) * 0.5f;
         float iconY = cellTL.y + 6.0f;
-        DrawAchIcon(dl, ImVec2(iconX, iconY), ICON_SZ, e.completed);
+        DrawAchIcon(dl, { iconX, iconY }, ICON_SZ, e.completed);
 
         // Progress bar
         float frac = (e.goal > 0)
             ? (float)std::min(e.progress, e.goal) / (float)e.goal
             : (e.completed ? 1.0f : 0.0f);
         float barY = iconY + ICON_SZ + 4.0f;
-        float barX = cellTL.x + 6.0f;
-        DrawProgressBar(dl, ImVec2(barX, barY), CELL_W - 12.0f, frac, BAR_BG, BAR_FILL);
+        DrawBar(dl, { cellTL.x + 5.0f, barY }, cw - 10.0f, frac, BAR_BG, BAR_FILL);
 
-        // Name label (truncated)
         float textY = barY + BAR_H + 4.0f;
         ImVec4 nameCol = e.completed ? COL_DONE : (e.progress > 0 ? COL_WIP : COL_LOCK);
-        ImGui::SetCursorScreenPos(ImVec2(cellTL.x + 4.0f, textY));
+
+        ImGui::SetCursorScreenPos({ cellTL.x + 4.0f, textY });
         ImGui::PushStyleColor(ImGuiCol_Text, nameCol);
-        ImGui::PushTextWrapPos(cellTL.x + CELL_W - 4.0f);
-        ImGui::TextUnformatted(e.name.c_str());
-        ImGui::PopTextWrapPos();
+        ImGui::SetWindowFontScale(FONT_SCALE);
+
+        // Truncate name to fit cell manually
+        const char* fullName = e.name.c_str();
+        char truncated[64];
+        strncpy(truncated, fullName, sizeof(truncated) - 1);
+        truncated[sizeof(truncated) - 1] = '\0';
+        // Shorten until it fits
+        float maxTextW = cw - 8.0f;
+        while (strlen(truncated) > 3) {
+            if (ImGui::CalcTextSize(truncated).x <= maxTextW) break;
+            truncated[strlen(truncated) - 1] = '\0';
+        }
+        // Append ellipsis if truncated
+        if (strlen(truncated) < e.name.size()) {
+            size_t len = strlen(truncated);
+            if (len > 2) { truncated[len - 2] = '.'; truncated[len - 1] = '.'; truncated[len] = '.'; truncated[len + 1] = '\0'; }
+        }
+
+        ImGui::TextUnformatted(truncated);
+        ImGui::SetWindowFontScale(1.0f);
         ImGui::PopStyleColor();
 
-        // Invisible button
+        // Invisible button over full cell
         ImGui::SetCursorScreenPos(cellTL);
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1, 1, 1, 0.06f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1, 1, 1, 0.12f));
+        ImGui::PushStyleColor(ImGuiCol_Button, { 0,0,0,0 });
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, { 1,1,1,0.06f });
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, { 1,1,1,0.12f });
         char btnId[16]; snprintf(btnId, sizeof(btnId), "##ac%d", i);
-        if (ImGui::Button(btnId, ImVec2(CELL_W, CELL_H)))
+        if (ImGui::Button(btnId, ImVec2(cw, CELL_H)))
         {
-            if (detailIndex == i) { showDetail = false; detailIndex = -1; }
-            else { detailIndex = i;    showDetail = true; }
+            detailIndex = (detailIndex == i) ? -1 : i; showDetail = (detailIndex >= 0);
         }
         ImGui::PopStyleColor(3);
 
         col++;
-        if (col >= COLS) { col = 0; ImGui::Dummy(ImVec2(0, 4.0f)); }
+        if (col >= cols) { col = 0; ImGui::Dummy({ 0, 4.0f }); }
     }
 
     ImGui::EndChild();
 
+
     if (showDetail && detailIndex >= 0 && detailIndex < (int)entries.size())
     {
         const auto& sel = entries[detailIndex];
-
         ImGui::Separator();
         ImGui::Spacing();
 
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.20f, 0.95f));
-        ImGui::BeginChild("##ach_detail", ImVec2(0, DETAIL_H - 16.0f), true);
+        ImGui::BeginChild("##ach_detail", ImVec2(0, DETAIL_H - 12.0f), true);
 
-        ImVec4 hdrCol = sel.completed ? COL_DONE : COL_WIP;
-        ImGui::TextColored(hdrCol, "%s", sel.name.c_str());
+        ImGui::TextColored(sel.completed ? COL_DONE : COL_WIP, "%s", sel.name.c_str());
         ImGui::Separator();
         ImGui::Spacing();
         ImGui::TextWrapped("%s", sel.desc.c_str());
         ImGui::Spacing();
 
-        // Progress line
         if (sel.completed)
         {
             ImGui::TextColored(COL_DONE, "Completed");
-            if (!sel.completedAt.empty())
-            {
+            if (!sel.completedAt.empty()) {
                 ImGui::SameLine();
                 ImGui::TextDisabled("on %s", sel.completedAt.c_str());
             }
@@ -187,23 +193,21 @@ void AchievementWindow::Render()
         else
         {
             ImGui::TextColored(COL_WIP, "Progress: %lld / %lld", sel.progress, sel.goal);
-
             ImDrawList* ddl = ImGui::GetWindowDrawList();
             ImVec2 bTL = ImGui::GetCursorScreenPos();
-            float bw = ImGui::GetContentRegionAvail().x;
-            float frac = (sel.goal > 0)
+            float  bw = ImGui::GetContentRegionAvail().x;
+            float  frac = sel.goal > 0
                 ? (float)std::min(sel.progress, sel.goal) / (float)sel.goal : 0.0f;
-            const float DETAIL_BAR_H = 10.0f;
-            ddl->AddRectFilled(bTL, ImVec2(bTL.x + bw, bTL.y + DETAIL_BAR_H),
+            const float DBH = 10.0f;
+            ddl->AddRectFilled(bTL, { bTL.x + bw, bTL.y + DBH },
                 IM_COL32(25, 45, 90, 220), 4.0f);
             if (frac > 0.0f)
-                ddl->AddRectFilled(bTL, ImVec2(bTL.x + bw * frac, bTL.y + DETAIL_BAR_H),
-                    IM_COL32((int)(BAR_FILL.x * 255), (int)(BAR_FILL.y * 255), (int)(BAR_FILL.z * 255), 230), 4.0f);
-            ImGui::Dummy(ImVec2(0, DETAIL_BAR_H + 4.0f));
+                ddl->AddRectFilled(bTL, { bTL.x + bw * frac, bTL.y + DBH },
+                    IM_COL32((int)(BAR_FILL.x * 255), (int)(BAR_FILL.y * 255),
+                        (int)(BAR_FILL.z * 255), 230), 4.0f);
+            ImGui::Dummy({ 0, DBH + 4.0f });
         }
-
         ImGui::TextDisabled("Type: %s", sel.type.c_str());
-
         ImGui::EndChild();
         ImGui::PopStyleColor();
     }

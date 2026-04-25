@@ -1,48 +1,209 @@
 ﻿<?xml version="1.0" encoding="utf-8" ?>
 <Achievements>
-	<Achievement name="Bandit Slayer" desc="Kill 20 bandits" type="kill">
+
+	<!-- ═══════════════════════════════════════════════════ -->
+	<!--                        KILL                        -->
+	<!-- ═══════════════════════════════════════════════════ -->
+
+	<Achievement name="First Blood" desc="Kill your first monster." type="kill">
+		<Count>1</Count>
+	</Achievement>
+
+	<Achievement name="Bandit Slayer" desc="Kill 20 bandits." type="kill">
 		<Count>20</Count>
 		<MonsterCodeName>MOB_CH_BANDIT</MonsterCodeName>
 	</Achievement>
 
-	<!-- MONSTER HUNTER ACH:01 -->
-
-	<Achievement name="Monster Hunter Lvl 1" desc="Kill 100 monsters" type="kill">
-		<Count>100</Count>
-		<!-- Overall -->
+	<!-- Monster Hunter chain -->
+	<Achievement name="Monster Hunter I"   desc="Kill 500 monsters."       type="kill">
+		<Count>500</Count>
 	</Achievement>
-
-	<Achievement name="Monster Hunter Lvl 2" desc="Kill 1,000 monsters" type="kill">
-		<Count>1000</Count>
-		<!-- Overall -->
+	<Achievement name="Monster Hunter II"  desc="Kill 2,000 monsters."     type="kill">
+		<Count>2000</Count>
 	</Achievement>
-
-	<Achievement name="Monster Hunter Lvl 3" desc="Kill 2,500 monsters" type="kill">
-		<Count>2500</Count>
-		<!-- Overall -->
-	</Achievement>
-
-	<Achievement name="Monster Hunter Lvl 4" desc="Kill 5,000 monsters" type="kill">
+	<Achievement name="Monster Hunter III" desc="Kill 5,000 monsters."     type="kill">
 		<Count>5000</Count>
-		<!-- Overall -->
 	</Achievement>
-
-	<Achievement name="Monster Hunter Lvl 5" desc="Kill 10,000 monsters" type="kill">
+	<Achievement name="Monster Hunter IV"  desc="Kill 10,000 monsters."    type="kill">
 		<Count>10000</Count>
-		<!-- Overall -->
 	</Achievement>
-
-	<Achievement name="Monster Hunter Lvl 6" desc="Kill 25,000 monsters" type="kill">
+	<Achievement name="Monster Hunter V"   desc="Kill 25,000 monsters."    type="kill">
 		<Count>25000</Count>
-		<!-- Overall -->
+	</Achievement>
+	<Achievement name="Monster Hunter VI"  desc="Kill 100,000 monsters."   type="kill">
+		<Count>100000</Count>
+	</Achievement>
+	<Achievement name="Monster Hunter VII" desc="Kill 1,000,000 monsters." type="kill">
+		<Count>1000000</Count>
 	</Achievement>
 
-	<Achievement name="Monster Hunter Lvl 7" desc="Kill 50,000 monsters" type="kill">
-		<Count>50000</Count>
-		<!-- Overall -->
+	<!-- ═══════════════════════════════════════════════════ -->
+	<!--                       LEVEL                        -->
+	<!-- ═══════════════════════════════════════════════════ -->
+
+	<Achievement name="Taking Your First Steps" desc="Reach level 10."  type="level">
+		<Count>10</Count>
+	</Achievement>
+	<Achievement name="Getting Serious"          desc="Reach level 30."  type="level">
+		<Count>30</Count>
+	</Achievement>
+	<Achievement name="Halfway There"            desc="Reach level 60."  type="level">
+		<Count>60</Count>
+	</Achievement>
+	<Achievement name="Elite"                    desc="Reach level 90."  type="level">
+		<Count>90</Count>
+	</Achievement>
+	<Achievement name="Century"                  desc="Reach level 100." type="level">
+		<Count>100</Count>
+	</Achievement>
+	<Achievement name="Master"                   desc="Reach level 110." type="level">
+		<Count>110</Count>
+	</Achievement>
+	<Achievement name="Transcendent"             desc="Reach the level cap of 120." type="level">
+		<Count>120</Count>
 	</Achievement>
 
-	<Achievement name="First Blood" desc="Kill your first monster!" type="kill">
+	<!-- ═══════════════════════════════════════════════════ -->
+	<!--                        GOLD                        -->
+	<!-- ═══════════════════════════════════════════════════ -->
+
+	<Achievement name="Pocket Change"   desc="Accumulate 100,000 gold."       type="gold">
+		<Count>100000</Count>
+	</Achievement>
+	<Achievement name="Comfortable"     desc="Accumulate 1,000,000 gold."     type="gold">
+		<Count>1000000</Count>
+	</Achievement>
+	<Achievement name="Five Million"    desc="Accumulate 5,000,000 gold."     type="gold">
+		<Count>5000000</Count>
+	</Achievement>
+	<Achievement name="High Roller"     desc="Accumulate 25,000,000 gold."    type="gold">
+		<Count>25000000</Count>
+	</Achievement>
+	<Achievement name="Silk Road Baron" desc="Accumulate 100,000,000 gold."   type="gold">
+		<Count>100000000</Count>
+	</Achievement>
+	<Achievement name="Mogul"           desc="Accumulate 500,000,000 gold."   type="gold">
+		<Count>500000000</Count>
+	</Achievement>
+
+	<!-- ═══════════════════════════════════════════════════ -->
+	<!--                       DEATH                        -->
+	<!-- ═══════════════════════════════════════════════════ -->
+
+	<Achievement name="First Lesson"    desc="Die for the first time. Everyone starts somewhere." type="death">
 		<Count>1</Count>
 	</Achievement>
+	<Achievement name="Frequent Flyer"  desc="Die 10 times."   type="death">
+		<Count>10</Count>
+	</Achievement>
+	<Achievement name="Glutton for Punishment" desc="Die 50 times."  type="death">
+		<Count>50</Count>
+	</Achievement>
+	<Achievement name="Serial Dier"     desc="Die 100 times."  type="death">
+		<Count>100</Count>
+	</Achievement>
+	<Achievement name="Masochist"       desc="Die 500 times."  type="death">
+		<Count>500</Count>
+	</Achievement>
+
+	<!-- ═══════════════════════════════════════════════════ -->
+	<!--                     ITEM USE                       -->
+	<!-- ═══════════════════════════════════════════════════ -->
+
+	<!-- Potion chains (keyword match) -->
+	<Achievement name="Potion Sipper"    desc="Use 100 potions."     type="itemuse">
+		<Count>100</Count>
+		<ItemCodeNameContains>POTION</ItemCodeNameContains>
+	</Achievement>
+	<Achievement name="Potion Drinker"   desc="Use 500 potions."     type="itemuse">
+		<Count>500</Count>
+		<ItemCodeNameContains>POTION</ItemCodeNameContains>
+	</Achievement>
+	<Achievement name="Potion Gulper"    desc="Use 2,500 potions."   type="itemuse">
+		<Count>2500</Count>
+		<ItemCodeNameContains>POTION</ItemCodeNameContains>
+	</Achievement>
+	<Achievement name="Potion Addict"    desc="Use 10,000 potions."  type="itemuse">
+		<Count>10000</Count>
+		<ItemCodeNameContains>POTION</ItemCodeNameContains>
+	</Achievement>
+	<Achievement name="Potion Fiend"     desc="Use 50,000 potions."  type="itemuse">
+		<Count>50000</Count>
+		<ItemCodeNameContains>POTION</ItemCodeNameContains>
+	</Achievement>
+
+	<!-- General item use -->
+	<Achievement name="Item Curious"  desc="Use 250 items."    type="itemuse">
+		<Count>250</Count>
+	</Achievement>
+	<Achievement name="Item User"     desc="Use 1,000 items."  type="itemuse">
+		<Count>1000</Count>
+	</Achievement>
+	<Achievement name="Item Junkie"   desc="Use 10,000 items." type="itemuse">
+		<Count>10000</Count>
+	</Achievement>
+
+	<!-- ═══════════════════════════════════════════════════ -->
+	<!--                   ITEM PICKUP                      -->
+	<!-- ═══════════════════════════════════════════════════ -->
+
+	<Achievement name="Eyes on the Ground" desc="Pick up your first item."      type="itempickup">
+		<Count>1</Count>
+	</Achievement>
+	<Achievement name="Scavenger"          desc="Pick up 500 items."            type="itempickup">
+		<Count>500</Count>
+	</Achievement>
+	<Achievement name="Hoarder"            desc="Pick up 5,000 items."          type="itempickup">
+		<Count>5000</Count>
+	</Achievement>
+	<Achievement name="Pack Rat"           desc="Pick up 25,000 items."         type="itempickup">
+		<Count>25000</Count>
+	</Achievement>
+	<Achievement name="Vacuum"             desc="Pick up 100,000 items."        type="itempickup">
+		<Count>100000</Count>
+	</Achievement>
+
+	<!-- ═══════════════════════════════════════════════════ -->
+	<!--                      AMMO                          -->
+	<!-- ═══════════════════════════════════════════════════ -->
+
+	<Achievement name="Nocked"          desc="Fire 100 arrows or bolts."       type="ammo">
+		<Count>100</Count>
+	</Achievement>
+	<Achievement name="Marksman"        desc="Fire 5,000 arrows or bolts."     type="ammo">
+		<Count>5000</Count>
+	</Achievement>
+	<Achievement name="Volley Master"   desc="Fire 25,000 arrows or bolts."    type="ammo">
+		<Count>25000</Count>
+	</Achievement>
+	<Achievement name="Arrow Storm"     desc="Fire 100,000 arrows or bolts."   type="ammo">
+		<Count>100000</Count>
+	</Achievement>
+	<Achievement name="Infinite Quiver" desc="Fire 1,000,000 arrows or bolts." type="ammo">
+		<Count>1000000</Count>
+	</Achievement>
+
+	<!-- ═══════════════════════════════════════════════════ -->
+	<!--                    PLAYTIME                        -->
+	<!-- ═══════════════════════════════════════════════════ -->
+
+	<Achievement name="Just Visiting"   desc="Play for 1 hour."     type="playtime">
+		<Count>60</Count>
+	</Achievement>
+	<Achievement name="Regular"         desc="Play for 10 hours."   type="playtime">
+		<Count>600</Count>
+	</Achievement>
+	<Achievement name="Dedicated"       desc="Play for 24 hours."   type="playtime">
+		<Count>1440</Count>
+	</Achievement>
+	<Achievement name="Obsessed"        desc="Play for 72 hours."   type="playtime">
+		<Count>4320</Count>
+	</Achievement>
+	<Achievement name="No Life"         desc="Play for 200 hours."  type="playtime">
+		<Count>12000</Count>
+	</Achievement>
+	<Achievement name="Silkroad is Life" desc="Play for 500 hours." type="playtime">
+		<Count>30000</Count>
+	</Achievement>
+
 </Achievements>

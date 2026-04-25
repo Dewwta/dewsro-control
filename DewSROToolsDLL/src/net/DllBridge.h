@@ -29,6 +29,7 @@ struct PlayerState
 struct State
 {
     int sessionSeconds = 0;
+    int totalSeconds = 0;
     int sessionKills = 0;
     int isAfk = 0;
     DWORD syncTick = 0;

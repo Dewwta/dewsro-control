@@ -529,7 +529,36 @@ namespace VSRO_CONTROL_API.VSRO
                     )
                 );
                 ";
+        public const string MoveNPCToCharLocation_q = @"
+            USE [SRO_VT_SHARD];
 
+            DECLARE @NPCODE VARCHAR(129);
+            DECLARE @CHARNAME VARCHAR(64);
+            DECLARE @Z_X_Y_LOCATION INT;
+
+            SET @NPCODE = @NPCCODENAME;
+            SET @CHARNAME = @CHARACTERNAME;
+            SET @Z_X_Y_LOCATION = @DIRECTION;
+
+            DECLARE @AS1 INT = (SELECT ID FROM _RefObjCommon WHERE CodeName128 = @NPCODE);
+            DECLARE @AS2 INT = (SELECT dwTacticsID FROM Tab_RefTactics WHERE dwObjID = @AS1);
+            DECLARE @AS3 INT = (SELECT dwNestID FROM Tab_RefNest WHERE dwTacticsID = @AS2);
+
+            DECLARE @ASpos1 INT = (SELECT latestregion FROM _char WHERE charname16 = @CHARNAME);
+            DECLARE @ASpos2 INT = (SELECT posx FROM _char WHERE charname16 = @CHARNAME);
+            DECLARE @ASpos3 INT = (SELECT posy FROM _char WHERE charname16 = @CHARNAME);
+            DECLARE @ASpos4 INT = (SELECT posz FROM _char WHERE charname16 = @CHARNAME);
+
+            UPDATE Tab_RefNest
+            SET 
+                nregiondbid = @ASpos1,
+                flocalposx = @ASpos2,
+                flocalposy = @ASpos3,
+                flocalposz = @ASpos4,
+                wInitialDir = @Z_X_Y_LOCATION
+            WHERE dwnestid = @AS3 
+              AND dwtacticsid = @AS2;
+            ";
         public static readonly string[] MonsterAreaPrefixes = new string[]
         {
             "MOB_CH_",   // Jangan

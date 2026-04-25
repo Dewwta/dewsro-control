@@ -1283,7 +1283,7 @@ namespace VSRO_CONTROL_API.VSRO
                     using (SqlCommand cmd = new SqlCommand(Constant.AddSilkToUserByJID_q, conn))
                     {
                         cmd.Parameters.AddWithValue("@SILKAMOUNT", _silkAmount);
-                        cmd.Parameters.AddWithValue("@JIDNUM", _jid);
+                        cmd.Parameters.AddWithValue("@JID", _jid);
 
                         int affectedRows = await cmd.ExecuteNonQueryAsync();
                         Logger.Info(typeof(DBConnect), $"Added silk! Amount: {_silkAmount} - User Id: {_jid}");

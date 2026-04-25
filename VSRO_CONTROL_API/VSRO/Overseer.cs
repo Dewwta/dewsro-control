@@ -141,7 +141,6 @@ namespace VSRO_CONTROL_API.VSRO
                 new("ITEM_COS_P_SPOT_RABBIT_SCROLL",    DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_SPOT_RABBIT_SCROLL")),
                 new("ITEM_COS_P_SEOWON_SCROLL",         DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_SEOWON_SCROLL")),
                 new("ITEM_COS_P_GGLIDER_SCROLL",        DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_GGLIDER_SCROLL")),
-                new("ITEM_COS_P_BROWNIE_SCROLL",        DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_BROWNIE_SCROLL")),
                 new("ITEM_COS_P_MYOWON_SCROLL",         DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_MYOWON_SCROLL")),
             },
 
@@ -292,6 +291,7 @@ namespace VSRO_CONTROL_API.VSRO
         public static HashSet<int> ShopNPCIds = new HashSet<int>();
         public static Dictionary<byte, ulong> ExpTable = new();
         public static Dictionary<byte, ulong> ExpTableCumulative = new();
+        
         #endregion
 
         #region - Startup -
@@ -1238,6 +1238,7 @@ namespace VSRO_CONTROL_API.VSRO
 
         public static void StartAgentMonitor()
         {
+            StopAgentMonitorLoop();
             _monitorCts = new CancellationTokenSource();
             var token = _monitorCts.Token;
 
@@ -1260,9 +1261,12 @@ namespace VSRO_CONTROL_API.VSRO
                 _monitorTask?.Wait(2000);
             }
             catch { }
-
-            _monitorTask = null;
-            _monitorCts = null;
+            finally
+            {
+                _monitorCts?.Dispose();
+                _monitorCts = null;
+                _monitorTask = null;
+            }
         }
         private static async Task GlobalNoticeLoop(CancellationToken token)
         {
@@ -1514,7 +1518,6 @@ namespace VSRO_CONTROL_API.VSRO
         {
             if (AgentProxy == null)
             {
-                Logger.Error(typeof(Overseer), $"AgentProxy was null!");
                 return -1;
             }
 
@@ -1541,8 +1544,18 @@ namespace VSRO_CONTROL_API.VSRO
         }
         public static Proxy? GetProxyByAccount(string accountName)
         {
+            Logger.Debug(typeof(Overseer), $"accountName: {accountName}");
+
+            foreach (var proxy in AgentProxy?.Connections?.Values!)
+            {
+                Logger.Debug(typeof(Overseer), $"Canidate: {proxy.Session!.AccountName}");
+            }
+
             return AgentProxy?.Connections.Values
-                .FirstOrDefault(p => p.Session?.AccountName == accountName);
+                .FirstOrDefault(p =>
+                    p.Session != null &&
+                    p.Session.AccountName!.Equals(accountName, StringComparison.OrdinalIgnoreCase));
+
         }
 
         #endregion

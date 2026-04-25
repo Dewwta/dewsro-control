@@ -3,6 +3,7 @@ using CoreLib.Tools.Logging;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 
 public class DllBridge : IDisposable
@@ -92,48 +93,70 @@ public class DllBridge : IDisposable
 
     private async Task HandleClientAsync(TcpClient tcp, CancellationToken ct)
     {
-        var reader = new StreamReader(tcp.GetStream());
-        var writer = new StreamWriter(tcp.GetStream()) { AutoFlush = true };
-        string accountName = null;
+        // Kill dead connections
+        tcp.ReceiveTimeout = 60_000;
+        tcp.SendTimeout = 10_000;
+
+        var stream = tcp.GetStream();
+        var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+        var writer = new StreamWriter(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+        string? accountName = null;
 
         try
         {
-            
             while (!ct.IsCancellationRequested && tcp.Connected)
             {
-                var line = await reader.ReadLineAsync(ct);
-                if (line == null) break;
-
-                var doc = JsonDocument.Parse(line);
-                var type = doc.RootElement.GetProperty("type").GetString();
-
-                if (string.IsNullOrWhiteSpace(line) || line[0] != '{')
+                string? line;
+                try
                 {
-                    Logger.Debug("DllBridge", $"Skipping non-JSON line");
-                    continue;
+                    // Per-read timeout — if the socket goes silent, this throws after 60s
+                    using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    readCts.CancelAfter(60_000);
+                    line = await reader.ReadLineAsync(readCts.Token);
                 }
-                // Intercept auth to bind the writer.
+                catch
+                {
+                    break; // dead socket, timeout, or cancelled — clean exit
+                }
+
+                if (line == null) break; // remote closed cleanly
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                if (line[0] != '{' || line[line.Length - 1] != '}') continue;
+
+                JsonDocument doc;
+                try { doc = JsonDocument.Parse(line); }
+                catch { continue; }
+
+                if (!doc.RootElement.TryGetProperty("type", out var typeProp)) continue;
+                var type = typeProp.GetString();
+                if (string.IsNullOrEmpty(type)) continue;
+
                 if (type == "auth")
                 {
-                    accountName = doc.RootElement.GetProperty("user").GetString();
+                    if (!doc.RootElement.TryGetProperty("user", out var userProp)) continue;
+                    accountName = userProp.GetString();
+                    if (string.IsNullOrEmpty(accountName)) continue;
+
                     _clients[accountName.ToLowerInvariant()] = writer;
                     Logger.Debug("DllAuth", $"Sending ack for user {accountName}");
-                    DllBridge.Instance.SendToDll(accountName!, "login_ack", new { });
+                    SendToDll(accountName, "login_ack", new { });
                     Logger.Info(this, $"Registered connection for {accountName}");
+                    continue;
                 }
 
-                if (_handlers.TryGetValue(type!, out var handler))
+                if (_handlers.TryGetValue(type, out var handler))
                     await handler(accountName ?? "unknown", doc.RootElement);
             }
         }
         catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) { } // proxt disposes deliberately, can be noisy, silencing it
-        catch (IOException) { }        // normal TCP drop / stream closed
-        catch (SocketException) { }    // connection reset by peer
+        catch (IOException) { }
+        catch (SocketException) { }
         catch (Exception ex) { Logger.Error(this, $"Client error: {ex.Message}"); }
         finally
         {
-            if (accountName != null) _clients.TryRemove(accountName, out _);
+            if (accountName != null)
+                _clients.TryRemove(accountName.ToLowerInvariant(), out _);
             tcp.Dispose();
         }
     }

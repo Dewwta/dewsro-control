@@ -22,6 +22,7 @@
         public byte? PendingLevelReward { get; set; } = null;
         public List<byte> UnclaimedRewards { get; set; } = new();
         public SemaphoreSlim AchievementLock { get; } = new SemaphoreSlim(1, 1);
-        
+        public TimeSpan TotalPlayTime { get; set; } = TimeSpan.Zero;
+
     }
 }

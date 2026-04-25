@@ -42,6 +42,7 @@ void RegisterAllHandlers() {
 
     g_bridge.RegisterHandler("session_sync", [](const std::string& json) {
         g_bridge.m_sessionState.sessionSeconds = g_bridge.ExtractInt(json, "sessionSeconds");
+        g_bridge.m_sessionState.totalSeconds = g_bridge.ExtractInt(json, "totalSeconds");
         g_bridge.m_sessionState.sessionKills = g_bridge.ExtractInt(json, "sessionKills");
         g_bridge.m_sessionState.isAfk = g_bridge.ExtractInt(json, "isAfk");
         g_bridge.m_sessionState.syncTick = GetTickCount();
@@ -89,6 +90,7 @@ void RegisterAllHandlers() {
         g_bridge.unclaimedRewards.clear();
         auto start = json.find('[');
         auto end = json.find(']');
+       
         if (start == std::string::npos || end == std::string::npos) return;
 
         std::string arr = json.substr(start + 1, end - start - 1);
@@ -115,10 +117,9 @@ void RegisterAllHandlers() {
         g_bridge.m_state.currentLevel = g_bridge.ExtractInt(json, "lvl");
     });
 
-    // In RegisterAllHandlers()
     g_bridge.RegisterHandler("achievements", [](const std::string& json) {
         std::vector<AchievementEntry> entries;
-
+        
         auto arrStart = json.find("\"items\":[");
         if (arrStart == std::string::npos) return;
         arrStart += 9;
@@ -145,7 +146,13 @@ void RegisterAllHandlers() {
             e.type = g_bridge.ExtractStr(obj, "type");
             e.goal = (long long)g_bridge.ExtractInt(obj, "goal");
             e.progress = (long long)g_bridge.ExtractInt(obj, "progress");
-            e.completed = g_bridge.ExtractInt(obj, "completed") != 0;
+            auto cpos = obj.find("\"completed\":");
+            if (cpos != std::string::npos) {
+                cpos += 12;
+                while (cpos < obj.size() && obj[cpos] == ' ') cpos++;
+                e.completed = obj.substr(cpos, 4) == "true";
+            }
+            
             e.completedAt = g_bridge.ExtractStr(obj, "completedAt");
             if (!e.name.empty()) entries.push_back(e);
 
@@ -153,7 +160,7 @@ void RegisterAllHandlers() {
         }
 
         g_achWindow.Open(std::move(entries));
-        });
+    });
 }
 
 void Control::Initialize()

@@ -50,19 +50,15 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network
         {
             if (SettingsLoader.Settings != null && SettingsLoader.Settings.Proxy?.SilkPerXHours > 0)
             {
-                var hours = (int)session.AccumulatedPlayTime.TotalHours;
-
-                // how many reward intervals should have happened
-                var rewardIntervals = hours / SettingsLoader.Settings.Proxy.SilkPerXHours;
+                var minutes = (int)session.AccumulatedPlayTime.TotalMinutes;
+                var rewardIntervals = minutes / SettingsLoader.Settings.Proxy.SilkPerXHours;
 
                 if (rewardIntervals > session.RewardedHours)
                 {
                     session.RewardedHours = rewardIntervals;
-
                     OnPlaytimeHourReached?.Invoke(this, session);
                 }
             }
-            
         }
         #endregion
 

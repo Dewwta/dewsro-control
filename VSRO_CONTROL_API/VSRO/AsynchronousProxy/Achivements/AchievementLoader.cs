@@ -40,9 +40,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
             }
         }
 
-        /// <summary>
-        /// Quick lookup by name. Returns null if not found or not loaded.
-        /// </summary>
         public static AchievementDefinition? GetByName(string name)
         {
             if (!IsLoaded || Definitions == null) return null;
@@ -50,9 +47,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
                 .FirstOrDefault(a => a.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         }
 
-        /// <summary>
-        /// Get all definitions matching a type (e.g. "kill").
-        /// </summary>
         public static List<AchievementDefinition> GetByType(string type)
         {
             if (!IsLoaded || Definitions == null) return new();

@@ -22,14 +22,14 @@
 		<AgentPort>17774</AgentPort>
 		<GatewayPort>17779</GatewayPort>
 		<DownloadPort>17771</DownloadPort>
-		<SilkPerXHours>1</SilkPerXHours> <!-- Set to 0 to disable -->
+		<SilkPerXHours>30</SilkPerXHours> <!-- Set to 0 to disable -->
 		<SilkAmount>25</SilkAmount>
 		<AutoNoticeInterval>5</AutoNoticeInterval>
 		<AutoNoticeMessage>Good luck!</AutoNoticeMessage>
 		<AutoLongestOnlinePlayerInterval>10</AutoLongestOnlinePlayerInterval>
 		<LongestPlayerOnlineMessage>{NAME} has been no-lifing for {TIME}</LongestPlayerOnlineMessage>
 		<AfkMessage>{NAME}, You are AFK</AfkMessage>
-		<AfkTime>300</AfkTime>
+		<AfkTime>600</AfkTime>
 		<BackFromAfkMessage>Welcome back {NAME}!</BackFromAfkMessage>
 	</Proxy>
 
