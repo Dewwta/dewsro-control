@@ -24,9 +24,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\RSBot.FileSystem\FileSystem.csproj" />
-    <ProjectReference Include="..\RSBot.NavMeshApi\NavMesh.csproj" />
     <ProjectReference Include="..\CoreLib\CoreLib.csproj" />
+	<ProjectReference Include="..\FileSystem\FileSystem.csproj" />
+	<ProjectReference Include="..\NavMeshApi\NavMesh.csproj" />
   </ItemGroup>
 
 </Project>
