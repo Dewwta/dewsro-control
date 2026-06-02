@@ -10,6 +10,7 @@ namespace CoreLib.Processes
 {
     public class ProcessTools
     {
+        // Just some helpers for proccess launches uwu
         public static Process? LaunchProcessTracked(string exePath, int delayMs, string name, string args = "")
         {
             try

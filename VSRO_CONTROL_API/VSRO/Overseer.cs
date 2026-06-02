@@ -17,6 +17,9 @@ using VSRO_CONTROL_API.VSRO.Tools;
 
 namespace VSRO_CONTROL_API.VSRO
 {
+    /// <summary>
+    /// This is the Overseer. Responsible for being in the middle of server automation.
+    /// </summary>
     public static class Overseer
     {
         #region Win32
@@ -125,7 +128,6 @@ namespace VSRO_CONTROL_API.VSRO
         }
 
         #endregion
-
         
         #region - Rewards -
         
@@ -249,7 +251,6 @@ namespace VSRO_CONTROL_API.VSRO
 
         #endregion
 
-
         #region - Fields -
 
         private static StartupSettings? ss;
@@ -288,6 +289,8 @@ namespace VSRO_CONTROL_API.VSRO
         private static CancellationTokenSource? _monitorCts;
         private static Task? _monitorTask;
         public static Dictionary<(int NpcObjID, int TabIndex, int SlotIndex), (int RefItemID, string CodeName)> ShopLookup = new Dictionary<(int NpcObjID, int TabIndex, int SlotIndex), (int RefItemID, string CodeName)>();
+        public static Dictionary<(int TabID, int Slot), ItemRecord> MallLookup = new();
+
         public static HashSet<int> ShopNPCIds = new HashSet<int>();
         public static Dictionary<byte, ulong> ExpTable = new();
         public static Dictionary<byte, ulong> ExpTableCumulative = new();
@@ -361,7 +364,7 @@ namespace VSRO_CONTROL_API.VSRO
 
                 // Build the shop db
                 await BuildShopDB();
-
+                //await BuildMallDB();
                 // ── Step 2: Start Cert module ─────────────────────────────────────
                 _stage = "Starting Cert Server";
                 CertServer = ProcessTools.LaunchProcessTracked(ss.CertServerPath!, 4000, "Cert Server", ss.CertServerArgs ?? "");
@@ -788,6 +791,7 @@ namespace VSRO_CONTROL_API.VSRO
 
         public static void SetupProxy()
         {
+            // Gateway is always first.
             GatewayProxy = new Server();
             GatewayProxy.SetProxy(Settings.Proxy!.IntegratedProxyIP!, Settings.Proxy!.GatewayServerPort);
             GatewayProxy.Start(15779);
@@ -860,6 +864,48 @@ namespace VSRO_CONTROL_API.VSRO
 
             ShopNPCIds = ShopLookup.Keys.Select(k => k.NpcObjID).ToHashSet();
             Logger.Info("ShopDB", $"Loaded {ShopLookup.Count} shop entries for {ShopNPCIds.Count} NPCs");
+        }
+        public static async Task BuildMallDB()
+        {
+            var query = @"
+                SELECT 
+                    goods.RefTabCodeName,
+                    goods.SlotIndex,
+                    goods.RefPackageItemCodeName
+                FROM _refShopGoods goods
+                WHERE goods.RefTabCodeName LIKE 'MALL_%'
+                ORDER BY goods.RefTabCodeName, goods.SlotIndex";
+
+            using var conn = DBConnect.OpenConnection("SRO_VT_SHARD");
+            await conn.OpenAsync();
+
+            using var cmd = new SqlCommand(query, conn);
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            while (await reader.ReadAsync())
+            {
+                string tabCode = reader["RefTabCodeName"].ToString()!;
+                int slot = Convert.ToInt32(reader["SlotIndex"]);
+                string packageName = reader["RefPackageItemCodeName"].ToString()!;
+
+                // PACKAGE → ITEM
+                string itemCode = packageName.Replace("PACKAGE_ITEM", "ITEM_");
+
+                var tabResult = await DBConnect.GetMallTabId(tabCode);
+                if (!tabResult.success)
+                    continue;
+
+                var itemResult = await DBConnect.GetItemRecordByCodeName(itemCode);
+                if (!itemResult.success)
+                    continue;
+
+                var key = (tabResult.tabId, slot);
+
+                if (!MallLookup.ContainsKey(key))
+                    MallLookup[key] = itemResult.item!;
+            }
+
+            Logger.Info("MallDB", $"Loaded {MallLookup.Count} mall entries");
         }
         private static void RegisterGWSHandlers()
         {
@@ -1056,18 +1102,39 @@ namespace VSRO_CONTROL_API.VSRO
                         Logger.Info(typeof(Overseer),
                             $"Agent Server: Connection finished ({endpoint})");
 
-                        if (proxy.SessionTokenSource != null)
+                        if (proxy.Session != null && proxy != null)
                         {
-                            proxy.SessionTokenSource.Cancel();
-                            proxy.SessionTokenSource.Dispose();
-                            proxy.SessionTokenSource = null;
+                            if (proxy.Session!._walkerCts != null)
+                            {
+                                proxy.Session!._walkerCts.Cancel();
+                                proxy.Session!._walkerCts.Dispose();
+                                proxy.Session!._walkerCts = null;
+                            }
+
+                            if (proxy.Session!.SessionTokenSource != null)
+                            {
+                                proxy.Session!.SessionTokenSource.Cancel();
+                                proxy.Session!.SessionTokenSource.Dispose();
+                                proxy.Session!.SessionTokenSource = null;
+                            }
+
+                            if (proxy.Session!.ActiveSortCts != null)
+                                proxy.Session!.ActiveSortCts?.Cancel();
+                            
+                            if (session != null && !string.IsNullOrEmpty(session.CharacterName))
+                            {
+                                DllBridge.Instance.RemoveClient(session.AccountName!);
+
+                                await DBConnect.AddPlayTimeAsync(session.CharacterName, session.AccumulatedPlayTime);
+                                session.AccumulatedPlayTime = TimeSpan.Zero; // prevent double-save safety net
+
+                                Logger.Info(typeof(Overseer),
+                                    $"Saved playtime for {session.CharacterName}: {session.AccumulatedPlayTime}");
+
+                                CharacterSnapshotStore.Save(session, proxy.Session.Inventory);
+                            }
                         }
 
-                        if (proxy.ActiveSortCts != null)
-                            proxy.ActiveSortCts?.Cancel();
-                        
-
-                        
                         if (session != null && !string.IsNullOrEmpty(session.CharacterName))
                         {
                             DllBridge.Instance.RemoveClient(session.AccountName!);
@@ -1078,7 +1145,7 @@ namespace VSRO_CONTROL_API.VSRO
                             Logger.Info(typeof(Overseer),
                                 $"Saved playtime for {session.CharacterName}: {session.AccumulatedPlayTime}");
 
-                            CharacterSnapshotStore.Save(session, proxy.Inventory);
+                            CharacterSnapshotStore.Save(session, proxy.Session.Inventory);
                         }
                     }
                     catch (Exception ex)
@@ -1151,12 +1218,15 @@ namespace VSRO_CONTROL_API.VSRO
             PlayerTools.RegisterStorageHandler(AgentProxy);
             PlayerTools.RegisterPlayerKillHandler(AgentProxy);
             PlayerTools.RegisterSTRINTUpdateHandler(AgentProxy);
-            PlayerTools.RegisterClientMovementHandler(AgentProxy);
             PlayerTools.RegisterClientSortHandler(AgentProxy);
             PlayerTools.RegisterPlayerRewardHandler(AgentProxy);
             PlayerTools.RegisterAchievementHandler(AgentProxy);
-            //RegisterExploitFilter(AgentProxy, GatewayProxy);
-            // Activity Time
+            PlayerTools.RegisterBotHandler(AgentProxy);
+            PlayerTools.RegisterBuffHandler(AgentProxy);
+            PlayerTools.RegisterServerMovementHandler(AgentProxy);
+            PlayerTools.RegisterAttackHandlers(AgentProxy);
+
+            RegisterExploitFilter(AgentProxy, GatewayProxy!);
             ushort[] activityOpcodes =
             {
                 Constant.CLIENT_MOVEMENT,
@@ -1341,19 +1411,19 @@ namespace VSRO_CONTROL_API.VSRO
             Thread.Sleep(800);
             GetWindowRect(hwnd, out RECT rect);
 
-            // ── Click "ServerControl" tab ─────────────────────────────────────
+            // Click "ServerControl" tab
             ClickAt(rect.Left + 375, rect.Top + 58);
             Thread.Sleep(2000);
 
-            // ── Right-click in the node area ──────────────────────────────────
+            // Right-click in the node area
             RightClickAt(rect.Left + 640, rect.Top + 200);
             Thread.Sleep(500);
 
-            // ── Click "Start All Service" (4th item) ──────────────────────────
+            // Click "Start All Service" (4th item)
             ClickAt(rect.Left + 900, rect.Top + 200 + 99);
             Thread.Sleep(600);
 
-            // ── Handle "warnning" popup ───────────────────────────────────────
+            // Handle "warnning" popup
             Logger.Info(typeof(Overseer), "Waiting for 'warnning' confirmation popup...");
             IntPtr warnHwnd = WaitForWindow("warnning", timeoutMs: 8000);
             if (warnHwnd == IntPtr.Zero)
@@ -1390,46 +1460,34 @@ namespace VSRO_CONTROL_API.VSRO
             // Window is full/near-full screen on 1024x768
             // All offsets are relative to window top-left
 
-            // ── Step 1: Click "Application" menu ─────────────────────────────────
-            // From screenshot: "Application" text starts at roughly x=48, menu bar y≈11
+            // Click "Application" menu
+
             ClickAt(rect.Left + 48, rect.Top + 11);
             Thread.Sleep(600); // Slightly longer — give dropdown time to fully render
 
-            // ── Step 2: Click "LoadPlugins" dropdown item ─────────────────────────
-            // From screenshot: dropdown appears directly below, "LoadPlugins" is first item ~y=39
+            // Click "LoadPlugins" dropdown item
             ClickAt(rect.Left + 48, rect.Top + 58);
-            Logger.Info(typeof(Overseer), "Clicked LoadPlugins. Waiting 8 seconds for plugins to load...");
-            Thread.Sleep(20000); // Give it extra headroom
+            Logger.Info(typeof(Overseer), "Clicked LoadPlugins. Waiting 6 seconds for plugins to load...");
+            Thread.Sleep(6000); // Give it extra headroom
 
-            // Re-assert focus after the long wait — another window may have taken it
+            // Re-assert focus after the long wait
             ForceWindowToFront(hwnd);
             Thread.Sleep(500);
 
-            // ── Step 3: Click "ServerControl" tab ────────────────────────────────
-            // From screenshot: tab bar is at y≈36 after plugins load
-            // "ServerControl" is the 6th tab. Tabs start ~x=5, each roughly 105px wide
-            // CAS|ConcurrentUserLog|ModulePatch|Notice|Security|ServerControl
-            // 0    1                2           3      4        5
-            // Approximate x center of ServerControl tab ≈ 440
+            // Click "ServerControl" tab
             ClickAt(rect.Left + 375, rect.Top + 58);
-            Thread.Sleep(5000);
+            Thread.Sleep(500);
 
-            // ── Step 4: Right-click in the node area ─────────────────────────────
-            // From screenshot: node boxes (Common/Shard/ServerMachine) appear in upper area
-            // Right click in open space below/beside them, not ON a box
-            // Safe area: center of window, avoiding the boxes ~x=640, y=200
+            // Right-click in the node area
             RightClickAt(rect.Left + 640, rect.Top + 200);
             Thread.Sleep(500);
 
-            // ── Step 5: Click "Start All Service" (4th item) ─────────────────────
-            // Menu rendered at ~x=848 center, items ~37px tall, Start All Service = 4th item
-            // Right-click was at (640, 200), menu appeared to the right
-            // Click at fixed offset from where menu appeared
+            // Click "Start All Service" (4th item)
             ClickAt(rect.Left + 900, rect.Top + 200 + 99);
             Thread.Sleep(600);
 
 
-            // ── Step 6: Handle "warnning" popup ──────────────────────────────────
+            // Handle "warnning" popup
             Logger.Info(typeof(Overseer), "Waiting for 'warnning' confirmation popup...");
             IntPtr warnHwnd = WaitForWindow("warnning", timeoutMs: 8000);
             if (warnHwnd == IntPtr.Zero)
@@ -1447,10 +1505,7 @@ namespace VSRO_CONTROL_API.VSRO
             RightClickAt(rect.Left + 640, rect.Top + 200);
             Thread.Sleep(500);
 
-            // ── Step 7: Click "Deactivate Alarm" (4th item) ─────────────────────
-            // Menu rendered at ~x=848 center, items ~37px tall, Start All Service = 4th item
-            // Right-click was at (640, 200), menu appeared to the right
-            // Click at fixed offset from where menu appeared
+            // Click "Deactivate Alarm" (3rd item)
             ClickAt(rect.Left + 900, rect.Top + 200 + 79);
             Thread.Sleep(600);
 
@@ -1542,7 +1597,15 @@ namespace VSRO_CONTROL_API.VSRO
             Logger.Info(typeof(Overseer), $"Notice sent to {sent} client(s): {message}");
             return sent;
         }
-        public static Proxy? GetProxyByAccount(string accountName)
+        
+
+
+        /// <summary>
+        /// Returns a currently connected proxy by its account name.
+        /// </summary>
+        /// <param name="accountName"></param>
+        /// <returns>Proxy instance</returns>
+        public static Proxy? GetProxyByAccountName(string accountName)
         {
             Logger.Debug(typeof(Overseer), $"accountName: {accountName}");
 
@@ -1558,6 +1621,40 @@ namespace VSRO_CONTROL_API.VSRO
 
         }
 
+        /// <summary>
+        /// Returns a currently connected proxy by its character name.
+        /// </summary>
+        /// <param name="charName"></param>
+        /// <returns>Proxy instance</returns>
+        public static Proxy? GetProxyByCharacterName(string charName)
+        {
+            Logger.Debug(typeof(Overseer), $"charName: {charName}");
+
+            foreach (var proxy in AgentProxy?.Connections?.Values!)
+            {
+                Logger.Debug(typeof(Overseer), $"Canidate: {proxy.Session!.CharacterName}");
+            }
+
+            return AgentProxy?.Connections.Values
+                .FirstOrDefault(p =>
+                    p.Session != null &&
+                    p.Session.CharacterName!.Equals(charName, StringComparison.OrdinalIgnoreCase));
+
+        }
+        /// <summary>
+        /// Finds the (tabIndex, slotIndex) of an item in a specific NPC's shop by CodeName.
+        /// Safe to call because no NPC has duplicate items across tabs.
+        /// Returns null if not found.
+        /// </summary>
+        public static (int tab, int slot)? FindShopSlot(int npcRefObjId, string codeName)
+        {
+            foreach (var kvp in ShopLookup)
+            {
+                if (kvp.Key.NpcObjID == npcRefObjId && kvp.Value.CodeName == codeName)
+                    return (kvp.Key.TabIndex, kvp.Key.SlotIndex);
+            }
+            return null;
+        }
         #endregion
 
 

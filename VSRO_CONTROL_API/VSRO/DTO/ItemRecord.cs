@@ -2,6 +2,7 @@
 {
     public class ItemRecord
     {
+        public int ID { get; set; }
         public string CodeName { get; set; }
         public byte T1 { get; set; }
         public byte T2 { get; set; }

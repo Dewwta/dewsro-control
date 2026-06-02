@@ -2,6 +2,8 @@ using CoreLib.Tools.Logging;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using VSRO_CONTROL.FileSystem;
+using VSRO_CONTROL.NavMeshApi;
 using VSRO_CONTROL_API.Settings;
 using VSRO_CONTROL_API.VSRO;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy;
@@ -9,7 +11,6 @@ using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements;
 using VSRO_CONTROL_API.VSRO.Backup;
 using VSRO_CONTROL_API.VSRO.ServerCfg;
 using VSRO_CONTROL_API.VSRO.Tools;
-
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,10 +20,16 @@ Logger.Init(new LoggerSettings
     CleanupTimerInHours = 48,
     SaveTimerInHours = 12
 });
+
 if (SettingsLoader.LoadSettings() == true)
 {
     Logger.Info(typeof(Program), "Succesfully loaded Settings/settings.xml");
 }
+
+// init navmesh
+var pk2 = new PackFileSystem("C:\\pk2\\Data.pk2", "169841");
+NavMeshManager.Initialize(pk2);
+
 var dbUrl = builder.Configuration["DBUrl"];
 if (!string.IsNullOrEmpty(dbUrl)) 
 {
@@ -50,7 +57,7 @@ else
         Logger.Info(typeof(Program), "Achievement DB init failed — system disabled.");
 }
 
-Logger.SetDebug(SettingsLoader.Settings!.DebugMode);
+Logger.SetLogLevel(Logger.LogLevel.Trace);
 
 await Overseer.Initialize();
 
@@ -67,6 +74,8 @@ else
 {
     Logger.Warn(typeof(Program), "ServerCfgPath not set in settings.xml. Server rates will be unavailable.");
 }
+
+
 
 // Configure JWT Authentication
 var jwtSecret = builder.Configuration["JwtSettings:Secret"];

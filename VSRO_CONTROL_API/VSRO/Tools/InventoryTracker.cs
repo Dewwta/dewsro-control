@@ -9,21 +9,21 @@ namespace VSRO_CONTROL_API.VSRO.Tools
     public class InventoryTracker
     {
         // 0x30C9 is sometime delayed after 0x30C8. so we need to defer it from parsing until the pet spawn packet is parsed.
-        public ConcurrentDictionary<uint, (Packet Packet, byte ItemCount)> PendingCosPages { get; } = new();
+        public ConcurrentDictionary<uint, (Packet Packet, byte ItemCount)> PendingCosPages { get; set; } = new();
 
         // Avatars
-        public ConcurrentDictionary<byte, (int ItemID, string CodeName, int Stack, int MaxStack)> Avatars { get; } = new();
+        public ConcurrentDictionary<byte, SR_Item> Avatars { get; set; } = new();
 
         // Storage
-        public ConcurrentDictionary<byte, (int ItemID, string CodeName, int Stack, int MaxStack)> Storage { get; } = new();
+        public ConcurrentDictionary<byte, SR_Item> Storage { get; set; } = new();
 
         // Player inventory
-        public ConcurrentDictionary<byte, (int ItemID, string CodeName, int Stack, int MaxStack)> Slots { get; } = new();
+        public ConcurrentDictionary<byte, SR_Item> Slots { get; set; } = new();
 
         // Pets
-        public ConcurrentDictionary<uint, Pet> Pets { get; } = new();
+        public ConcurrentDictionary<uint, Pet> Pets { get; set; } = new();
         // Equipment
-        public ConcurrentDictionary<byte, (int ItemID, string CodeName, int Stack, int MaxStack)> Equipment { get; } = new();
+        public ConcurrentDictionary<byte, SR_Item> Equipment { get; set; } = new();
 
         public bool IsReady { get; set; } = false;
 
@@ -36,7 +36,7 @@ namespace VSRO_CONTROL_API.VSRO.Tools
                 foreach (var kv in Equipment.OrderBy(k => k.Key))
                 {
                     Logger.Info("InventoryDump",
-                        $"  [{kv.Key,2}] {Truncate(kv.Value.CodeName, 30)}");
+                        $"  [{kv.Key,2}] {Truncate(kv.Value.CodeName128 ?? "Name was null", 30)}");
                 }
             }
 
@@ -45,7 +45,7 @@ namespace VSRO_CONTROL_API.VSRO.Tools
             foreach (var kv in Slots.OrderBy(k => k.Key))
             {
                 Logger.Info("InventoryDump",
-                    $"  [{kv.Key,2}] {Truncate(kv.Value.CodeName, 30)} ({kv.Value.Stack}/{kv.Value.MaxStack})");
+                    $"  [{kv.Key,2}] {Truncate(kv.Value.CodeName128 ?? "Name was null", 30)} ({kv.Value.Stack}/{kv.Value.MaxStack})");
             }
 
             // Pet Inventories
@@ -59,7 +59,7 @@ namespace VSRO_CONTROL_API.VSRO.Tools
                 foreach (var kv in petInv.OrderBy(k => k.Key))
                 {
                     Logger.Info("InventoryDump",
-                        $"  [{kv.Key,2}] {Truncate(kv.Value.CodeName, 30)} ({kv.Value.Stack}/{kv.Value.MaxStack})");
+                        $"  [{kv.Key,2}] {Truncate(kv.Value.CodeName128 ?? "Name was null", 30)} ({kv.Value.Stack}/{kv.Value.MaxStack})");
                 }
             }
         }

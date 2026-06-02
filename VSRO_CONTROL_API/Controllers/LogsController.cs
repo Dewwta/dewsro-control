@@ -11,8 +11,6 @@ namespace VSRO_CONTROL_API.Controllers
     {
         // GET api/logs?since=N
         // Returns all entries from index N onwards, plus the current total count.
-        // If 'since' exceeds the total (e.g. after a log flush cleared history),
-        // the client should reset its index and re-fetch from 0.
         [HttpGet]
         public IActionResult GetLogs([FromQuery] int since = 0)
         {

@@ -3,5 +3,7 @@
     <File Path=".editorconfig" />
   </Folder>
   <Project Path="CoreLib/CoreLib.csproj" />
+  <Project Path="RSBot.FileSystem/FileSystem.csproj" />
+  <Project Path="RSBot.NavMeshApi/NavMesh.csproj" />
   <Project Path="VSRO_CONTROL_API/VSRO_CONTROL_API.csproj" />
 </Solution>

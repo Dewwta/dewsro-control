@@ -81,7 +81,6 @@ namespace VSRO_CONTROL_API.Controllers
                     return BadRequest(msg);
                 }
 
-                // fetch the newly created user to get the real JID before updating profile fields
                 var userLookup = await DBConnect.GetUserAccountByUsername(_req.Username);
                 if (userLookup.success && userLookup.user != null)
                 {

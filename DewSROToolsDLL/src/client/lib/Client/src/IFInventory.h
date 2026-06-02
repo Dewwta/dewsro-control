@@ -1,0 +1,30 @@
+#pragma once
+
+#include "IFSlotWithHelp.h"
+#include "IFStorageRoom.h"
+#include "IFStoreForPackage.h"
+#include "IFWnd.h"
+#include "SOItem.h"
+
+class CIFInventory : public CIFWnd
+{
+
+public:
+    /// \address 0006b3e50
+    CSOItem* GetItemBySlot(int slotId);
+
+    /// \address 006b3ea0
+    CIFSlotWithHelp *GetItemSlotBySlotId(int slotId);
+
+public:
+	CIFStoreForPackage* m_storeWindow; //0x036C 
+	CIFStorageRoom* m_storageWindow; //0x0370 
+	char pad_0x0374[0xC]; //0x0374
+	__int32 N00000183; //0x0380 
+	char pad_0x0384[0x4]; //0x0384
+	CIFStatic* m_goldAmtText; //0x0388 
+	char pad_0x038C[0xC]; //0x038C
+	CIFButton* m_moneyDropButton; //0x0398 
+	char pad_0x039C[0x54]; //0x039C
+
+};//Size=0x03F0

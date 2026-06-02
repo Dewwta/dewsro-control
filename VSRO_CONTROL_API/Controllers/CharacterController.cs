@@ -62,7 +62,7 @@ namespace VSRO_CONTROL_API.Controllers
         }
 
         // GET /api/characters/{charId}/snapshot
-        // Returns the state for a single character — live if online, persisted if not.
+        // Returns the state for a single character - live if online, persisted if not.
         [RequireAuth]
         [HttpGet("{charName}/snapshot")]
         public IActionResult GetSnapshot(string charName)
@@ -95,7 +95,7 @@ namespace VSRO_CONTROL_API.Controllers
         private static CharacterSnapshot BuildLiveSnapshot(Proxy proxy)
         {
             var session = proxy.Session!;
-            var inv     = proxy.Inventory;
+            var inv     = proxy.Session!.Inventory;
 
             return new CharacterSnapshot
             {
@@ -129,11 +129,11 @@ namespace VSRO_CONTROL_API.Controllers
         }
 
         private static SnapshotItem ToItem(
-            (int ItemID, string CodeName, int Stack, int MaxStack) t) =>
+            SR_Item t) =>
             new()
             {
-                ItemID   = t.ItemID,
-                CodeName = t.CodeName,
+                ItemID   = t.RefItemID,
+                CodeName = t.CodeName128,
                 Stack    = t.Stack,
                 MaxStack = t.MaxStack,
             };

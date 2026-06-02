@@ -1,18 +1,21 @@
 using CoreLib.Tools.Logging;
 using Microsoft.Data.SqlClient;
+using System.Collections.Concurrent;
 using System.Data;
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using VSRO_CONTROL_API.VSRO.DTO;
+using VSRO_CONTROL_API.VSRO.DTO.VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Enums;
 using VSRO_CONTROL_API.VSRO.Tools;
+using ISession = VSRO_CONTROL_API.VSRO.DTO.ISession;
 
 namespace VSRO_CONTROL_API.VSRO
 {
     public static class DBConnect
     {
         #region - Properties - 
-
         private static string _connectionString = string.Empty;
 
         /// <summary>Returns an unopened SqlConnection using the configured credentials, targeting the specified catalog.</summary>
@@ -115,6 +118,11 @@ namespace VSRO_CONTROL_API.VSRO
         public static bool TextdataGenerationRunning = false;
         public static int TextdataGenerationProgress = 0;
 
+        /// <summary>
+        /// Gets the cached learned skills for the session.
+        /// </summary>
+        public static ConcurrentDictionary<uint, SR_Skill> SkillCache { get; set; } = new();
+
         #endregion
 
         #region - Initialization -
@@ -164,7 +172,36 @@ namespace VSRO_CONTROL_API.VSRO
         #endregion
 
         #region - Querying -
+        public static async Task<(bool success, int tabId, string reason)> GetMallTabId(string tabCodeName)
+        {
+            try
+            {
+                using (SqlConnection conn = new SqlConnection(_connectionString))
+                {
+                    await conn.OpenAsync();
 
+                    using (SqlCommand cmd = new SqlCommand(Constant.GetMallTabIdByCodeName_q, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@CodeName", tabCodeName);
+
+                        using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
+                        {
+                            if (!await reader.ReadAsync())
+                                return (false, 0, "Tab not found");
+
+                            int id = Convert.ToInt32(reader["ID"]);
+                            return (true, id, "");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                string msg = $"Error retrieving mall tab ID: {ex.Message}";
+                Logger.Error(typeof(DBConnect), msg);
+                return (false, 0, msg);
+            }
+        }
         // Game
         public static async Task<(bool success, string codename, string reason)> LookupItemCodeName(uint _refItemId)
         {
@@ -213,6 +250,7 @@ namespace VSRO_CONTROL_API.VSRO
 
                             var item = new ItemRecord
                             {
+                                ID = Convert.ToInt32(reader["ID"]),
                                 CodeName = reader["CodeName128"].ToString() ?? "",
                                 T1 = Convert.ToByte(reader["TypeID1"]),
                                 T2 = Convert.ToByte(reader["TypeID2"]),
@@ -220,7 +258,7 @@ namespace VSRO_CONTROL_API.VSRO
                                 T4 = Convert.ToByte(reader["TypeID4"]),
 
                                 MaxStack = reader["MaxStack"] != DBNull.Value
-                                    ? Convert.ToUInt16(reader["MaxStack"]) // Use UInt16 (ushort)
+                                    ? Convert.ToUInt16(reader["MaxStack"])
                                     : (ushort)1
                             };
 
@@ -236,6 +274,49 @@ namespace VSRO_CONTROL_API.VSRO
                 return (false, null, msg);
             }
         }
+        public static async Task<(bool success, ItemRecord? item, string reason)> GetItemRecordByCodeName(string _itemCodeName)
+        {
+            try
+            {
+                using (SqlConnection conn = new SqlConnection(_connectionString))
+                {
+                    await conn.OpenAsync();
+
+                    using (SqlCommand cmd = new SqlCommand(Constant.GetItemTypeId_q, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@ItemID", _itemCodeName);
+
+                        using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
+                        {
+                            if (!await reader.ReadAsync())
+                                return (false, null, "Item not found");
+
+                            var item = new ItemRecord
+                            {
+                                CodeName = reader["CodeName128"].ToString() ?? "",
+                                T1 = Convert.ToByte(reader["TypeID1"]),
+                                T2 = Convert.ToByte(reader["TypeID2"]),
+                                T3 = Convert.ToByte(reader["TypeID3"]),
+                                T4 = Convert.ToByte(reader["TypeID4"]),
+
+                                MaxStack = reader["MaxStack"] != DBNull.Value
+                                    ? Convert.ToUInt16(reader["MaxStack"])
+                                    : (ushort)1
+                            };
+
+                            return (true, item, "");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                string msg = $"Error retrieving item record: {ex.Message}";
+                Logger.Error(typeof(DBConnect), msg);
+                return (false, null, msg);
+            }
+        }
+
         public static async Task<bool> DoesUsernameExist(string username)
         {
             try
@@ -534,11 +615,11 @@ namespace VSRO_CONTROL_API.VSRO
                 return (false, $"ERROR_REF_{refObjID}");
             }
         }
-        public static async Task<(bool success, Dictionary<short, string>? regions, string reason)> GetRegionsWithContinentsDict()
+        public static async Task<(bool success, Dictionary<short, (string Continent, string AreaName)>? regions, string reason)> GetRegionsWithContinentsDict()
         {
             try
             {
-                var regions = new Dictionary<short, string>();
+                var regions = new Dictionary<short, (string Continent, string AreaName)>();
 
                 using (SqlConnection conn = new SqlConnection(_connectionString))
                 {
@@ -552,8 +633,8 @@ namespace VSRO_CONTROL_API.VSRO
                             {
                                 short regionId = Convert.ToInt16(reader["wRegionID"]);
                                 string continent = reader["ContinentName"].ToString() ?? string.Empty;
-
-                                regions[regionId] = continent;
+                                string areaName = reader["AreaName"].ToString() ?? string.Empty;
+                                regions[regionId] = (continent, areaName);
                             }
                         }
                     }
@@ -2641,7 +2722,90 @@ namespace VSRO_CONTROL_API.VSRO
                 return (false, list, msg);
             }
         }
+        public static async Task<SR_Buff?> GetBuffById(uint skillId)
+        {
+            using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = new SqlCommand(Constant.GetSkillById_q, conn);
+            cmd.Parameters.AddWithValue("@SkillID", (int)skillId);
+            using var reader = await cmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync()) return null;
 
+            var skill = new SR_Buff();
+            skill.ID = skillId;
+            skill.CodeName = reader["Basic_Code"]?.ToString() ?? "";
+            skill.Params = new int[50];
+            for (int i = 1; i <= 50; i++)
+                skill.Params[i - 1] = Convert.ToInt32(reader[$"Param{i}"]);
+
+            return skill;
+        }
+
+        public static async Task<SR_Skill?> GetSkillById(uint skillId)
+        {
+            if (SkillCache.TryGetValue(skillId, out var cached))
+                return cached;
+
+            using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+
+            using var cmd = new SqlCommand(Constant.GetSkillById_q, conn);
+            cmd.Parameters.AddWithValue("@SkillID", (int)skillId);
+
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            if (!await reader.ReadAsync())
+                return null;
+
+            string codeName = reader["Basic_Code"]?.ToString() ?? "";
+
+            string resolvedCodeName = Regex.Replace(codeName, @"_\d+$", "");
+            // Safe extraction handling for the Mastery column type change
+            var masteryLevelObj = reader["ReqCommon_MasteryLevel1"];
+            byte resolvedLevel = 0;
+            if (masteryLevelObj != null && masteryLevelObj != DBNull.Value)
+            {
+                resolvedLevel = (byte)Convert.ToInt32(masteryLevelObj);
+            }
+            var skill = new SR_Skill
+            {
+                ID = skillId,
+                CodeName = codeName,
+                ReadableName = GameObjectNameResolver.Resolve(resolvedCodeName),
+                Group = reader["Basic_Group"]?.ToString() ?? "",
+                Level = resolvedLevel,
+                PreparingTime = Convert.ToInt32(reader["Action_PreparingTime"]),
+                CastingTime = Convert.ToInt32(reader["Action_CastingTime"]),
+                ActionDuration = Convert.ToInt32(reader["Action_ActionDuration"]),
+                ReuseDelay = Convert.ToInt32(reader["Action_ReuseDelay"]),
+                CoolTime = Convert.ToInt32(reader["Action_CoolTime"]),
+                Range = Convert.ToInt32(reader["Action_Range"]),
+                AutoAttackType = Convert.ToInt32(reader["Action_AutoAttackType"]),
+                CanUseInTown = Convert.ToInt32(reader["Action_InTown"]) == 1,
+                RequiresTarget = Convert.ToInt32(reader["Target_Required"]) == 1,
+                ConsumeHP = Convert.ToInt32(reader["Consume_HP"]),
+                ConsumeMP = Convert.ToInt32(reader["Consume_MP"]),
+                AIAttackChance = Convert.ToInt32(reader["AI_AttackChance"]),
+                AISkillType = Convert.ToInt32(reader["AI_SkillType"]),
+                Params = new int[50]
+            };
+
+            for (int i = 1; i <= 50; i++)
+                skill.Params[i - 1] = Convert.ToInt32(reader[$"Param{i}"]);
+
+            for (int p = 0; p < 49; p++)
+            {
+                if ((uint)skill.Params[p] == 1752396901)
+                {
+                    skill.MoveSpeedPercent = skill.Params[p + 1];
+                    break;
+                }
+            }
+
+            SkillCache[skillId] = skill;
+
+            return skill;
+        }
         #endregion
 
     }

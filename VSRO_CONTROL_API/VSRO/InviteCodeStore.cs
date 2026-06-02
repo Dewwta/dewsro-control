@@ -17,7 +17,6 @@ namespace VSRO_CONTROL_API.VSRO
 
         private sealed record Entry(string Code, DateTime CreatedAt, string Note);
 
-        // ── Startup ───────────────────────────────────────────────────────────
 
         static InviteCodeStore()
         {
@@ -56,8 +55,6 @@ namespace VSRO_CONTROL_API.VSRO
                 Logger.Error(typeof(InviteCodeStore), $"Failed to save invite codes: {ex.Message}");
             }
         }
-
-        // ── Public API ────────────────────────────────────────────────────────
 
         /// <summary>Generates a new cryptographically-random invite code and persists it.</summary>
         public static string Generate(string note = "")

@@ -7,28 +7,31 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(DXSDK_DIR "C:/Program Files (x86)/Microsoft DirectX SDK (June 2010)" CACHE PATH "DirectX SDK path")
 
-# -------------------------
+
 # DirectX SDK
-# -------------------------
 link_directories("${DXSDK_DIR}/Lib/x86")
 
-# -------------------------
-# Force x86 for MSVC properly
-# -------------------------
+
+# Force x86 for MSVC
 if (MSVC)
     add_compile_options(/arch:SSE2)
     set(CMAKE_GENERATOR_PLATFORM Win32)
 endif()
 
-# -------------------------
 # Dependencies
-# -------------------------
 add_subdirectory(minhook)
 add_subdirectory(src/BSLib)
+add_subdirectory(src/client/lib/GFX/FM)
+add_subdirectory(src/client/lib/GFX/GFXMainFrame)
+add_subdirectory(src/client/lib/GFX/GFX3DFunction)
+add_subdirectory(src/client/lib/InterfaceLib)
+add_subdirectory(src/client/lib/NavMesh)
+add_subdirectory(src/client/lib/SimpleViewer)
+add_subdirectory(src/client/lib/TypeId)
+add_subdirectory(src/client/lib/Client)
 
-# -------------------------
-# Source files
-# -------------------------
+
+# Source
 set(SOURCES
     src/DllMain.cpp
     src/Control.cpp
@@ -42,13 +45,6 @@ set(SOURCES
     src/net/DllBridge.cpp
     src/net/NetActions.h
     src/net/LoginHook.h
-
-    # Client
-    src/client/ClassLink.h
-    src/client/data/CommonData.h
-    src/client/TypeId/TypeId.h
-    src/client/TypeId/TypeIdBase.h
-    src/client/TypeId/TypeIdRegistry.cpp
 
     # Memory
     src/mem/Process.h
@@ -72,13 +68,13 @@ set(SOURCES
 
     # Kiero
     kiero/kiero.cpp
-    "src/client/RewardWindow.cpp" "src/client/AchievementWindow.cpp")
+    src/client/RewardWindow.cpp 
+    src/client/AchievementWindow.cpp 
+)
 
-add_library(DewSROToolkit SHARED ${SOURCES} "src/client/RewardWindow.h" "src/client/RewardWindow.cpp" "src/client/SoxOverlay.h"  "src/client/AchievementWindow.h" "src/client/AchievementWindow.cpp")
+add_library(DewSROToolkit SHARED ${SOURCES} "src/client/RewardWindow.h" "src/client/RewardWindow.cpp" "src/client/SoxOverlay.h"  "src/client/AchievementWindow.h" "src/client/AchievementWindow.cpp" "src/client/stb_image.h")
 
-# -------------------------
 # Includes
-# -------------------------
 target_include_directories(DewSROToolkit PRIVATE
     src/
     kiero/
@@ -86,12 +82,21 @@ target_include_directories(DewSROToolkit PRIVATE
     imgui/backends/
     minhook/include/
     BSLib/
+    src/client/lib/GFX/FM/include/
+    src/client/lib/GFX/GFXMainFrame/include/
+    src/client/lib/GFX/GFX3DFunction/include/
+    src/client/lib/InterfaceLib/include/
+    src/client/lib/NavMesh/include/NavMesh
+    src/client/lib/SimpleViewer/include/SimpleViewer
+    src/client/lib/TypeId/include/
+    src/client/lib/Client/
+    src/client/lib/CharDependentData/
+    src/client/lib/Data/
     "${DXSDK_DIR}/Include"
 )
 
-# -------------------------
+
 # Link libs
-# -------------------------
 target_link_libraries(DewSROToolkit PRIVATE
     d3d9.lib
     d3dx9.lib
@@ -99,19 +104,25 @@ target_link_libraries(DewSROToolkit PRIVATE
     minhook
     BSLib
     ws2_32
+    GFXMainFrame
+    GFX3DFunction
+    FM
+    SROInterfaceLIB
+    NavMesh
+    SimpleViewer
+    TypeId
+    ClientLib
 )
 
-# -------------------------
+
 # Linker options
-# -------------------------
 target_link_options(DewSROToolkit PRIVATE
     /DEF:${CMAKE_SOURCE_DIR}/src/exports.def
     /MACHINE:X86
 )
 
-# -------------------------
+
 # Output name
-# -------------------------
 set_target_properties(DewSROToolkit PROPERTIES
     OUTPUT_NAME "DewSROToolkit"
 )

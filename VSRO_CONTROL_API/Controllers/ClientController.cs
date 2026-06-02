@@ -49,7 +49,7 @@ namespace VSRO_CONTROL_API.Controllers
                 SizeBytes  = file.Length
             });
 
-            // Keep newest MaxClients; delete files for anything that falls off
+            // Keep newest MaxClients
             manifest = manifest.OrderByDescending(e => e.UploadedAt).ToList();
 
             while (manifest.Count > MaxClients)

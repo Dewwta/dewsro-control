@@ -131,7 +131,7 @@ namespace VSRO_CONTROL_API.Controllers
                     ? Encoding.ASCII.GetString(ipBytes, 0, nullIndex)
                     : Encoding.ASCII.GetString(ipBytes);
 
-                // Object Limit — need VA-to-file conversion
+                // Object Limit
                 int objectLimit = 50000; // default
                 try
                 {

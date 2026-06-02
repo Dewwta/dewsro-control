@@ -20,12 +20,12 @@ void Patcher::PatchAll() {
 	WriteMemoryValue<uint8_t>(0x009448B1 + 6, maxLevel); // Skill limit
 	log.Info("Patcher::PatchAll", "Patched max level");
 
-	uint32_t masteries_CH = 550;
+	uint32_t masteries_CH = 600;
 	WriteMemoryValue<uint32_t>(0x006A51BC + 1, masteries_CH);
 	WriteMemoryValue<uint32_t>(0x006AA4C3 + 1, masteries_CH);
 	log.Info("Patcher::PatchAll", "Patched max CH mastery level");
 
-	uint32_t masteries_EU = 220;
+	uint32_t masteries_EU = 240;
 	WriteMemoryValue<uint32_t>(0x006A5197 + 1, masteries_EU);
 	WriteMemoryValue<uint32_t>(0x006A51A2 + 1, masteries_EU);
 	WriteMemoryValue<uint32_t>(0x006AA498 + 1, masteries_EU);
@@ -47,5 +47,7 @@ void Patcher::PatchAll() {
 	WriteMemoryValue<float>(0x00DE4C54, 5500.0f); // 3
 	WriteMemoryValue<float>(0x00DE4C50, 6500.0f); // 4
 	log.Info("Patcher::PatchAll", "Patched background sight range");
+
+	
 
 }

@@ -1,0 +1,57 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "DdConverter/1.0.0": {
+        "dependencies": {
+          "Pfim": "0.11.3",
+          "SixLabors.ImageSharp": "3.1.6"
+        },
+        "runtime": {
+          "DdConverter.dll": {}
+        }
+      },
+      "Pfim/0.11.3": {
+        "runtime": {
+          "lib/netstandard2.0/Pfim.dll": {
+            "assemblyVersion": "0.11.3.0",
+            "fileVersion": "0.11.3.0"
+          }
+        }
+      },
+      "SixLabors.ImageSharp/3.1.6": {
+        "runtime": {
+          "lib/net6.0/SixLabors.ImageSharp.dll": {
+            "assemblyVersion": "3.0.0.0",
+            "fileVersion": "3.1.6.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "DdConverter/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Pfim/0.11.3": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-UNVStuGHVIGyBlQaLX8VY6KpzZm/pG2zpV8ewNSXNFKFVPn8dLQKJITfps3lwUMzwTL+Do7RrMUvgQ1ZsPTu4w==",
+      "path": "pfim/0.11.3",
+      "hashPath": "pfim.0.11.3.nupkg.sha512"
+    },
+    "SixLabors.ImageSharp/3.1.6": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-dHQ5jugF9v+5/LCVHCWVzaaIL6WOehqJy6eju/0VFYFPEj2WtqkGPoEV9EVQP83dHsdoqYaTuWpZdwAd37UwfA==",
+      "path": "sixlabors.imagesharp/3.1.6",
+      "hashPath": "sixlabors.imagesharp.3.1.6.nupkg.sha512"
+    }
+  }
+}

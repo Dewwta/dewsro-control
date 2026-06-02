@@ -195,6 +195,35 @@
                                 {selectedSession.stats.int?.toLocaleString?.() ?? 0}
                             </span>
 						</div>
+
+                        <!-- WORLD POS -->
+                        <div class="stat-pill">
+							<span class="stat-pill__label">Region: </span>
+							<span class="stat-pill__val">
+                                {selectedSession.stats.currentRegion}
+                            </span>
+						</div>
+
+                        <div class="stat-pill">
+							<span class="stat-pill__label">X: </span>
+							<span class="stat-pill__val">
+                                {selectedSession.stats.worldX}
+                            </span>
+						</div>
+                        <div class="stat-pill">
+							<span class="stat-pill__label">Y: </span>
+							<span class="stat-pill__val">
+                                {selectedSession.stats.worldY}
+                            </span>
+						</div>
+
+                        <div class="stat-pill">
+							<span class="stat-pill__label">Z: </span>
+							<span class="stat-pill__val">
+                                {selectedSession.stats.worldZ}
+                            </span>
+						</div>
+
 					</div>
 				{/if}
 

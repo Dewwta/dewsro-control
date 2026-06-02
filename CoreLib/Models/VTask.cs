@@ -5,7 +5,7 @@ using System.Text;
 namespace CoreLib.Models
 {
     /// <summary>
-    /// DTO for task data. Used particularly in reading/writing from the database API.
+    /// DTO for task data. Used particularly in reading/writing from the database API. For org software
     /// </summary>
     public class VTask 
     {

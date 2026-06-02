@@ -48,14 +48,18 @@ public class DllBridge : IDisposable
 
     public void SendToDll(string accountName, string eventType, object payload)
     {
-        if (accountName.Contains("PartyBot"))
-            return;
-        
-        Logger.Debug(this, $"SendToDll called: account='{accountName}' type='{eventType}'");
+
+        if (!accountName.Contains("PartyBot"))
+        {
+            
+            //Logger.Debug(this, $"SendToDll called: account='{accountName}' type='{eventType}'");
+
+        }
 
         if (!_clients.TryGetValue(accountName.ToLowerInvariant(), out var writer))
         {
-            Logger.Warn(this, $"No connected DLL client for account '{accountName}' — dropping '{eventType}'");
+            if (!accountName.Contains("PartyBot"))
+                Logger.Warn(this, $"No connected DLL client for account '{accountName}' — dropping '{eventType}'");
             return;
         }
         
@@ -110,14 +114,13 @@ public class DllBridge : IDisposable
                 string? line;
                 try
                 {
-                    // Per-read timeout — if the socket goes silent, this throws after 60s
                     using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     readCts.CancelAfter(60_000);
                     line = await reader.ReadLineAsync(readCts.Token);
                 }
                 catch
                 {
-                    break; // dead socket, timeout, or cancelled — clean exit
+                    break; // dead socket, timeout, or cancelled
                 }
 
                 if (line == null) break; // remote closed cleanly
@@ -135,10 +138,17 @@ public class DllBridge : IDisposable
                 if (type == "auth")
                 {
                     if (!doc.RootElement.TryGetProperty("user", out var userProp)) continue;
-                    accountName = userProp.GetString();
+                    accountName = userProp.GetString()?.ToLowerInvariant();
                     if (string.IsNullOrEmpty(accountName)) continue;
 
-                    _clients[accountName.ToLowerInvariant()] = writer;
+                    // Evict any stale writer before registering the new one
+                    if (_clients.TryRemove(accountName, out var staleWriter))
+                    {
+                        try { staleWriter.BaseStream.Close(); } catch { }
+                        Logger.Debug("DllAuth", $"Evicted stale connection for {accountName}");
+                    }
+
+                    _clients[accountName] = writer;
                     Logger.Debug("DllAuth", $"Sending ack for user {accountName}");
                     SendToDll(accountName, "login_ack", new { });
                     Logger.Info(this, $"Registered connection for {accountName}");

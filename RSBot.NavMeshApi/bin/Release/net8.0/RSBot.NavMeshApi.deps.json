@@ -1,0 +1,39 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "RSBot.NavMeshApi/1.0.0": {
+        "dependencies": {
+          "RSBot.FileSystem": "1.0.0"
+        },
+        "runtime": {
+          "RSBot.NavMeshApi.dll": {}
+        }
+      },
+      "RSBot.FileSystem/1.0.0": {
+        "runtime": {
+          "RSBot.FileSystem.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "RSBot.NavMeshApi/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "RSBot.FileSystem/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

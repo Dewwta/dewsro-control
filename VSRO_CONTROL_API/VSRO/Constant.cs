@@ -6,6 +6,33 @@ namespace VSRO_CONTROL_API.VSRO
     public static class Constant
     {
         #region - SQL Queries -
+        public const string GetMallTabIdByCodeName_q = @"
+            USE SRO_VT_SHARD
+            SELECT ID
+            FROM _RefShopTab
+            WHERE CodeName128 = @CodeName;";
+        public const string GetSkillById_q = @"
+            USE SRO_VT_SHARD
+            SELECT ID, Basic_Code, Basic_Group, ReqCommon_MasteryLevel1,
+                   Action_PreparingTime, Action_CastingTime, Action_ActionDuration,
+                   Action_ReuseDelay, Action_CoolTime, Action_Range,
+                   Action_AutoAttackType, Action_InTown,
+                   Target_Required,
+                   Consume_HP, Consume_MP,
+                   AI_AttackChance, AI_SkillType,
+                   Param1,  Param2,  Param3,  Param4,  Param5,
+                   Param6,  Param7,  Param8,  Param9,  Param10,
+                   Param11, Param12, Param13, Param14, Param15,
+                   Param16, Param17, Param18, Param19, Param20,
+                   Param21, Param22, Param23, Param24, Param25,
+                   Param26, Param27, Param28, Param29, Param30,
+                   Param31, Param32, Param33, Param34, Param35,
+                   Param36, Param37, Param38, Param39, Param40,
+                   Param41, Param42, Param43, Param44, Param45,
+                   Param46, Param47, Param48, Param49, Param50
+            FROM _RefSkill
+            WHERE ID = @SkillID AND Service = 1";
+
 
         public const string CreateUnclaimedRewardsTable_q = @"
             IF NOT EXISTS (
@@ -79,9 +106,10 @@ namespace VSRO_CONTROL_API.VSRO
             USE SRO_VT_SHARD
             SELECT 
                 wRegionID,
-                ContinentName
+                ContinentName,
+                AreaName
             FROM _RefRegion
-            GROUP BY wRegionID, ContinentName
+            GROUP BY wRegionID, ContinentName, AreaName
             ORDER BY wRegionID";
         public const string GetAchievementNames_q = @"
             USE SRO_VT_PROXY;
@@ -145,12 +173,14 @@ namespace VSRO_CONTROL_API.VSRO
         public const string GetItemTypeId_q = @"
             USE SRO_VT_SHARD
             SELECT 
+                common.ID,
                 common.CodeName128, 
                 common.TypeID1, common.TypeID2, common.TypeID3, common.TypeID4,
-                item.MaxStack -- This is what you need for the 4th tuple slot
+                item.MaxStack
             FROM _RefObjCommon AS common
             INNER JOIN _RefObjItem AS item ON common.Link = item.ID
             WHERE common.ID = @ItemID;";
+
         public const string GetItemCodeNameByRefId_q = @"
             USE SRO_VT_SHARD
             SELECT CodeName128
@@ -843,7 +873,13 @@ namespace VSRO_CONTROL_API.VSRO
                  // ------------ Custom -------------
                  DEW_SORT = 0xE101,
                  DEW_CLAIM_REWARD = 0xE102,
-                 DEW_ACHIEVEMENTS = 0xE103;
+                 DEW_ACHIEVEMENTS = 0xE103,
+                 DEW_START_BOT = 0xE104,
+                 DEW_STOP_BOT = 0xE105,
+                 DEW_SKILL_ADD = 0xDE10,
+                 DEW_SKILL_REMOVE = 0xDE11,
+                 DEW_SKILL_MOVE = 0xDE12,
+                 DEW_BOT_SETTINGS = 0xDE13;
 
         #endregion
 

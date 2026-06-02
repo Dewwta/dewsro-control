@@ -31,7 +31,7 @@ namespace VSRO_CONTROL_API.Controllers
                     LoginTime      = p.Session.LoginTime,
                     SessionSeconds = p.Session.AccumulatedPlayTime.TotalSeconds,
                     IsAfk          = p.Session.IsAfk,
-                    InventoryReady = p.Inventory.IsReady,
+                    InventoryReady = p.Session.Inventory.IsReady,
                     Party          = p.Session.PlayerParty == null ? null : new LivePartyDTO
                     {
                         PartyId     = p.Session.PlayerParty.PartyID,
@@ -51,7 +51,11 @@ namespace VSRO_CONTROL_API.Controllers
                         ZerkLevel        = p.Session.PlayerStats.ZerkLevel,
                         UnusedStatPoints = p.Session.PlayerStats.UnusedStatPoints,
                         Gold             = p.Session.PlayerStats.RemainingGold,
-                        SkillPoints      = p.Session.PlayerStats.RemainingSkillPoints
+                        SkillPoints      = p.Session.PlayerStats.RemainingSkillPoints,
+                        CurrentRegion    = p.Session.RegionReadableName!,
+                        WorldX           = p.Session.WorldX,
+                        WorldY           = p.Session.WorldY,
+                        WorldZ           = p.Session.Z
                     }
                 })
                 .ToList();
@@ -70,15 +74,15 @@ namespace VSRO_CONTROL_API.Controllers
             if (!Overseer.AgentProxy.Connections.TryGetValue(connectionId, out var proxy) || proxy.Session == null)
                 return NotFound(new { message = "Session not found." });
 
-            var inv = proxy.Inventory;
+            var inv = proxy.Session.Inventory;
 
             // collect every unique code name to batch-query icon paths
-            var allCodeNames = inv.Equipment.Values.Select(v => v.CodeName)
-                .Concat(inv.Slots.Values.Select(v => v.CodeName))
+            var allCodeNames = inv.Equipment.Values.Select(v => v.CodeName128)
+                .Concat(inv.Slots.Values.Select(v => v.CodeName128))
                 .Concat(inv.Pets.Values
                     .Where(d => d != null)
-                    .SelectMany(d => d.Inventory.Values ?? Enumerable.Empty<(int ItemID, string CodeName, int Stack, int MaxStack)>())
-                    .Select(v => v.CodeName))
+                    .SelectMany(d => d.Inventory.Values ?? Enumerable.Empty<SR_Item>())
+                    .Select(v => v.CodeName128))
                 .Where(c => !string.IsNullOrEmpty(c));
 
             var iconPaths = await DBConnect.GetItemIconPaths(allCodeNames);
@@ -127,10 +131,10 @@ namespace VSRO_CONTROL_API.Controllers
 
         private static LiveInventoryItemDTO BuildItem(
             byte slot,
-            (int ItemID, string CodeName, int Stack, int MaxStack) item,
+            SR_Item item,
             Dictionary<string, string> iconPaths)
         {
-            if (item.ItemID == 0 || string.IsNullOrEmpty(item.CodeName))
+            if (item.RefItemID == 0 || string.IsNullOrEmpty(item.CodeName128))
             {
                 return new LiveInventoryItemDTO
                 {
@@ -144,14 +148,14 @@ namespace VSRO_CONTROL_API.Controllers
                 };
             }
 
-            iconPaths.TryGetValue(item.CodeName, out var rawIcon);
+            iconPaths.TryGetValue(item.CodeName128, out var rawIcon);
 
             return new LiveInventoryItemDTO
             {
                 Slot = slot,
-                ItemId = item.ItemID,
-                CodeName = item.CodeName,
-                DisplayName = GameObjectNameResolver.Resolve(item.CodeName),
+                ItemId = item.RefItemID,
+                CodeName = item.CodeName128,
+                DisplayName = GameObjectNameResolver.Resolve(item.CodeName128),
                 Stack = item.Stack,
                 MaxStack = item.MaxStack,
                 IconUrl = rawIcon != null

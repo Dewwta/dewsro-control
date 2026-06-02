@@ -2,12 +2,12 @@ using Pfim;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
-// DDJ structure:
-//   [0..7]   JMXVDDJ  (8 bytes — Joymax magic)
-//   [8..11]  version  (4 bytes — e.g. "1000")
-//   [12..15] data size (4 bytes, little-endian)
-//   [16..19] flags    (4 bytes)
-//   [20..]   raw DDS payload
+// DDJ structure 
+// [0..7]   JMXVDDJ  (8 bytes — Joymax magic)
+// [8..11]  version  (4 bytes — e.g. "1000")
+// [12..15] data size (4 bytes, little-endian)
+// [16..19] flags    (4 bytes)
+// [20..]   raw DDS payload
 
 const int DdjHeaderSize = 20;
 
@@ -58,7 +58,7 @@ Parallel.ForEach(files,
                 return;
             }
 
-            // Extract raw DDS (everything after the 20-byte DDJ header)
+            // Extract raw DDS (after the 20-byte DDJ header)
             using var ddsStream = new MemoryStream(ddjBytes, DdjHeaderSize, ddjBytes.Length - DdjHeaderSize, writable: false);
             using var pfimImage = Pfimage.FromStream(ddsStream);
             pfimImage.Decompress();
@@ -92,21 +92,21 @@ static Image ToImageSharp(IImage pfimImage)
 
     switch (pfimImage.Format)
     {
-        // ── 32-bit BGRA (most uncompressed RGBA and all BCn decompressed) ───────
+        // 32-bit BGRA
         case ImageFormat.Rgba32:
         {
             var pixels = StripStride(src, h, stride, w * 4);
             return Image.LoadPixelData<Bgra32>(pixels, w, h);
         }
 
-        // ── 24-bit BGR (uncompressed RGB, no alpha) ──────────────────────────
+        // 24-bit BGR (uncompressed RGB, no alpha)
         case ImageFormat.Rgb24:
         {
             var pixels = StripStride(src, h, stride, w * 3);
             return Image.LoadPixelData<Bgr24>(pixels, w, h);
         }
 
-        // ── 16-bit ARGB1555 (A=bit15, R=bits14-10, G=bits9-5, B=bits4-0) ────
+        // 16-bit ARGB1555 (A=bit15, R=bits14-10, G=bits9-5, B=bits4-0)
         case ImageFormat.R5g5b5a1:
         case ImageFormat.Rgba16:
         {
@@ -125,7 +125,7 @@ static Image ToImageSharp(IImage pfimImage)
             return Image.LoadPixelData<Rgba32>(pixels, w, h);
         }
 
-        // ── 16-bit RGB555 (no alpha, R=bits14-10, G=bits9-5, B=bits4-0) ────
+        // 16-bit RGB555 (no alpha, R=bits14-10, G=bits9-5, B=bits4-0)
         case ImageFormat.R5g5b5:
         {
             var pixels = new byte[w * h * 4];
@@ -143,7 +143,7 @@ static Image ToImageSharp(IImage pfimImage)
             return Image.LoadPixelData<Rgba32>(pixels, w, h);
         }
 
-        // ── 16-bit RGB565 (R=bits15-11, G=bits10-5, B=bits4-0) ─────────────
+        // 16-bit RGB565 (R=bits15-11, G=bits10-5, B=bits4-0)
         case ImageFormat.R5g6b5:
         {
             var pixels = new byte[w * h * 4];

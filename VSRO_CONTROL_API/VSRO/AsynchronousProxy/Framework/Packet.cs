@@ -126,6 +126,21 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Framework
                 SeekRead(count, SeekOrigin.Current);
             }
         }
+        public void SeekBack(int count)
+        {
+            lock (m_lock)
+            {
+                if (!m_locked)
+                    throw new Exception("Cannot SeekBack on an unlocked Packet.");
+
+                long current = m_reader.BaseStream.Position;
+
+                if (count > current)
+                    throw new Exception($"SeekBack out of bounds. Current={current}, Count={count}");
+
+                m_reader.BaseStream.Seek(-count, SeekOrigin.Current);
+            }
+        }
         public long Position
         {
             get

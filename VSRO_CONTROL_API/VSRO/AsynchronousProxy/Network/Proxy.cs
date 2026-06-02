@@ -36,16 +36,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network
 
         public int ConnectionId { get; set; }
         public PlayerSession? Session;
-        public InventoryTracker Inventory { get; } = new InventoryTracker();
-        public ConcurrentDictionary<uint, uint> SpawnCache { get; } = new(); 
         public Dictionary<byte, TaskCompletionSource<bool>> PendingMoves = new();
         public event Action<Proxy, PlayerSession>? OnPlaytimeHourReached;
-        public ConcurrentDictionary<uint, (uint RefObjID, short RegionID)> SpawnedObjects { get; set; } = new();
-        public uint LastTargetUID { get; set; }
-        public CancellationTokenSource? SessionTokenSource;
-        public bool IsSorting { get; set; } = false;
-        public CancellationTokenSource? ActiveSortCts { get; set; }
-        public byte CurrentGroupSpawnType { get; set; } = 0;  // 1=spawn, 2=despawn
+        
         internal void CheckPlaytimeReward(PlayerSession session)
         {
             if (SettingsLoader.Settings != null && SettingsLoader.Settings.Proxy?.SilkPerXHours > 0)

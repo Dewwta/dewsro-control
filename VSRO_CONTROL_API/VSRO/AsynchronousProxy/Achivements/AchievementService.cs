@@ -24,12 +24,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
             return true;
         }
 
-        // -----------------------------------------------------------------------
-        // Core
-        // -----------------------------------------------------------------------
-
         /// <summary>
-        /// Internal: increment matching achievements and fire the unlock notice.
+        /// increment matching achievements and fire the unlock notice.
         /// </summary>
         private static async Task ProcessAchievements(
             string charName, Proxy proxy,
@@ -45,14 +41,10 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
                     Logger.Info(typeof(AchievementService),
                         $"[ACH] {charName} completed: \"{ach.Name}\"!");
                     PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null,
-                        $"ACHIEVEMENT UNLOCKED: {ach.Name} — {ach.Description}");
+                        $"ACHIEVEMENT UNLOCKED: {ach.Name} - {ach.Description}");
                 }
             }
         }
-
-        // -----------------------------------------------------------------------
-        // Kill
-        // -----------------------------------------------------------------------
 
         /// <summary>
         /// Call from the kill packet handler.
@@ -66,10 +58,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
             await ProcessAchievements(charName, proxy, candidates);
         }
 
-        // -----------------------------------------------------------------------
-        // Level
-        // -----------------------------------------------------------------------
-
         /// <summary>
         /// Call when a character levels up. newLevel = the level they just reached.
         /// Level achievements use Count as the target level threshold.
@@ -77,14 +65,11 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
         /// </summary>
         public static async Task OnLevelUp(string charName, int newLevel, Proxy proxy)
         {
-            // For level achievements, Count is the threshold level.
-            // We only want to fire ones where Count == newLevel exactly so multi-level jumps
-            // don't double-fire — the caller should call this once per level reached.
             var candidates = AchievementLoader.GetByType("level")
                 .Where(a => a.Count == newLevel);
 
-            // Level achievements are binary (hit the level = done), so we upsert directly
-            // as "complete" by passing amount=Count, goal=Count.
+            // Level achievements are binary (hit the level = done), upsert directly
+            // as complete by passing amount=Count, goal=Count
             foreach (var ach in candidates)
             {
                 bool newlyCompleted = await DBConnect.IncrementAchievementProgress(
@@ -95,14 +80,10 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
                     Logger.Info(typeof(AchievementService),
                         $"[ACH] {charName} completed level achievement: \"{ach.Name}\"!");
                     PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null,
-                        $"ACHIEVEMENT UNLOCKED: {ach.Name} — {ach.Description}");
+                        $"ACHIEVEMENT UNLOCKED: {ach.Name} - {ach.Description}");
                 }
             }
         }
-
-        // -----------------------------------------------------------------------
-        // Gold
-        // -----------------------------------------------------------------------
 
         /// <summary>
         /// Call when a character's gold total changes (pickup, trade, etc.).
@@ -116,7 +97,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
                 .Where(a => currentGold >= a.Count);
 
             // Gold achievements are threshold-based, not incremental.
-            // We set progress = Count (= goal) to complete them.
             foreach (var ach in candidates)
             {
                 bool newlyCompleted = await DBConnect.IncrementAchievementProgress(
@@ -127,14 +107,11 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
                     Logger.Info(typeof(AchievementService),
                         $"[ACH] {charName} completed gold achievement: \"{ach.Name}\"!");
                     PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null,
-                        $"ACHIEVEMENT UNLOCKED: {ach.Name} — {ach.Description}");
+                        $"ACHIEVEMENT UNLOCKED: {ach.Name} - {ach.Description}");
                 }
             }
         }
 
-        // -----------------------------------------------------------------------
-        // Death
-        // -----------------------------------------------------------------------
 
         /// <summary>
         /// Call when the character dies.
@@ -203,7 +180,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
                     Logger.Info(typeof(AchievementService),
                         $"[ACH] {charName} completed playtime achievement: \"{ach.Name}\"!");
                     PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null,
-                        $"ACHIEVEMENT UNLOCKED: {ach.Name} — {ach.Description}");
+                        $"ACHIEVEMENT UNLOCKED: {ach.Name} - {ach.Description}");
                 }
             }
         }

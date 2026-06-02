@@ -14,7 +14,13 @@ static bool __fastcall hk_Login(void* thisPtr, void* edx,
     auto& log = GetLogger();
     if (username) {
         log.Info("login_hook", std::string("Connecting with ").append(username));
-        g_bridge.Reconnect(username);
+        if (g_bridge.m_connected) {
+            g_bridge.ForceReconnect(username); // already connected
+        }
+        else {
+            g_bridge.SetIdentity(username);
+            g_bridge.Connect(); // first ever launch
+        }
     }
     else {
         log.Err("login_hook", "Couldn't retrieve username for dll bridge connection!");

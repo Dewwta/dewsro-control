@@ -8,6 +8,7 @@ namespace CoreLib.Text
 {
     public static class AsciiTools
     {
+        // prints ascii preview of a byte[] of data
         public static string GetAsciiPreview(byte[] data)
         {
             var chars = new char[data.Length];

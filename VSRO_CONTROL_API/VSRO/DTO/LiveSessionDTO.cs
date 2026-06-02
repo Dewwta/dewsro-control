@@ -35,6 +35,12 @@ namespace VSRO_CONTROL_API.VSRO.DTO
         public uint SkillPoints { get; set; }
         public uint STR { get; set; }
         public uint INT { get; set; }
+
+        public string CurrentRegion { get; set; } = "N/A";
+        public int WorldX { get; set; }
+        public int WorldY { get; set; }
+        public int WorldZ { get; set; }
+
     }
 
     public class LiveInventoryItemDTO

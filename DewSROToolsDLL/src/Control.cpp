@@ -10,6 +10,15 @@
 #include "Settings.h"
 #include "client/AchievementWindow.h"
 
+
+static int DetectStoneCaveFloor(float worldZ)
+{
+    if (worldZ < 116.f)  return 1;
+    if (worldZ < 254.f)  return 2;
+    if (worldZ < 393.f)  return 3;
+    return 4;
+}
+
 void RegisterAllHandlers() {
     g_bridge.RegisterHandler("login_ack", [](const std::string& _) {
         auto& log = GetLogger();
@@ -45,12 +54,75 @@ void RegisterAllHandlers() {
         g_bridge.m_sessionState.totalSeconds = g_bridge.ExtractInt(json, "totalSeconds");
         g_bridge.m_sessionState.sessionKills = g_bridge.ExtractInt(json, "sessionKills");
         g_bridge.m_sessionState.isAfk = g_bridge.ExtractInt(json, "isAfk");
+        g_bridge.m_sessionState.accountJID = g_bridge.ExtractInt(json, "accountJID");
+        g_bridge.m_sessionState.isGM = g_bridge.ExtractInt(json, "isGM");
         g_bridge.m_sessionState.syncTick = GetTickCount();
     });
 
     g_bridge.RegisterHandler("kill_update", [](const std::string& json) {
         g_bridge.m_sessionState.sessionKills = g_bridge.ExtractInt(json, "sessionKills");
     });
+
+    g_bridge.RegisterHandler("movement_sync", [](const std::string& json) {
+        auto& ss = g_bridge.m_sessionState;
+
+        ss.curRegionName = g_bridge.ExtractStr(json, "regionReadableName");
+        ss.curRegionCodeName = g_bridge.ExtractStr(json, "regionName");
+        ss.currentRegionID = g_bridge.ExtractInt(json, "regionId");
+        ss.WorldX = g_bridge.ExtractInt(json, "wX");
+        ss.WorldY = g_bridge.ExtractInt(json, "wY");
+        ss.WorldZ = g_bridge.ExtractInt(json, "wZ");
+        ss.SectorX = g_bridge.ExtractInt(json, "xSec");
+        ss.SectorY = g_bridge.ExtractInt(json, "ySec");
+
+        auto& s = ss;
+
+        static int lastX = 0, lastY = 0, lastZ = 0;
+
+        if (s.hasActiveMoveSample)
+        {
+            s.moveEndX = s.WorldX;
+            s.moveEndY = s.WorldY;
+            s.moveEndZ = s.WorldZ;
+        }
+
+        s.hasActiveMoveSample = true;
+        s.moveStartTime = std::chrono::steady_clock::now();
+
+        s.moveStartX = lastX;
+        s.moveStartY = lastY;
+        s.moveStartZ = lastZ;
+
+        lastX = s.WorldX;
+        lastY = s.WorldY;
+        lastZ = s.WorldZ;
+
+        ss.curRegionName = g_bridge.ExtractStr(json, "regionReadableName");
+        ss.curRegionCodeName = g_bridge.ExtractStr(json, "regionName");
+        ss.WorldX = g_bridge.ExtractInt(json, "wX");
+        ss.WorldY = g_bridge.ExtractInt(json, "wY");
+        ss.WorldZ = g_bridge.ExtractInt(json, "wZ");
+        ss.SectorX = g_bridge.ExtractInt(json, "xSec");
+        ss.SectorY = g_bridge.ExtractInt(json, "ySec");
+
+        auto& code = ss.curRegionCodeName;
+        auto pipe = code.find('|');
+        if (pipe != std::string::npos)
+        {
+            // Qin-Shi with explicit floor suffix
+            std::string suffix = code.substr(pipe + 1);
+            if (suffix.rfind("floor:", 0) == 0)
+                ss.currentFloor = std::stoi(suffix.substr(6));
+        }
+        else if (code == "Stone Cave")
+        {
+            ss.currentFloor = DetectStoneCaveFloor((float)ss.WorldZ);
+        }
+        else
+        {
+            ss.currentFloor = 0; // overworld, no floor
+        }
+        });
 
     g_bridge.RegisterHandler("level_reward", [](const std::string& json) {
         int level = g_bridge.ExtractInt(json, "level");
@@ -161,6 +233,217 @@ void RegisterAllHandlers() {
 
         g_achWindow.Open(std::move(entries));
     });
+    
+    g_bridge.RegisterHandler("skill_pool_sync", [](const std::string& json) {
+        auto& ss = g_bridge.m_sessionState;
+        ss.availableSkills.clear();
+
+        size_t skillsPos = json.find("\"skills\"");
+        if (skillsPos == std::string::npos) return;
+
+        size_t arrStart = json.find('[', skillsPos);
+        size_t arrEnd = json.find(']', arrStart);
+        if (arrStart == std::string::npos || arrEnd == std::string::npos) return;
+
+        std::string arr = json.substr(arrStart, arrEnd - arrStart + 1);
+        size_t pos = 0;
+        while ((pos = arr.find("\"id\"", pos)) != std::string::npos) {
+            SkillEntry sk;
+
+            size_t colon = arr.find(':', pos);
+            size_t comma = arr.find(',', colon);
+            sk.id = (uint32_t)std::stoul(arr.substr(colon + 1, comma - colon - 1));
+
+            size_t namePos = arr.find("\"name\"", pos);
+            size_t nameColon = arr.find(':', namePos);
+            size_t nameStart = arr.find('"', nameColon + 1) + 1;
+            size_t nameEnd = arr.find('"', nameStart);
+            sk.readableName = arr.substr(nameStart, nameEnd - nameStart);
+
+            size_t passivePos = arr.find("\"passive\"", pos);
+            size_t passiveColon = arr.find(':', passivePos);
+            size_t passiveVal = arr.find_first_not_of(' ', passiveColon + 1);
+            sk.isPassive = arr.substr(passiveVal, 4) == "true";
+
+            ss.availableSkills.push_back(sk);
+            pos = nameEnd;
+        }
+        auto& log = GetLogger();
+        log.Info("skill_list_sync", "Pool size at resolution: " + std::to_string(ss.availableSkills.size()));
+
+        for (auto& sk : ss.attackSkills) {
+            log.Info("skill_list_sync", "Resolving ID " + std::to_string(sk.id));
+            auto it = std::find_if(ss.availableSkills.begin(), ss.availableSkills.end(),
+                [&](const SkillEntry& a) { return a.id == sk.id; });
+            if (it != ss.availableSkills.end())
+                sk.readableName = it->readableName;
+        }
+        for (auto& sk : ss.buffSkills) {
+            log.Info("skill_list_sync", "Resolving ID " + std::to_string(sk.id));
+            auto it = std::find_if(ss.availableSkills.begin(), ss.availableSkills.end(),
+                [&](const SkillEntry& a) { return a.id == sk.id; });
+            if (it != ss.availableSkills.end())
+                sk.readableName = it->readableName;
+        }
+    });
+
+    g_bridge.RegisterHandler("skill_list_sync", [](const std::string& json) {
+        auto& ss = g_bridge.m_sessionState;
+        ss.attackSkills.clear();
+        ss.buffSkills.clear();
+
+        auto parseSkillArray = [&](const std::string& key, std::vector<SkillEntry>& out) {
+            size_t keyPos = json.find("\"" + key + "\"");
+            if (keyPos == std::string::npos) return;
+
+            size_t arrStart = json.find('[', keyPos);
+            size_t arrEnd = json.find(']', arrStart);
+            if (arrStart == std::string::npos || arrEnd == std::string::npos) return;
+
+            std::string arr = json.substr(arrStart, arrEnd - arrStart + 1);
+            size_t pos = 0;
+            while ((pos = arr.find("\"id\"", pos)) != std::string::npos) {
+                SkillEntry sk;
+
+                size_t colon = arr.find(':', pos);
+                size_t comma = arr.find(',', colon);
+                sk.id = (uint32_t)std::stoul(arr.substr(colon + 1, comma - colon - 1));
+
+                size_t namePos = arr.find("\"name\"", pos);
+                size_t nameColon = arr.find(':', namePos);
+                size_t nameStart = arr.find('"', nameColon + 1) + 1;
+                size_t nameEnd = arr.find('"', nameStart);
+                sk.readableName = "";
+                sk.isPassive = false;
+
+                out.push_back(sk);
+                pos = nameEnd;
+            }
+            };
+
+            parseSkillArray("attack", ss.attackSkills);
+            parseSkillArray("buffs", ss.buffSkills);
+
+            for (auto& sk : ss.attackSkills)
+            {
+                auto it = std::find_if(ss.availableSkills.begin(), ss.availableSkills.end(),
+                    [&](const SkillEntry& a) { return a.id == sk.id; });
+
+                if (it != ss.availableSkills.end())
+                    sk.readableName = it->readableName;
+            }
+
+            for (auto& sk : ss.buffSkills)
+            {
+                auto it = std::find_if(ss.availableSkills.begin(), ss.availableSkills.end(),
+                    [&](const SkillEntry& a) { return a.id == sk.id; });
+
+                if (it != ss.availableSkills.end())
+                    sk.readableName = it->readableName;
+            }
+        });
+
+    g_bridge.RegisterHandler("bot_config_sync", [](const std::string& json) {
+        g_bridge.m_sessionState.savedBotX = g_bridge.ExtractInt(json, "x");
+        g_bridge.m_sessionState.savedBotY = g_bridge.ExtractInt(json, "y");
+        g_bridge.m_sessionState.savedBotZ = g_bridge.ExtractInt(json, "z");
+        g_bridge.m_sessionState.savedBotR = g_bridge.ExtractInt(json, "r");
+        g_bridge.m_sessionState.savedBotRegionId = g_bridge.ExtractInt(json, "regionId");
+
+        g_bridge.m_sessionState.hasSavedBotConfig = true;
+    });
+
+    g_bridge.RegisterHandler("bot_state_update", [](const std::string& json) {
+        auto& ss = g_bridge.m_sessionState;
+
+        ss.botStateLabel = g_bridge.ExtractStr(json, "botState");
+        ss.distanceToTarget = g_bridge.ExtractFloat(json, "distanceToTarget");
+        ss.lastTargetUid = g_bridge.ExtractInt(json, "targetUid");
+    });
+
+    g_bridge.RegisterHandler("bot_settings_sync", [](const std::string& json) {
+        auto& settings = g_bridge.m_sessionState.botSettings;
+
+        // CONSUMABLES CATEGORY
+        settings.Consumables.BuyHpPotions = g_bridge.ExtractBool(json, "BuyHpPotions");
+        settings.Consumables.HpPotionRefillAmount = g_bridge.ExtractInt(json, "HpPotionRefillAmount");
+        settings.Consumables.HpPotionReturnThreshold = g_bridge.ExtractInt(json, "HpPotionReturnThreshold");
+        settings.Consumables.HPType = (PotionType)g_bridge.ExtractInt(json, "HPType");
+
+        settings.Consumables.BuyMpPotions = g_bridge.ExtractBool(json, "BuyMpPotions");
+        settings.Consumables.MpPotionRefillAmount = g_bridge.ExtractInt(json, "MpPotionRefillAmount");
+        settings.Consumables.MpPotionReturnThreshold = g_bridge.ExtractInt(json, "MpPotionReturnThreshold");
+        settings.Consumables.MPType = (PotionType)g_bridge.ExtractInt(json, "MPType");
+
+        settings.Consumables.BuyReturnScrolls = g_bridge.ExtractBool(json, "BuyReturnScrolls");
+        settings.Consumables.ReturnScrollRefillAmount = g_bridge.ExtractInt(json, "ReturnScrollRefillAmount");
+        settings.Consumables.ReturnScrollType = (ScrollType)g_bridge.ExtractInt(json, "ReturnScrollType");
+
+        settings.Consumables.BuyVigorPotions = g_bridge.ExtractBool(json, "BuyVigorPotions");
+        settings.Consumables.VigorPotionRefillAmount = g_bridge.ExtractInt(json, "VigorPotionRefillAmount");
+        settings.Consumables.VigorPotionReturnThreshold = g_bridge.ExtractInt(json, "VigorPotionReturnThreshold");
+
+        settings.Consumables.BuyUniversalPills = g_bridge.ExtractBool(json, "BuyUniversalPills");
+        settings.Consumables.UniversalPillsRefillAmount = g_bridge.ExtractInt(json, "UniversalPillsRefillAmount");
+        settings.Consumables.UniversalPillsReturnThreshold = g_bridge.ExtractInt(json, "UniversalPillsReturnThreshold");
+        settings.Consumables.UniPillType = (UniversalPillType)g_bridge.ExtractInt(json, "UniPillType");
+
+        settings.Consumables.BuyPurifPills = g_bridge.ExtractBool(json, "BuyPurifPills");
+        settings.Consumables.PurifPillsRefillAmount = g_bridge.ExtractInt(json, "PurifPillsRefillAmount");
+        settings.Consumables.PurifPillsReturnThreshold = g_bridge.ExtractInt(json, "PurifPillsReturnThreshold");
+        settings.Consumables.PurificationPillType = (UniversalPillType)g_bridge.ExtractInt(json, "PurificationPillType");
+
+        settings.Consumables.BuySpeedDrugs = g_bridge.ExtractBool(json, "BuySpeedDrugs");
+        settings.Consumables.SpeedDrugsRefillAmount = g_bridge.ExtractInt(json, "SpeedDrugsRefillAmount");
+        settings.Consumables.SpeedDrugsReturnThreshold = g_bridge.ExtractInt(json, "SpeedDrugsReturnThreshold");
+        settings.Consumables.DrugType = (SpeedDrugsType)g_bridge.ExtractInt(json, "DrugType");
+
+        settings.Consumables.BuyAmmo = g_bridge.ExtractBool(json, "BuyAmmo");
+        settings.Consumables.AmmoRefillAmount = g_bridge.ExtractInt(json, "AmmoRefillAmount");
+        settings.Consumables.AmmoReturnThreshold = g_bridge.ExtractInt(json, "AmmoReturnThreshold");
+        settings.Consumables.AmmoType = (AmmunitionType)g_bridge.ExtractInt(json, "AmmoType");
+
+        // AUTO POTION CATEGORY
+        settings.AutoPotion.AutoUseHP = g_bridge.ExtractBool(json, "AutoUseHP");
+        settings.AutoPotion.AutoUseMP = g_bridge.ExtractBool(json, "AutoUseMP");
+        settings.AutoPotion.UseVigorPotions = g_bridge.ExtractBool(json, "UseVigorPotions");
+        settings.AutoPotion.HPPotHealthThreshold = g_bridge.ExtractInt(json, "HPPotHealthThreshold");
+        settings.AutoPotion.MPPotManaThreshold = g_bridge.ExtractInt(json, "MPPotManaThreshold");
+        settings.AutoPotion.VigorHPMPThreshold = g_bridge.ExtractInt(json, "VigorHPMPThreshold");
+        settings.AutoPotion.PreferVigorFirst = g_bridge.ExtractBool(json, "PreferVigorFirst");
+        settings.AutoPotion.HPDelay = g_bridge.ExtractInt(json, "HPDelay");
+        settings.AutoPotion.MPDelay = g_bridge.ExtractInt(json, "MPDelay");
+        settings.AutoPotion.HealPets = g_bridge.ExtractBool(json, "HealPets");
+        settings.AutoPotion.HealPetHPThreshold = g_bridge.ExtractInt(json, "HealPetHPThreshold");
+        settings.AutoPotion.AutoUseContPills = g_bridge.ExtractBool(json, "AutoUseUnivPills"); // Note: maps to property name
+        settings.AutoPotion.AutoUsePurifPills = g_bridge.ExtractBool(json, "AutoUsePurifPills");
+
+        // MAINTENANCE CATEGORY
+        settings.Maintenance.RepairWeapon = g_bridge.ExtractBool(json, "RepairWeapon");
+        settings.Maintenance.RepairDurabilityThreshold = g_bridge.ExtractInt(json, "RepairDurabilityThreshold");
+
+        // RECALL TRIGGERS
+        settings.BackTownMonitor.ReturnIfDead = g_bridge.ExtractBool(json, "ReturnIfDead");
+        settings.BackTownMonitor.ReturnIfInventoryFull = g_bridge.ExtractBool(json, "ReturnIfInventoryFull");
+
+        // ATTACK & ZERK CATEGORY
+        settings.Attack.IgnoreDimensionPillars = g_bridge.ExtractBool(json, "IgnoreDimensionPillars");
+        settings.Attack.UseZerkRightAwayWhenFull = g_bridge.ExtractBool(json, "UseZerkRightAwayWhenFull");
+        settings.Attack.UseZerkOnNormalGiants = g_bridge.ExtractBool(json, "UseZerkOnNormalGiants");
+        settings.Attack.UseZerkOnPartyMobs = g_bridge.ExtractBool(json, "UseZerkOnPartyMobs");
+        settings.Attack.UseZerkOnPartyGiants = g_bridge.ExtractBool(json, "UseZerkOnPartyGiants");
+        settings.Attack.UseZerkOnUniques = g_bridge.ExtractBool(json, "UseZerkOnUniques");
+        settings.Attack.UseZerkIfNMobsAttackingSimulataneously = g_bridge.ExtractBool(json, "UseZerkIfNMobsAttackingSimulataneously");
+        settings.Attack.ZerkMobCount = g_bridge.ExtractInt(json, "ZerkMobCount");
+
+        // LOOT & WALKING BUFFS
+        settings.Pickup.PickGold = g_bridge.ExtractBool(json, "PickGold");
+        settings.Pickup.PickAll = g_bridge.ExtractBool(json, "PickAll");
+        settings.Pickup.PickAmmoIfAmountLowerThan = g_bridge.ExtractBool(json, "PickAmmoIfAmountLowerThan");
+
+        settings.Autowalker.CastSpeedBuffWhileWalking = g_bridge.ExtractBool(json, "CastSpeedBuffWhileWalking");
+        settings.Autowalker.CastNoiseBuffWhileWalking = g_bridge.ExtractBool(json, "CastNoiseBuffWhileWalking");
+        });
 }
 
 void Control::Initialize()
@@ -168,7 +451,7 @@ void Control::Initialize()
     auto& log = GetLogger();
 
     log.Alloc();
-    log.SetState(false);
+    log.SetState(true);
     Settings::Load();
     dx9_hook::init();
     log.Info("Control::Initialize", "Initialzed d3d9_hook.");

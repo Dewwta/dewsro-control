@@ -88,11 +88,11 @@ namespace VSRO_CONTROL_API.VSRO.Tools
             }
         }
         private static SnapshotItem ToItem(
-            (int ItemID, string CodeName, int Stack, int MaxStack) t) =>
+            SR_Item t) =>
             new()
             {
-                ItemID   = t.ItemID,
-                CodeName = t.CodeName,
+                ItemID   = t.RefItemID,
+                CodeName = t.CodeName128!,
                 Stack    = t.Stack,
                 MaxStack = t.MaxStack
             };

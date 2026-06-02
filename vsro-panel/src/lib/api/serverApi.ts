@@ -70,8 +70,8 @@ export interface LiveParty {
 }
 
 export interface LiveStats {
-    STR: number,
-    INT: number
+    STR: number;
+    INT: number;
 	level: number;
 	currentHP: number;
 	currentMP: number;
@@ -79,6 +79,10 @@ export interface LiveStats {
 	unusedStatPoints: number;
 	gold: number;
 	skillPoints: number;
+    worldX: number;
+    worldY: number;
+    worldZ: number;
+    currentRegion: string | null;
 }
 
 export interface LiveSession {
@@ -196,7 +200,22 @@ export const serverApi = {
 	getLogOpcodes:   ()               => request<string[]>('/server/log-opcodes'),
 	addLogOpcode:    (opcode: string) => request<{ message: string }>(`/server/add-log-opcode?opcode=${encodeURIComponent(opcode)}`),
 	removeLogOpcode: (opcode: string) => request<{ message: string }>(`/server/remove-log-opcode?opcode=${encodeURIComponent(opcode)}`),
-	clearLogOpcodes: ()               => request<{ message: string }>('/server/clear-log-opcodes')
+	clearLogOpcodes: ()               => request<{ message: string }>('/server/clear-log-opcodes'),
+    startBots:  () => request<{ message: string }>('/bot/start-bots',  { method: 'POST' }),
+    stopBots:   () => request<{ message: string }>('/bot/stop-bots',   { method: 'POST' }),
+    botStatus:  () => request<{ isStarting: boolean; runningBots: string[] }>('/bot/bot-status'),
+    stopBot:    (name: string) => request<{ message: string }>(`/bot/stop-bot/${encodeURIComponent(name)}`,    { method: 'POST' }),
+    restartBot: (name: string) => request<{ message: string }>(`/bot/restart-bot/${encodeURIComponent(name)}`, { method: 'POST' }),
+    setBotTrainplace: (name: string, x: number, y: number, z: number, r: number) =>
+    request<{ message: string }>(`/bot/bot-trainplace/${encodeURIComponent(name)}`, {
+        method: 'POST',
+        body: JSON.stringify({ x, y, z, r })
+    }),
+
+    getBotTrainplace: (name: string) =>
+    request<{ botName: string; x: number; y: number; z: number; r: number }>(
+        `/bot/bot-trainplace/${encodeURIComponent(name)}`
+    ),
 };
 
 export const playersApi = {

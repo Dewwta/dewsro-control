@@ -1,10 +1,17 @@
 #pragma once
 #include "../BSLib/ClientNet/MsgStreamBuffer.h"
 #include <BSLib/ClientNet/ClientNet.h>
+#include "DllBridge.h"
 
 #define DEW_SORT 0xE101
 #define DEW_CLAIM_REWARD 0xE102
 #define DEW_ACHIEVEMENTS 0xE103
+#define DEW_START_BOT 0xE104
+#define DEW_STOP_BOT 0xE105
+#define DEW_SKILL_ADD 0xDE10
+#define DEW_SKILL_REMOVE 0xDE11
+#define DEW_SKILL_MOVE 0xDE12
+#define DEW_SAVE_SETTINGS 0xDE13
 
 enum class SortType : BYTE
 {
@@ -23,6 +30,30 @@ enum class SortTarget : BYTE
 class NetActions
 {
 public:
+    static void SendSkillAdd(uint32_t skillId, bool isBuff)
+    {
+        NEWMSG(DEW_SKILL_ADD)
+            pReq << (uint32_t)skillId;
+            pReq << (BYTE)(isBuff ? 1 : 0);
+        SENDMSG()
+    }
+
+    static void SendSkillRemove(uint32_t skillId, bool isBuff)
+    {
+        NEWMSG(DEW_SKILL_REMOVE)
+            pReq << (uint32_t)skillId;
+            pReq << (BYTE)(isBuff ? 1 : 0);
+        SENDMSG()
+    }
+
+    static void SendSkillMove(uint32_t skillId, int direction)
+    {
+        NEWMSG(DEW_SKILL_MOVE)
+            pReq << (uint32_t)skillId;
+            pReq << (int)direction;
+        SENDMSG()
+    }
+
     static void SendSortRequest(SortType sortType, SortTarget target) {
         NEWMSG(DEW_SORT)
             pReq << (BYTE)sortType;
@@ -45,7 +76,127 @@ public:
         NEWMSG(DEW_ACHIEVEMENTS)
             SENDMSG()
     }
+    static void SendStopBotRequest() {
+        NEWMSG(DEW_STOP_BOT)
+            SENDMSG()
+    }
 
+    static void SendStartBotRequest(int x, int y, int z, int r, int regionID)
+    {
+        NEWMSG(DEW_START_BOT)
+
+            pReq << (int)x;
+            pReq << (int)y;
+            pReq << (int)z;
+            pReq << (int)r;
+            pReq << (int)regionID;
+
+        SENDMSG()
+    }
+    static void SendSaveBotSettings(const BotSettings& s)
+    {
+        NEWMSG(DEW_SAVE_SETTINGS)
+
+            pReq << (BYTE)(s.Consumables.BuyHpPotions ? 1 : 0);
+        pReq << (int)s.Consumables.HpPotionRefillAmount;
+        pReq << (int)s.Consumables.HpPotionReturnThreshold;
+        pReq << (int)s.Consumables.HPType;
+
+        pReq << (BYTE)(s.Consumables.BuyMpPotions ? 1 : 0);
+        pReq << (int)s.Consumables.MpPotionRefillAmount;
+        pReq << (int)s.Consumables.MpPotionReturnThreshold;
+        pReq << (int)s.Consumables.MPType;
+
+        pReq << (BYTE)(s.Consumables.BuyReturnScrolls ? 1 : 0);
+        pReq << (int)s.Consumables.ReturnScrollRefillAmount;
+        pReq << (int)s.Consumables.ReturnScrollType;
+
+        pReq << (BYTE)(s.Consumables.BuyVigorPotions ? 1 : 0);
+        pReq << (int)s.Consumables.VigorPotionRefillAmount;
+        pReq << (int)s.Consumables.VigorPotionReturnThreshold;
+
+        pReq << (BYTE)(s.Consumables.BuyUniversalPills ? 1 : 0);
+        pReq << (int)s.Consumables.UniversalPillsRefillAmount;
+        pReq << (int)s.Consumables.UniversalPillsReturnThreshold;
+        pReq << (int)s.Consumables.UniPillType;
+
+        pReq << (BYTE)(s.Consumables.BuyPurifPills ? 1 : 0);
+        pReq << (int)s.Consumables.PurifPillsRefillAmount;
+        pReq << (int)s.Consumables.PurifPillsReturnThreshold;
+        pReq << (int)s.Consumables.PurificationPillType;
+
+        pReq << (BYTE)(s.Consumables.BuySpeedDrugs ? 1 : 0);
+        pReq << (int)s.Consumables.SpeedDrugsRefillAmount;
+        pReq << (int)s.Consumables.SpeedDrugsReturnThreshold;
+        pReq << (int)s.Consumables.DrugType;
+
+        pReq << (BYTE)(s.Consumables.BuyRecKits ? 1 : 0);
+        pReq << (int)s.Consumables.RecKitsRefillAmount;
+        pReq << (int)s.Consumables.RecKitsReturnThreshold;
+        pReq << (int)s.Consumables.RecKitsType;
+
+        pReq << (BYTE)(s.Consumables.BuyHGPPotions ? 1 : 0);
+        pReq << (int)s.Consumables.HGPPotionsRefillAmount;
+        pReq << (int)s.Consumables.HGPPotionsReturnThreshold;
+
+        pReq << (BYTE)(s.Consumables.BuyAbnPill ? 1 : 0);
+        pReq << (int)s.Consumables.AbnPillRefillAmount;
+        pReq << (int)s.Consumables.AbnPillReturnThreshold;
+        pReq << (int)s.Consumables.AbnPillType;
+
+        pReq << (BYTE)(s.Consumables.BuyHorses ? 1 : 0);
+        pReq << (int)s.Consumables.HorsesRefillAmount;
+        pReq << (int)s.Consumables.HorsesType;
+
+        pReq << (BYTE)(s.Consumables.BuyAmmo ? 1 : 0);
+        pReq << (int)s.Consumables.AmmoRefillAmount;
+        pReq << (int)s.Consumables.AmmoReturnThreshold;
+        pReq << (int)s.Consumables.AmmoType;
+
+        pReq << (BYTE)(s.Autowalker.CastSpeedBuffWhileWalking ? 1 : 0);
+        pReq << (BYTE)(s.Autowalker.CastNoiseBuffWhileWalking ? 1 : 0);
+
+        pReq << (BYTE)(s.AutoPotion.AutoUseHP ? 1 : 0);
+        pReq << (BYTE)(s.AutoPotion.AutoUseMP ? 1 : 0);
+        pReq << (BYTE)(s.AutoPotion.UseVigorPotions ? 1 : 0);
+        pReq << (int)s.AutoPotion.HPPotHealthThreshold;
+        pReq << (int)s.AutoPotion.MPPotManaThreshold;
+        pReq << (int)s.AutoPotion.VigorHPMPThreshold;
+        pReq << (BYTE)(s.AutoPotion.PreferVigorFirst ? 1 : 0);
+        pReq << (int)s.AutoPotion.HPDelay;
+        pReq << (int)s.AutoPotion.MPDelay;
+        pReq << (BYTE)(s.AutoPotion.HealPets ? 1 : 0);
+        pReq << (int)s.AutoPotion.HealPetHPThreshold;
+        pReq << (int)s.AutoPotion.HealPetsDelay;
+        pReq << (BYTE)(s.AutoPotion.UseHGPPotions ? 1 : 0);
+        pReq << (int)s.AutoPotion.HGPPotionsThreshold;
+        pReq << (BYTE)(s.AutoPotion.AutoUseContPills ? 1 : 0);
+        pReq << (BYTE)(s.AutoPotion.AutoUsePurifPills ? 1 : 0);
+
+        pReq << (BYTE)(s.Pickup.PickAmmoIfAmountLowerThan ? 1 : 0);
+        pReq << (int)s.Pickup.AmmoAmount;
+        pReq << (BYTE)(s.Pickup.PickDelay ? 1 : 0);
+        pReq << (int)s.Pickup.PickDelayTime;
+        pReq << (BYTE)(s.Pickup.PickGold ? 1 : 0);
+        pReq << (BYTE)(s.Pickup.PickAll ? 1 : 0);
+
+        pReq << (BYTE)(s.BackTownMonitor.ReturnIfDead ? 1 : 0);
+        pReq << (BYTE)(s.BackTownMonitor.ReturnIfInventoryFull ? 1 : 0);
+
+        pReq << (BYTE)(s.Maintenance.RepairWeapon ? 1 : 0);
+        pReq << (int)s.Maintenance.RepairDurabilityThreshold;
+
+        pReq << (BYTE)(s.Attack.IgnoreDimensionPillars ? 1 : 0);
+        pReq << (BYTE)(s.Attack.UseZerkRightAwayWhenFull ? 1 : 0);
+        pReq << (BYTE)(s.Attack.UseZerkOnNormalGiants ? 1 : 0);
+        pReq << (BYTE)(s.Attack.UseZerkOnPartyMobs ? 1 : 0);
+        pReq << (BYTE)(s.Attack.UseZerkOnPartyGiants ? 1 : 0);
+        pReq << (BYTE)(s.Attack.UseZerkOnUniques ? 1 : 0);
+        pReq << (BYTE)(s.Attack.UseZerkIfNMobsAttackingSimulataneously ? 1 : 0);
+        pReq << (int)s.Attack.ZerkMobCount;
+
+        SENDMSG()
+    }
 private:
 	const unsigned short
         LOGIN_CLIENT_INFO = 0x2001,

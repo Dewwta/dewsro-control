@@ -13,13 +13,13 @@ DllBridge g_bridge;
 void DllBridge::SetIdentity(const std::string& username) {
     m_username = username;
 }
-
-void DllBridge::Reconnect(const std::string& username) {
+void DllBridge::ForceReconnect(const std::string& username) {
+    m_username = username;
     m_connected = false;
-    m_started.store(false);
-
-    SetIdentity(username);
-    Connect();
+    if (m_socket) {
+        closesocket(SOCK);
+        m_socket = nullptr;
+    }
 }
 
 void DllBridge::Connect() {
@@ -42,10 +42,12 @@ void DllBridge::RunLoop() {
     Sleep(3000);
     
     auto& log = GetLogger();
-    WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
 
     while (true) {
+        if (m_username.empty()) {
+            Sleep(500);
+            continue;
+        }
         SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
         m_socket = (void*)(size_t)s;
 
@@ -149,7 +151,34 @@ int DllBridge::ExtractInt(const std::string& json, const std::string& key) {
         return 0;
     }
 }
+bool DllBridge::ExtractBool(const std::string& json, const std::string& key) {
+    std::string search = "\"" + key + "\":";
+    auto s = json.find(search);
+    if (s == std::string::npos) return false;
 
+    s += search.size();
+
+    // Safety check: ensure we aren't at the end of the string block
+    if (s >= json.size()) return false;
+
+    // Check if it matches 'true' safely
+    if (json.compare(s, 4, "true") == 0) {
+        return true;
+    }
+    return false;
+}
+float DllBridge::ExtractFloat(const std::string& json, const std::string& key) {
+    std::string search = "\"" + key + "\":";
+    auto s = json.find(search);
+    if (s == std::string::npos) return 0.0f;
+    s += search.size();
+    try {
+        return std::stof(json.substr(s));
+    }
+    catch (...) {
+        return 0.0f;
+    }
+}
 
 uint64_t DllBridge::ExtractUint64(const std::string& json, const std::string& key) {
     std::string search = "\"" + key + "\":";

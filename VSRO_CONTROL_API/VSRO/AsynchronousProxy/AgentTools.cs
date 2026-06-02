@@ -1,48 +1,13 @@
 ﻿using CoreLib.Tools.Logging;
-using Newtonsoft.Json.Linq;
 using VSRO_CONTROL_API.Settings;
+using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Framework;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
+using VSRO_CONTROL_API.VSRO.Bots;
 using VSRO_CONTROL_API.VSRO.DTO;
-
 namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 {
     public class AgentTools
     {
-        #region - Obsoletes for archiving -
-
-        [Obsolete("Legacy spawn tracker. Replaced by RegisterSpawnTrackerImproved. Do not register.")]
-        public static void RegisterSpawnTracker(Server _agentProxy)
-        {
-            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_SPAWN, (sender, e) =>
-            {
-                var packet = e.Packet;
-                if (packet.RemainingRead() < 8) return;
-                uint refObjID = packet.ReadUInt();
-                uint spawnUID = packet.ReadUInt();
-                //if (Overseer.ShopNPCIds.Contains((int)refObjID))
-                //    e.Proxy.SpawnedObjects[spawnUID] = refObjID;
-            });
-
-            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_GROUPSPAWN_BODY, (sender, e) =>
-            {
-                var packet = e.Packet;
-                if (packet.RemainingRead() < 8) return;
-                uint refObjID = packet.ReadUInt();
-                uint spawnUID = packet.ReadUInt();
-                //if (Overseer.ShopNPCIds.Contains((int)refObjID))
-                //   e.Proxy.SpawnedObjects[spawnUID] = refObjID;
-            });
-
-            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_DESPAWN, (sender, e) =>
-            {
-                var packet = e.Packet;
-                uint spawnUID = packet.ReadUInt();
-                e.Proxy.SpawnedObjects.TryRemove(spawnUID, out _);
-            });
-        }
-
-        #endregion
-
         public static HashSet<int> _regionIds = new HashSet<int>();
         
         public static async Task Init()
@@ -102,10 +67,10 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     accName = userName.userName
                 });
 
-                e.Proxy.SessionTokenSource = new CancellationTokenSource();
+                e.Proxy.Session!.SessionTokenSource = new CancellationTokenSource();
 
                 _ = Task.Run(() =>
-                    PlayerTools.RunSessionTracker(e.Proxy, e.Proxy.SessionTokenSource.Token)
+                    PlayerTools.RunSessionTracker(e.Proxy, e.Proxy.Session!.SessionTokenSource.Token)
                 );
 
                 e.Proxy.OnPlaytimeHourReached += async (p, session) =>
@@ -132,6 +97,65 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     }
 
                 };
+                var session = e.Proxy.Session;
+                if (session._attackLoop == null)
+                {
+                    session._attackLoop = new AttackLoop(
+                        getPosition: () => session.GetEstimatedPosition(),
+                        getNearbyMobs: () => session.SpawnedPositions.ToDictionary(
+                            kvp => kvp.Key,
+                            kvp => {
+                                bool isDungeon = (session.RegionId & 0x8000) != 0;
+                                return isDungeon
+                                    ? BotPosition.FromDisplayWorldDungeon(kvp.Value.WorldX, kvp.Value.WorldY, 0, (ushort)session.RegionId)
+                                    : BotPosition.FromDisplayWorld(kvp.Value.WorldX, kvp.Value.WorldY);
+                            }
+                        ),
+                        sendPacket: p =>
+                        {
+                            try
+                            {
+                                PlayerTools.MarkActivity(e.Proxy);
+                                e.Proxy.Server.Send(p);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Warn("Bot", $"sendPacket failed: {ex.Message}");
+                            }
+                        },
+                        session: session,
+                        sendMove: pos =>
+                        {
+                            try
+                            {
+                                var p = new Packet(0x7021);
+                                p.WriteByte(1);
+                                p.WriteByte(pos.SectorX);
+                                p.WriteByte(pos.SectorY);
+
+                                bool isDungeon = (pos.RegionId & 0x8000) != 0;
+                                if (isDungeon)
+                                {
+                                    p.WriteUInt((uint)(int)pos.XOffset);
+                                    p.WriteInt((int)pos.ZOffset);
+                                    p.WriteUInt((uint)(int)pos.YOffset);
+                                }
+                                else
+                                {
+                                    p.WriteShort((short)pos.XOffset);
+                                    p.WriteShort((short)pos.ZOffset);
+                                    p.WriteShort((short)pos.YOffset);
+                                }
+
+                                e.Proxy.Server.Send(p);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Warn("Bot", $"sendMove failed: {ex.Message}");
+                            }
+                        }
+                    );
+                }
 
                 Logger.Info(typeof(Overseer), $"Player logged in: {e.Proxy.Session.CharacterName}");
             });
@@ -171,7 +195,11 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     {
                         sessionSeconds = (int)e.Proxy.Session.AccumulatedPlayTime.TotalSeconds,
                         sessionKills = e.Proxy.Session.SessionKills,
-                        isAfk = e.Proxy.Session.IsAfk ? 1 : 0  // int not bool
+                        totalSeconds = (int)e.Proxy.Session.TotalPlayTime.TotalSeconds,
+                        isAfk = e.Proxy.Session.IsAfk ? 1 : 0,
+                        accountJID = e.Proxy.Session.JID,
+                        isGM = e.Proxy.Session.IsGM ? 1 : 0,
+
                     });
 
                     DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "unclaimed_rewards", new
@@ -181,8 +209,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                     var payload = new
                     {
-                        hp = e.Proxy.Session.PlayerStats.CurrentHP,
-                        mp = e.Proxy.Session.PlayerStats.CurrentMP,
+                        hp = e.Proxy.Session.PlayerStats!.CurrentHP,
+                        mp = e.Proxy.Session.PlayerStats!.CurrentMP,
                         sessionKills = e.Proxy.Session.SessionKills,
                         unusedStatPoints = e.Proxy.Session.PlayerStats.UnusedStatPoints,
                         currentLevel = e.Proxy.Session.PlayerStats.CurrentLevel,
@@ -299,7 +327,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
         /// <summary>
         /// Registers the spawn trackers for group spawns.
-        /// Currently tracks: NPC's, Monsters
+        /// Currently tracks: NPC's, Monsters, and Teleporters
         /// </summary>
         /// <param name="_agentProxy">Proxy object to act upon</param>
         public static void RegisterSpawnTrackerImproved(Server _agentProxy)
@@ -308,74 +336,325 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             {
                 var packet = e.Packet.Clone();
                 var proxy = e.Proxy;
-                proxy.CurrentGroupSpawnType = packet.ReadByte(); // 1=spawn, 2=despawn
+                proxy.Session!.CurrentGroupSpawnType = packet.ReadByte(); // 1=spawn, 2=despawn
                 byte count = packet.ReadByte();
             });
 
-            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_GROUPSPAWN_BODY, (s, e) =>
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_GROUPSPAWN_BODY, async (s, e) =>
             {
-                var packet = e.Packet;
+                var packet = e.Packet.Clone();
                 var proxy = e.Proxy;
 
-                if (proxy.CurrentGroupSpawnType == 2)
+                try
                 {
-                    // Despawn list (unchanged)
-                    while (packet.RemainingRead() >= 4)
+                    if (proxy.Session!.CurrentGroupSpawnType == 2)
                     {
-                        uint despawnUID = packet.ReadUInt();
-                        proxy.SpawnedObjects.TryRemove(despawnUID, out _);
+                        while (packet.RemainingRead() >= 4)
+                        {
+                            uint despawnUID = packet.ReadUInt();
+                            proxy.Session!.SpawnedObjects.TryRemove(despawnUID, out _);
+                            proxy.Session!.SpawnedPositions.TryRemove(despawnUID, out _);
+                            proxy.Session!.MobUIDs.TryRemove(despawnUID, out _);
+                        }
+                        return;
                     }
-                    return;
+
+                    while (packet.RemainingRead() >= 10)
+                    {
+                        uint refObjID = packet.ReadUInt();
+                        if (refObjID == 0 || refObjID > 100000) break;
+
+                        var record = await DBConnect.GetItemRecord(refObjID);
+                        if (record.item == null)
+                        {
+                            Logger.Warn("SpawnBody::Record", $"Unknown refObjID={refObjID} — cannot skip, aborting packet parse");
+                            break;
+                        }
+                        string code = record.item.CodeName;
+
+                        if (code.StartsWith("ITEM_") || code.StartsWith("GOLD"))
+                        {
+                            if (code.Contains("QNO") || code.Contains("SNOWFLAKE"))
+                            {
+                                ushort nameLen = packet.ReadUShort();
+                                for (int i = 0; i < nameLen; i++) packet.ReadByte();
+                            }
+
+                            bool isGold = code.StartsWith("ITEM_ETC_GOLD") || code.StartsWith("GOLD");
+
+                            uint goldAmount = 0;
+                            if (isGold)
+                                goldAmount = packet.ReadUInt(); // gold amount prepended
+
+                            uint itemUID = packet.ReadUInt();
+
+                            int itemWorldX, itemWorldY;
+                            if (isGold)
+                            {
+                                byte gsx = packet.ReadByte();
+                                byte gsy = packet.ReadByte();
+                                float gx = packet.ReadFloat();
+                                float gz = packet.ReadFloat();
+                                float gy = packet.ReadFloat();
+                                var (goldPos, _, _) = BotPosition.FromRawOffsets(gsx, gsy, gx, gy);
+                                itemWorldX = (int)goldPos.X;
+                                itemWorldY = (int)goldPos.Y;
+                            }
+                            else
+                            {
+                                ushort itemRegionID = packet.ReadUShort();
+                                float _x = packet.ReadFloat();
+                                float _z = packet.ReadFloat();
+                                float _y = packet.ReadFloat();
+                                byte itemSX = (byte)(itemRegionID & 0xFF);
+                                byte itemSY = (byte)((itemRegionID >> 8) & 0xFF);
+                                var (itemPos, _, _) = BotPosition.FromRawOffsets(itemSX, itemSY, _x, _y);
+                                itemWorldX = (int)itemPos.X;
+                                itemWorldY = (int)itemPos.Y;
+                            }
+
+                            packet.ReadUShort(); // angle
+                            byte hasOwner = packet.ReadByte();
+                            uint ownerJID = 0;
+                            if (hasOwner != 0)
+                                ownerJID = packet.ReadUInt();
+                            packet.ReadByte(); // isBlue
+
+                            proxy.Session!.DroppedItems[itemUID] = (refObjID, code, itemWorldX, itemWorldY);
+                            Logger.Debug("SpawnBody::Item", $"Tracked drop {code} uid={itemUID} gold={goldAmount} owner={ownerJID} world=({itemWorldX},{itemWorldY}) remaining={packet.RemainingRead()}");
+                            continue;
+                        }
+
+                        // --- read common position header ---
+                        uint spawnUID = packet.ReadUInt();
+                        byte xsec = packet.ReadByte();
+                        byte ysec = packet.ReadByte();
+                        float rawX = packet.ReadFloat();
+                        float rawZ = packet.ReadFloat();
+                        float rawY = packet.ReadFloat();
+                        packet.ReadUShort(); // angle
+
+                        var (entityPos, sx, sy) = BotPosition.FromRawOffsets(xsec, ysec, rawX, rawY);
+                        int worldX = (int)entityPos.X;
+                        int worldY = (int)entityPos.Y;
+                        ushort regionID = (ushort)((sy << 8) | sx);
+
+                        // --- STORE (portals/gates) ---
+                        if (code.StartsWith("STORE"))
+                        {
+                            proxy.Session!.SpawnedObjects[spawnUID] = (refObjID, (short)regionID, refObjID);
+                            proxy.Session!.SpawnedPositions[spawnUID] = (worldX, worldY);
+                            packet.ReadUInt();
+                            packet.ReadULong();
+                            Logger.Debug("SpawnBody", $"Parsed {code} uid={spawnUID} ObjID={refObjID} world=({worldX},{worldY}) remaining={packet.RemainingRead()}");
+                            continue;
+                        }
+
+                        // --- Movement block ---
+                        byte hasDestination = packet.ReadByte();
+
+                        if (!code.StartsWith("NPC"))
+                            packet.ReadByte(); // isRunning — MOB/COS only
+
+                        if (hasDestination == 1)
+                        {
+                            byte dxsec = packet.ReadByte();
+                            byte dysec = packet.ReadByte();
+                            bool isDungeonDest = PlayerTools.IsDungeon((ushort)((dysec << 8) | dxsec));
+
+                            if (isDungeonDest)
+                            {
+                                // Dungeon destination - 4 ints
+                                packet.ReadInt();  // destX
+                                packet.ReadInt();  // destZ  
+                                packet.ReadInt();  // destY
+                            }
+                            else
+                            {
+                                // Overworld destination — 3 ushorts
+                                packet.ReadUShort();
+                                packet.ReadUShort();
+                                packet.ReadUShort();
+                            }
+                        }
+                        else if (code.StartsWith("MOB"))
+                        {
+                            packet.ReadByte();
+                            packet.ReadUShort();
+                        }
+
+                        // Register
+                        if (code.StartsWith("MOB"))
+                            proxy.Session!.MobUIDs[spawnUID] = 1;
+
+                        proxy.Session!.SpawnedObjects[spawnUID] = (refObjID, (short)regionID, refObjID);
+                        proxy.Session!.SpawnedPositions[spawnUID] = (worldX, worldY);
+
+                        Logger.Debug("SpawnBody", $"Parsed {code} uid={spawnUID} world=({worldX},{worldY}) remaining={packet.RemainingRead()} hasDest={hasDestination}");
+                        SkipEntityTail(packet, record.item);
+                    }
                 }
-
-                // Spawn group — reliable byte scan (works in EVERY region)
-                byte[] raw = packet.GetBytes();
-
-                for (int i = 0; i <= raw.Length - 10; i++)   // need at least ref + uid + region
+                catch (Exception ex)
                 {
-                    uint refObjID = BitConverter.ToUInt32(raw, i);
-                    uint spawnUID = BitConverter.ToUInt32(raw, i + 4);
-                    ushort regionID = BitConverter.ToUInt16(raw, i + 8);
-
-                    // Same validation you already had + region now
-                    if (refObjID < 1 || refObjID > 100000 ||
-                        spawnUID == 0 ||
-                        !_regionIds.Contains((int)regionID))
-                    {
-                        continue;
-                    }
-
-
-                    // Store the tuple your code now expects
-                    proxy.SpawnedObjects[spawnUID] = (refObjID, (short)regionID);
-
-                    // Skip past this entity (entities are ~55 bytes in 1.188; 50 is safe and prevents false matches inside data)
-                    i += 50;
+                    Logger.Error("SpawnBody", $"Parse failed: {ex.Message} — remaining={packet.RemainingRead()}");
                 }
             });
-
+            
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_GROUPSPAWN_TAIL, (s, e) =>
             {
                 var proxy = e.Proxy;
-                proxy.CurrentGroupSpawnType = 0; // reset
+                proxy.Session!.CurrentGroupSpawnType = 0; // reset
             });
 
-            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_SPAWN, (s, e) =>
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_SPAWN, async (s, e) =>
             {
                 var packet = e.Packet.Clone();
                 if (packet.RemainingRead() < 10) return;
+
                 uint refObjID = packet.ReadUInt();
+                var record = await DBConnect.GetItemRecord(refObjID);
+
+                if (record.item == null)
+                {
+                    Logger.Warn("SERVER_SPAWN", $"Unknown refObjID={refObjID} — aborting");
+                    return;
+                }
+
+                string code = record.item.CodeName;
+
+                if (code.StartsWith("ITEM_") || code.StartsWith("GOLD"))
+                {
+                    if (code.Contains("QNO") || code.Contains("SNOWFLAKE"))
+                    {
+                        ushort nameLen = packet.ReadUShort();
+                        for (int i = 0; i < nameLen; i++) packet.ReadByte();
+                    }
+
+                    bool isGold = code.StartsWith("ITEM_ETC_GOLD") || code.StartsWith("GOLD");
+
+                    uint goldAmount = 0;
+                    if (isGold)
+                        goldAmount = packet.ReadUInt(); // gold amount prepended
+
+                    uint itemUID = packet.ReadUInt();
+
+                    int itemWorldX, itemWorldY;
+                    if (isGold)
+                    {
+                        // Gold uses separate sector bytes like entities
+                        byte gsx = packet.ReadByte();
+                        byte gsy = packet.ReadByte();
+                        float gx = packet.ReadFloat();
+                        float gz = packet.ReadFloat();
+                        float gy = packet.ReadFloat();
+                        var (goldPos2, _, _) = BotPosition.FromRawOffsets(gsx, gsy, gx, gy);
+                        itemWorldX = (int)goldPos2.X;
+                        itemWorldY = (int)goldPos2.Y;
+                    }
+                    else
+                    {
+                        ushort itemRegionID = packet.ReadUShort();
+                        float _x = packet.ReadFloat();
+                        float _z = packet.ReadFloat();
+                        float _y = packet.ReadFloat();
+                        byte itemSX = (byte)(itemRegionID & 0xFF);
+                        byte itemSY = (byte)((itemRegionID >> 8) & 0xFF);
+                        var (itemPos2, _, _) = BotPosition.FromRawOffsets(itemSX, itemSY, _x, _y);
+                        itemWorldX = (int)itemPos2.X;
+                        itemWorldY = (int)itemPos2.Y;
+                    }
+
+                    packet.ReadUShort(); // angle
+                    byte hasOwner = packet.ReadByte();
+                    uint ownerJID = 0;
+                    if (hasOwner != 0)
+                        ownerJID = packet.ReadUInt();
+                    packet.ReadByte(); // isBlue
+
+                    e.Proxy.Session!.DroppedItems[itemUID] = (refObjID, code, itemWorldX, itemWorldY);
+                    Logger.Debug("SpawnBody::Item", $"Tracked drop {code} uid={itemUID} gold={goldAmount} owner={ownerJID} world=({itemWorldX},{itemWorldY}) remaining={packet.RemainingRead()}");
+                    return;
+                }
+
                 uint spawnUID = packet.ReadUInt();
-                ushort regionID = packet.ReadUShort();
-                e.Proxy.SpawnedObjects[spawnUID] = (refObjID, (short)regionID);
+                byte xsec = packet.ReadByte();
+                byte ysec = packet.ReadByte();
+                float rawX = packet.ReadFloat();
+                float rawZ = packet.ReadFloat();
+                float rawY = packet.ReadFloat();
+                packet.ReadUShort(); // angle
+
+                var (spawnPos, sx, sy) = BotPosition.FromRawOffsets(xsec, ysec, rawX, rawY);
+                int worldX = (int)spawnPos.X;
+                int worldY = (int)spawnPos.Y;
+                ushort regionID = (ushort)((sy << 8) | sx);
+
+                if (code.StartsWith("MOB"))
+                    e.Proxy.Session!.MobUIDs[spawnUID] = 1;
+
+                e.Proxy.Session!.SpawnedObjects[spawnUID] = (refObjID, (short)regionID, refObjID);
+                e.Proxy.Session!.SpawnedPositions[spawnUID] = (worldX, worldY);
+
+                Logger.Debug("SERVER_SPAWN", $"Parsed {code} uid={spawnUID} world=({worldX:F1},{worldY:F1})");
             });
 
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_DESPAWN, (s, e) =>
             {
                 var packet = e.Packet.Clone();
                 uint spawnUID = packet.ReadUInt();
-                e.Proxy.SpawnedObjects.TryRemove(spawnUID, out _);
+                e.Proxy.Session!.MobUIDs.TryRemove(spawnUID, out _);
+                e.Proxy.Session!.SpawnedObjects.TryRemove(spawnUID, out _);
+                e.Proxy.Session!.SpawnedPositions.TryRemove(spawnUID, out _);
+                e.Proxy.Session!.DroppedItems.TryRemove(spawnUID, out _);
             });
+        }
+
+        private static void SkipEntityTail(Packet packet, ItemRecord record)
+        {
+            try
+            {
+                string code = record.CodeName;
+
+                if (code.StartsWith("MOB"))
+                {
+                    packet.ReadByte();  // alive
+                    packet.ReadByte();  // unknown
+                    packet.ReadByte();  // unknown
+                    packet.ReadByte();  // zerk active
+                    packet.ReadFloat(); // walk speed
+                    packet.ReadFloat(); // run speed
+                    packet.ReadFloat(); // zerk speed
+                    packet.ReadUInt();  // unknown
+                    packet.ReadByte();  // type (passive/predator/etc)
+                }
+                else if (code.StartsWith("NPC") || code.StartsWith("STORE"))
+                {
+                    packet.ReadULong();  // unknown (8 bytes)
+                    packet.ReadULong();  // unknown (8 bytes)
+                    packet.ReadFloat();  // speed 100.0 (4 bytes)
+                    ushort check = packet.ReadUShort();  // (2 bytes) = 22 minimum
+                    if (check != 0)
+                    {
+                        byte count = packet.ReadByte();
+                        for (int i = 0; i < count; i++)
+                            packet.ReadByte();
+                    }
+                }
+                else if (code.StartsWith("COS"))
+                {
+                    // nothing needed yet
+                }
+                else if (code.StartsWith("CHAR"))
+                {
+                    // nothing needed yet
+                }
+                
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("PlayerTools::GroupSpawnBody", ex.Message);
+            }
+
         }
 
         /// <summary>
@@ -391,7 +670,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 byte result = packet.ReadByte();
                 if (result != 1) return;
                 uint targetUID = packet.ReadUInt();
-                e.Proxy.LastTargetUID = targetUID;
+                e.Proxy.Session!.LastTargetUID = targetUID;
             });
         }
 

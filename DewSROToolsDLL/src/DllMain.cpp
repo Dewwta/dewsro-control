@@ -12,6 +12,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
     switch (dwReason)
     {
     case DLL_PROCESS_ATTACH:
+        WSADATA wsa;
+        WSAStartup(MAKEWORD(2, 2), &wsa);
         DisableThreadLibraryCalls(hModule);
         CreateThread(nullptr, 0, InitThreadProc, nullptr, 0, nullptr);
         break;

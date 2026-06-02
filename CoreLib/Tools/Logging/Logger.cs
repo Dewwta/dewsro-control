@@ -9,6 +9,16 @@ namespace CoreLib.Tools.Logging
     {
         #region - Var -
 
+        public enum LogLevel
+        {
+            Trace = 0,   
+            Debug = 1, 
+            Info = 2,
+            Warn = 3,
+            Error = 4,
+            None = 5
+        }
+        private static LogLevel _minLevel = LogLevel.Info;
         // Path to logs
         private static string _logSavePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"logs");
 
@@ -35,17 +45,6 @@ namespace CoreLib.Tools.Logging
 
         #endregion
 
-        #region - Debug -
-
-        private static bool _debug = false;
-        public static void SetDebug(bool debug)
-        {
-            if (_debug == true) return;
-            _debug = debug;
-        }
-
-        #endregion
-
         #region - Default Logging -
 
         #region - Special -
@@ -67,27 +66,21 @@ namespace CoreLib.Tools.Logging
         #endregion
 
         #region - Normal -
-        
+
+        public static void Trace(object obj, string msg)
+            => Log_Out(obj, LogLevel.Trace, msg);
+
         public static void Debug(object obj, string msg)
-        {
-            if (_debug == true)
-                Log_Out(obj, "DEBUG", msg);
-        }
+            => Log_Out(obj, LogLevel.Debug, msg);
 
         public static void Info(object obj, string msg)
-        {
-            Log_Out(obj, "INFO", msg);
-        }
+            => Log_Out(obj, LogLevel.Info, msg);
 
         public static void Warn(object obj, string msg)
-        {
-            Log_Out(obj, "WARN", msg);
-        }
+            => Log_Out(obj, LogLevel.Warn, msg);
 
         public static void Error(object obj, string msg)
-        {
-            Log_Out(obj, "ERROR", msg);
-        }
+            => Log_Out(obj, LogLevel.Error, msg);
 
         #endregion
 
@@ -113,9 +106,10 @@ namespace CoreLib.Tools.Logging
 
         #region - Private -
 
-        private static void Log_Out(object obj, string level, string msg)
+        private static void Log_Out(object obj, LogLevel level, string msg)
         {
             if (!_hasInit) return;
+            if (level < _minLevel) return;
             string name = obj switch
             {
                 null => "Unknown",
@@ -138,39 +132,64 @@ namespace CoreLib.Tools.Logging
             {
                 switch (level)
                 {
-                    case "ERROR":
-                        // stderr
-                        Console.ForegroundColor = ConsoleColor.Cyan;
+                    case LogLevel.Error:
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
                         Console.Error.Write(one);
+
                         Console.ForegroundColor = ConsoleColor.Red;
-                        Console.Error.Write(two); // stderr
+                        Console.Error.Write(two);
+
                         Console.ForegroundColor = ConsoleColor.Red;
-                        Console.Error.WriteLine(three); // stderr
+                        Console.Error.WriteLine(three);
                         break;
-                    case "WARN":
-                        // stderr
-                        Console.ForegroundColor = ConsoleColor.Cyan;
+
+                    case LogLevel.Warn:
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
                         Console.Error.Write(one);
+
+                        Console.ForegroundColor = ConsoleColor.DarkYellow;
+                        Console.Error.Write(two);
+
                         Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.Error.Write(two); // stderr
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.Error.WriteLine(three); // stderr
+                        Console.Error.WriteLine(three);
                         break;
-                    case "INFO":
-                        // stdout
-                        Console.ForegroundColor = ConsoleColor.Cyan;
+
+                    case LogLevel.Info:
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
                         Console.Write(one);
-                        Console.ForegroundColor = ConsoleColor.Magenta;
-                        Console.Write(two); // stderr
+
+                        Console.ForegroundColor = ConsoleColor.Cyan;
+                        Console.Write(two);
+
                         Console.ForegroundColor = ConsoleColor.White;
-                        Console.WriteLine(three); // stderr
+                        Console.WriteLine(three);
                         break;
-                    case "DEBUG":
+
+                    case LogLevel.Debug:
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
+                        Console.Write(one);
+
+                        Console.ForegroundColor = ConsoleColor.Gray;
+                        Console.Write(two);
+
+                        Console.ForegroundColor = ConsoleColor.Gray;
+                        Console.WriteLine(three);
                         break;
+
+                    case LogLevel.Trace:
+                        Console.ForegroundColor = ConsoleColor.Black;
+                        Console.Write(one);
+
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
+                        Console.Write(two);
+
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
+                        Console.WriteLine(three);
+                        break;
+
                     default:
                         Warn(typeof(Logger), $"Unknown log level?: {level}");
                         break;
-
                 }
 
                 Console.ForegroundColor = ConsoleColor.White;
@@ -285,8 +304,6 @@ namespace CoreLib.Tools.Logging
 
             }
 
-
-            Okay();
             _hasInit = true;
         }
 
@@ -461,6 +478,10 @@ namespace CoreLib.Tools.Logging
             lock (_logLock)
                 logHistory.Clear();
             Info(typeof(Logger), "In-memory log history cleared.");
+        }
+        public static void SetLogLevel(LogLevel level)
+        {
+            _minLevel = level;
         }
 
         #endregion

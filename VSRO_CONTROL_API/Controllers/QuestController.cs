@@ -199,7 +199,7 @@ namespace VSRO_CONTROL_API.Controllers
                 return StatusCode(500, new { message = $"Failed to run bat: {ex.Message}" });
             }
 
-            // Poll for Quest.sct — helper.exe may flush to disk slightly after cmd.exe exits
+            // Poll for Quest.sct
             string outputSct = Path.Combine(settings.QuestLuaRootPath, "Quest.sct");
             var deadline = DateTime.UtcNow.AddSeconds(15);
             while (!System.IO.File.Exists(outputSct) && DateTime.UtcNow < deadline)
