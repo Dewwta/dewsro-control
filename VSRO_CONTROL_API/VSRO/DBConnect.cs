@@ -9,7 +9,6 @@ using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.DTO.VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Enums;
 using VSRO_CONTROL_API.VSRO.Tools;
-using ISession = VSRO_CONTROL_API.VSRO.DTO.ISession;
 
 namespace VSRO_CONTROL_API.VSRO
 {
@@ -1180,6 +1179,42 @@ namespace VSRO_CONTROL_API.VSRO
             catch (Exception ex)
             {
                 Logger.Error(typeof(DBConnect), $"Error incrementing achievement '{achievementName}' for {charName}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Sets progress to MAX(existing, amount). Used for high-score achievements like gold.
+        /// Returns true if this call newly completed the achievement.
+        /// </summary>
+        public static async Task<bool> SetAchievementHighScoreProgress(
+            string charName, string achievementName, long amount, long goal)
+        {
+            try
+            {
+                var (currentProgress, alreadyCompleted) = await GetAchievementProgress(charName, achievementName);
+                if (alreadyCompleted) return false;
+
+                using (SqlConnection conn = new SqlConnection(_connectionString))
+                {
+                    await conn.OpenAsync();
+                    using (SqlCommand cmd = new SqlCommand(Constant.SetAchievementHighScoreProgress_q, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@CharName", charName);
+                        cmd.Parameters.AddWithValue("@AchievementName", achievementName);
+                        cmd.Parameters.AddWithValue("@Amount", amount);
+                        cmd.Parameters.AddWithValue("@Goal", goal);
+
+                        await cmd.ExecuteNonQueryAsync();
+                    }
+                }
+
+                long newProgress = Math.Max(currentProgress, amount);
+                return newProgress >= goal;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(typeof(DBConnect), $"Error setting high-score achievement '{achievementName}' for {charName}: {ex.Message}");
                 return false;
             }
         }
@@ -2774,6 +2809,7 @@ namespace VSRO_CONTROL_API.VSRO
                 ReadableName = GameObjectNameResolver.Resolve(resolvedCodeName),
                 Group = reader["Basic_Group"]?.ToString() ?? "",
                 Level = resolvedLevel,
+                BasicActivity = Convert.ToInt32(reader["Basic_Activity"]),
                 PreparingTime = Convert.ToInt32(reader["Action_PreparingTime"]),
                 CastingTime = Convert.ToInt32(reader["Action_CastingTime"]),
                 ActionDuration = Convert.ToInt32(reader["Action_ActionDuration"]),
@@ -2787,6 +2823,7 @@ namespace VSRO_CONTROL_API.VSRO
                 ConsumeMP = Convert.ToInt32(reader["Consume_MP"]),
                 AIAttackChance = Convert.ToInt32(reader["AI_AttackChance"]),
                 AISkillType = Convert.ToInt32(reader["AI_SkillType"]),
+                IconFile = (reader["UI_IconFile"]?.ToString() ?? "").Replace('\\', '/'),
                 Params = new int[50]
             };
 
@@ -2805,6 +2842,148 @@ namespace VSRO_CONTROL_API.VSRO
             SkillCache[skillId] = skill;
 
             return skill;
+        }
+
+        public static async Task<(bool success, DBCharData? character, string reason)> GetCharDataByID(int charID)
+        {
+            try
+            {
+                using SqlConnection conn = OpenConnection("SRO_VT_SHARD");
+                await conn.OpenAsync();
+
+                using SqlCommand cmd = new(Constant.GetCharDataById_q, conn);
+                cmd.Parameters.AddWithValue("@characterId", charID);
+
+                using SqlDataReader reader = await cmd.ExecuteReaderAsync();
+
+                if (!await reader.ReadAsync())
+                    return (false, null, $"Character {charID} not found.");
+
+                DBCharData character = new()
+                {
+                    CharID = reader.GetInt32(reader.GetOrdinal("CharID")),
+                    Deleted = reader.GetByte(reader.GetOrdinal("Deleted")),
+                    RefObjID = reader.GetInt32(reader.GetOrdinal("RefObjID")),
+
+                    CharName16 = reader["CharName16"].ToString() ?? string.Empty,
+                    NickName16 = reader["NickName16"].ToString() ?? string.Empty,
+
+                    Scale = reader.GetByte(reader.GetOrdinal("Scale")),
+                    CurLevel = reader.GetByte(reader.GetOrdinal("CurLevel")),
+                    MaxLevel = reader.GetByte(reader.GetOrdinal("MaxLevel")),
+
+                    ExpOffset = reader.GetInt64(reader.GetOrdinal("ExpOffset")),
+                    SExpOffset = reader.GetInt32(reader.GetOrdinal("SExpOffset")),
+
+                    Strength = reader.GetInt16(reader.GetOrdinal("Strength")),
+                    Intellect = reader.GetInt16(reader.GetOrdinal("Intellect")),
+
+                    RemainGold = reader.GetInt64(reader.GetOrdinal("RemainGold")),
+
+                    RemainSkillPoint = reader.GetInt32(reader.GetOrdinal("RemainSkillPoint")),
+                    RemainStatPoint = reader.GetInt16(reader.GetOrdinal("RemainStatPoint")),
+                    RemainHwanCount = reader.GetByte(reader.GetOrdinal("RemainHwanCount")),
+
+                    GatheredExpPoint = reader.GetInt32(reader.GetOrdinal("GatheredExpPoint")),
+
+                    HP = reader.GetInt32(reader.GetOrdinal("HP")),
+                    MP = reader.GetInt32(reader.GetOrdinal("MP")),
+
+                    LatestRegion = reader.GetInt16(reader.GetOrdinal("LatestRegion")),
+
+                    PosX = reader.GetFloat(reader.GetOrdinal("PosX")),
+                    PosY = reader.GetFloat(reader.GetOrdinal("PosY")),
+                    PosZ = reader.GetFloat(reader.GetOrdinal("PosZ")),
+
+                    AppointedTeleport = reader.GetInt32(reader.GetOrdinal("AppointedTeleport")),
+
+                    AutoInvestExp = reader.GetByte(reader.GetOrdinal("AutoInvestExp")),
+
+                    InventorySize = reader.GetInt32(reader.GetOrdinal("InventorySize")),
+
+                    DailyPK = reader.GetByte(reader.GetOrdinal("DailyPK")),
+                    TotalPK = reader.GetInt16(reader.GetOrdinal("TotalPK")),
+
+                    PKPenaltyPoint = reader.GetInt32(reader.GetOrdinal("PKPenaltyPoint")),
+                    TPP = reader.GetInt32(reader.GetOrdinal("TPP")),
+
+                    PenaltyForfeit = reader.GetInt32(reader.GetOrdinal("PenaltyForfeit")),
+                    JobPenaltyTime = reader.GetInt32(reader.GetOrdinal("JobPenaltyTime")),
+
+                    JobLvl_Trader = reader.GetByte(reader.GetOrdinal("JobLvl_Trader")),
+                    Trader_Exp = reader.GetInt32(reader.GetOrdinal("Trader_Exp")),
+
+                    JobLvl_Hunter = reader.GetByte(reader.GetOrdinal("JobLvl_Hunter")),
+                    Hunter_Exp = reader.GetInt32(reader.GetOrdinal("Hunter_Exp")),
+
+                    JobLvl_Robber = reader.GetByte(reader.GetOrdinal("JobLvl_Robber")),
+                    Robber_Exp = reader.GetInt32(reader.GetOrdinal("Robber_Exp")),
+
+                    GuildID = reader.IsDBNull(reader.GetOrdinal("GuildID"))
+                        ? null
+                        : reader.GetInt32(reader.GetOrdinal("GuildID")),
+
+                    LastLogout = reader.GetDateTime(reader.GetOrdinal("LastLogout")),
+
+                    TelRegion = reader.GetInt16(reader.GetOrdinal("TelRegion")),
+
+                    TelPosX = reader.GetFloat(reader.GetOrdinal("TelPosX")),
+                    TelPosY = reader.GetFloat(reader.GetOrdinal("TelPosY")),
+                    TelPosZ = reader.GetFloat(reader.GetOrdinal("TelPosZ")),
+
+                    DiedRegion = reader.GetInt16(reader.GetOrdinal("DiedRegion")),
+
+                    DiedPosX = reader.GetFloat(reader.GetOrdinal("DiedPosX")),
+                    DiedPosY = reader.GetFloat(reader.GetOrdinal("DiedPosY")),
+                    DiedPosZ = reader.GetFloat(reader.GetOrdinal("DiedPosZ")),
+
+                    WorldID = reader.GetInt16(reader.GetOrdinal("WorldID")),
+                    TelWorldID = reader.GetInt16(reader.GetOrdinal("TelWorldID")),
+                    DiedWorldID = reader.GetInt16(reader.GetOrdinal("DiedWorldID")),
+
+                    HwanLevel = reader.GetByte(reader.GetOrdinal("HwanLevel"))
+                };
+
+                return (true, character, "");
+            }
+            catch (Exception ex)
+            {
+                string msg = $"GetCharDataByID failed for CharID:{charID}: {ex.Message}";
+                Logger.Error(typeof(DBConnect), msg);
+                return (false, null, msg);
+            }
+        }
+        public static async Task<(bool success, Race race, string reason)> GetCharRaceByRefObjID(int refObjId)
+        {
+            try
+            {
+                using SqlConnection conn = OpenConnection("SRO_VT_SHARD");
+                await conn.OpenAsync();
+
+                using SqlCommand cmd = new(Constant.GetCharacterModelCodeNameByID_q, conn);
+                cmd.Parameters.AddWithValue("@refObjID", refObjId);
+
+                using SqlDataReader reader = await cmd.ExecuteReaderAsync();
+
+                if (!await reader.ReadAsync())
+                    return (false, Race.Unknown, $"RefObjID {refObjId} not found.");
+
+                string codeName = reader["CodeName128"].ToString() ?? string.Empty;
+
+                if (codeName.Contains("CHAR_EU_"))
+                    return (true, Race.European, "");
+
+                if (codeName.Contains("CHAR_CH_"))
+                    return (true, Race.Chinese, "");
+
+                return (false, Race.Unknown, $"Unknown race for model '{codeName}'.");
+            }
+            catch (Exception ex)
+            {
+                string msg = $"GetCharRaceByRefObjID failed for RefObjID:{refObjId}: {ex.Message}";
+                Logger.Error(typeof(DBConnect), msg);
+                return (false, Race.Unknown, msg);
+            }
         }
         #endregion
 

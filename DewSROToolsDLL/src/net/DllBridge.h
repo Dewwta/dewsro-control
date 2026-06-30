@@ -6,14 +6,15 @@
 #include <functional>
 #include <unordered_map>
 
-#define BRIDGE_HOST "REDACTED"
 #define BRIDGE_PORT 9001
+extern std::string g_bridgeHost;
 
 
 struct SkillEntry
 {
     uint32_t id;
     std::string readableName;
+    std::string iconFile;
     bool isPassive;
 };
 
@@ -54,7 +55,6 @@ enum class ScrollType : int { Normal, Special };
 enum class AmmunitionType : int { Arrows, Bolts };
 enum class RecoveryKitType : int { Small, Medium, Large };
 enum class AbnormalPillType : int { Small, Medium };
-
 struct ConsumableSettings
 {
     // HP Potions

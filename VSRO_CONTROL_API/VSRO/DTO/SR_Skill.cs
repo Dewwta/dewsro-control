@@ -14,6 +14,15 @@
             // Chardata state
             public bool Enabled { get; set; }
 
+            /// <summary>
+            /// Basic_Activity from _RefSkill.
+            /// 0 = truly passive (never castable — no cast mechanics, no reuse delay, no MP cost).
+            /// Non-zero = active/castable (buff, attack, etc.).
+            /// This is the correct passive discriminator; Action_AutoAttackType is 0 for both
+            /// passive and castable skills and must NOT be used for this purpose.
+            /// </summary>
+            public int BasicActivity { get; set; }
+
             // Action timing
             public int PreparingTime { get; set; }
             public int CastingTime { get; set; }
@@ -42,6 +51,13 @@
             public int MoveSpeedPercent { get; set; }
 
             public uint TimedJobId { get; set; }
+
+            /// <summary>
+            /// Relative icon path from the client's icon directory (e.g. "skill/china/bow_area_b.ddj").
+            /// Slashes are normalized to forward-slash on read. Extension is .ddj in the DB but
+            /// the DLL resolves it to .png on disk at load time.
+            /// </summary>
+            public string IconFile { get; set; } = "";
         }
     }
 

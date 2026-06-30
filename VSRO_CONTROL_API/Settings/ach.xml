@@ -164,26 +164,6 @@
 	</Achievement>
 
 	<!-- ═══════════════════════════════════════════════════ -->
-	<!--                      AMMO                          -->
-	<!-- ═══════════════════════════════════════════════════ -->
-
-	<Achievement name="Nocked"          desc="Fire 100 arrows or bolts."       type="ammo">
-		<Count>100</Count>
-	</Achievement>
-	<Achievement name="Marksman"        desc="Fire 5,000 arrows or bolts."     type="ammo">
-		<Count>5000</Count>
-	</Achievement>
-	<Achievement name="Volley Master"   desc="Fire 25,000 arrows or bolts."    type="ammo">
-		<Count>25000</Count>
-	</Achievement>
-	<Achievement name="Arrow Storm"     desc="Fire 100,000 arrows or bolts."   type="ammo">
-		<Count>100000</Count>
-	</Achievement>
-	<Achievement name="Infinite Quiver" desc="Fire 1,000,000 arrows or bolts." type="ammo">
-		<Count>1000000</Count>
-	</Achievement>
-
-	<!-- ═══════════════════════════════════════════════════ -->
 	<!--                    PLAYTIME                        -->
 	<!-- ═══════════════════════════════════════════════════ -->
 

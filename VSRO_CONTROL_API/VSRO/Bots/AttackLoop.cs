@@ -10,7 +10,60 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 {
     public class AttackLoop
     {
+        #region - NOTES -
+
+        // From documentation at https://www.elitepvpers.com/forum/sro-pserver-questions-answers/4810801-0xb074-packet-action-combinations.html
+        // Skill Queue Structure:
+        //[C -> S][7074]
+        //01                                                ................
+        //04                                                ................
+        //7F 00 00 00                                  Cast Buff 7F
+        //00                                                ................
+
+        //[S -> C][B074]
+        //01                                                OK / added to queue
+        //01                                                Position in Queue 1
+
+        //[C -> S][7074]
+        //01                                                ................
+        //04                                                ................
+        //82 00 00 00                                  Cast Buff 82
+        //00                                                ................
+
+        //[C -> S][7074]
+        //01                                                ................
+        //04                                                ................
+        //6E 00 00 00                                  Cast Buff 6E
+        //00                                                ................
+
+        //[S -> C][B074]
+        //01                                                OK / added to queue
+        //02                                                Position in Queue 2
+
+        //[S -> C][B074]
+        //01                                                OK / added to queue
+        //02                                                Position in Queue 2
+
+        //------------------------------------------------------------------------
+        //my guess here is that the engine only allows a maximum queue of 2.
+        //therefore the 82 00 00 00 buff cast is being overriden by the 6E 00 00 00
+        //------------------------------------------------------------------------
+
+        //[S -> C][B074]
+        //02                                                casting / action done
+        //01                                                queue-items remaining: 1
+
+        //[S -> C][B074]
+        //02                                                casting / action done
+        //00                                                queue-items remaining: 0
+
+        #endregion
+
         #region - Var -
+
+        public static bool Debug { get; private set; } = false;
+        public static void SetDebug(bool debug) => Debug = debug;
+        private static void Log(string handler, string message) { if (Debug == true) Logger.Trace($"AttackLoop:{handler}", message); }
 
         private const float ATTACK_RANGE = 40f;
         private const float AGGRO_RADIUS = 50f;
@@ -23,10 +76,10 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         private readonly VSRO.DTO.ISession _session;
 
         // Pickup
-        private int _killsSinceLastPickup = 0;
-        private const int KILLS_PER_PICKUP = 3;
+        private DateTime _lastTargetSearchLog = DateTime.MinValue;
         private const float MAX_PICKUP_RADIUS = 75f;
-        private const float PICKUP_ARRIVAL_RADIUS = 3f;
+        private const float PICKUP_ARRIVAL_RADIUS = 5f;
+        public bool IsPickingUp { get; private set; } = false;
 
         private uint _currentTargetUID = 0;
         private uint _lastHitTargetUID = 0;
@@ -46,11 +99,15 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         public IReadOnlyList<SR_Skill> BuffsToUse => _buffsToUse;
         private bool _pendingKill = false;
         public bool StopAfterCurrentKill { get; set; } = false;
+        private volatile bool _stuckNotified = false;
 
         private BotPosition? _trainingCenter = null;
+        private int _wanderSpoke = 0;
+        private const int WANDER_SPOKES = 8;
 
         public bool WaitingForResult { get; private set; } = false;
         private readonly SemaphoreSlim _resultSignal = new(0, 1);
+
 
         #endregion
 
@@ -74,6 +131,12 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         {
             TRAINING_RADIUS = radius;
             Logger.Info("AttackLoop", "Starting");
+
+            // Discard drops from previous bot sessions so pickup doesn't chase stale clusters.
+            int staleCleared = _session.DroppedItems.Count;
+            _session.DroppedItems.Clear();
+            if (staleCleared > 0)
+                Logger.Info("AttackLoop", $"Cleared {staleCleared} stale DroppedItems from previous session");
 
             if (_trainingCenter == null)
             {
@@ -111,13 +174,23 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                     }
                     else
                     {
-                        Logger.Debug("AttackLoop", $"Locked target UID={_currentTargetUID} left training radius — dropping");
+                        Log("AttackLoop", $"Locked target UID={_currentTargetUID} left training radius — dropping");
                         _currentTargetUID = 0;
                     }
                 }
 
                 if (nextTargetUID == 0)
                 {
+                    var knownMobs = mobs.Where(m => _session.MobUIDs.ContainsKey(m.Key)).ToList();
+                    if (knownMobs.Count > 0 && DateTime.UtcNow - _lastTargetSearchLog > TimeSpan.FromSeconds(3))
+                    {
+                        _lastTargetSearchLog = DateTime.UtcNow;
+                        float nearest = knownMobs.Min(m => Distance(pos, m.Value));
+                        int inRadius = knownMobs.Count(m => Distance(pos, m.Value) <= AGGRO_RADIUS);
+                        int inTraining = knownMobs.Count(m => Distance(_trainingCenter.Value, m.Value) <= TRAINING_RADIUS);
+                        Log("AttackLoop", $"[TargetSearch] pos=({pos.X:F1},{pos.Y:F1}) mobs={knownMobs.Count} inAggroRadius={inRadius} inTraining={inTraining} nearestDist={nearest:F1}");
+                    }
+
                     var target = mobs
                         .Where(m => _session.MobUIDs.ContainsKey(m.Key))
                         .Where(m => !_skipList.ContainsKey(m.Key))
@@ -142,11 +215,11 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                         _obstructed = false;
                         _targetDead = false;
 
-                        Logger.Debug("AttackLoop", $"Engaging Target UID={_currentTargetUID} dist={Distance(pos, mobs[_currentTargetUID]):F1}");
+                        Log("AttackLoop", $"Engaging Target UID={_currentTargetUID} dist={Distance(pos, mobs[_currentTargetUID]):F1}");
 
                         if (!_session.SpawnedObjects.ContainsKey(_currentTargetUID))
                         {
-                            Logger.Debug("AttackLoop", $"UID={_currentTargetUID} no longer spawned — dropping");
+                            Log("AttackLoop", $"UID={_currentTargetUID} no longer spawned — dropping");
                             _currentTargetUID = 0;
                             continue;
                         }
@@ -164,7 +237,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                     var skill = PickNextSkill();
                     if (skill != null)
                     {
-                        Logger.Debug("AttackLoop", $"Using skill {skill.ReadableName} (ID={skill.ID})");
+                        Log("AttackLoop", $"Using skill {skill.ReadableName} (ID={skill.ID})");
                         while (_resultSignal.CurrentCount > 0) _resultSignal.Wait(0); // Clean signal tracker for skill
 
                         _sendPacket(BuildSkillUse(skill.ID, _currentTargetUID));
@@ -202,15 +275,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                         _currentTargetUID = 0;
 
                         if (_session._botSettings.Pickup.PickAll)
-                        {
-                            _killsSinceLastPickup++;
-                            if (_killsSinceLastPickup >= KILLS_PER_PICKUP)
-                            {
-                                _killsSinceLastPickup = 0;
-                                await RunPickupRoutineAsync(ct);
-                            }
-                        }
-                        
+                            await RunPickupRoutineAsync(ct);
 
                         continue;
                     }
@@ -222,6 +287,26 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                         continue;
                     }
 
+                    continue;
+                }
+
+                if (_pendingKill && !_targetDead)
+                {
+                    Log("AttackLoop", $"[RaceGuard] pendingKill uid={_currentTargetUID} — waiting for kill confirmation");
+                    await _resultSignal.WaitAsync(400, ct);
+                }
+
+                if (_targetDead)
+                {
+                    _targetDead = false;
+                    _pendingKill = false;
+                    _session.SpawnedPositions.TryRemove(_currentTargetUID, out _);
+                    _session.SpawnedObjects.TryRemove(_currentTargetUID, out _);
+                    _session.MobUIDs.TryRemove(_currentTargetUID, out _);
+                    _currentTargetUID = 0;
+
+                    if (_session._botSettings.Pickup.PickAll)
+                        await RunPickupRoutineAsync(ct);
                     continue;
                 }
 
@@ -243,164 +328,240 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         /// <returns></returns>
         private async Task RunPickupRoutineAsync(CancellationToken ct)
         {
-            var pos = _getPosition();
-
-            var itemsToPickup = _session.DroppedItems
-                .Where(kvp =>
-                {
-                    var (_, codeName, wx, wy) = kvp.Value;
-                    float dx = wx - pos.X;
-                    float dy = wy - pos.Y;
-                    float dist = MathF.Sqrt(dx * dx + dy * dy);
-                    if (dist > MAX_PICKUP_RADIUS) return false;
-
-                    // Check pickup setting if available
-                    //var opts = _session._botSettings?.ItemOptions
-                    //    ?.FirstOrDefault(o => o.CodeName == codeName);
-                    //if (opts != null && !opts.Pickup) return false;
-
-                    return true;
-                })
-                .OrderBy(kvp =>
-                {
-                    var (_, _, wx, wy) = kvp.Value;
-                    float dx = wx - pos.X;
-                    float dy = wy - pos.Y;
-                    return MathF.Sqrt(dx * dx + dy * dy);
-                })
-                .ToList();
-
-            if (itemsToPickup.Count == 0) return;
-
-            Logger.Debug("AttackLoop", $"Pickup routine — {itemsToPickup.Count} items in range");
-
-            foreach (var kvp in itemsToPickup)
+            IsPickingUp = true;
+            try
             {
-                if (ct.IsCancellationRequested) return;
+                // Cancel auto-attack follow
+                var pos = _getPosition();
+                _sendMove(pos);
 
-                uint itemUID = kvp.Key;
-                var (_, codeName, targetWorldX, targetWorldY) = kvp.Value;
-
-                // Re-check item still exists
-                if (!_session.DroppedItems.ContainsKey(itemUID)) continue;
-
-                pos = _getPosition();
-                float dx = targetWorldX - pos.X;
-                float dy = targetWorldY - pos.Y;
-                float dist = MathF.Sqrt(dx * dx + dy * dy);
-
-                Logger.Debug("AttackLoop", $"Pickup: {codeName} uid={itemUID} dist={dist:F1}");
-
-                // Walk to item in steps if needed
-                while (dist > PICKUP_ARRIVAL_RADIUS && !ct.IsCancellationRequested)
+                var dropDeadline = DateTime.UtcNow.AddMilliseconds(1000);
+                while (DateTime.UtcNow < dropDeadline && !ct.IsCancellationRequested)
                 {
-                    float stepDist = Math.Min(dist, 15f);
-                    float nx = dx / dist;
-                    float ny = dy / dist;
-
-                    float stepX = pos.X + nx * stepDist;
-                    float stepY = pos.Y + ny * stepDist;
-                    bool isDungeon = (pos.RegionId & 0x8000) != 0;
-                    var stepPos = isDungeon
-                        ? BotPosition.FromDisplayWorldDungeon(stepX, stepY, pos.ZOffset, pos.RegionId)
-                        : BotPosition.FromDisplayWorld(stepX, stepY, pos.ZOffset);
-                    _sendMove(stepPos);
-
-                    float gameSpeed = _session.GetCurrentMoveSpeed();
-                    float unitsPerSec = gameSpeed / 7.86f;
-                    int travelMs = (int)(stepDist / unitsPerSec * 1000f);
-                    int waitMs = Math.Clamp(travelMs + 150, 100, 8000);
-
-                    Logger.Debug("AttackLoop", $"  Pickup move → ({stepX:F1},{stepY:F1}) waitMs={waitMs}");
-
-                    await Task.Delay(waitMs, ct);
-
+                    await Task.Delay(100, ct);
                     pos = _getPosition();
-                    dx = targetWorldX - pos.X;
-                    dy = targetWorldY - pos.Y;
-                    dist = MathF.Sqrt(dx * dx + dy * dy);
+                    if (_session.DroppedItems.Any(kvp =>
+                    {
+                        var (_, _, wx, wy) = kvp.Value;
+                        float ddx = wx - pos.X, ddy = wy - pos.Y;
+                        return MathF.Sqrt(ddx * ddx + ddy * ddy) <= MAX_PICKUP_RADIUS;
+                    })) break;
+                }
+                pos = _getPosition();
+
+                var itemsToPickup = _session.DroppedItems
+                    .Where(kvp =>
+                    {
+                        var (_, codeName, wx, wy) = kvp.Value;
+                        float dx = wx - pos.X;
+                        float dy = wy - pos.Y;
+                        float dist = MathF.Sqrt(dx * dx + dy * dy);
+                        if (dist > MAX_PICKUP_RADIUS) return false;
+                        return true;
+                    })
+                    .OrderBy(kvp =>
+                    {
+                        var (_, _, wx, wy) = kvp.Value;
+                        float dx = wx - pos.X;
+                        float dy = wy - pos.Y;
+                        return MathF.Sqrt(dx * dx + dy * dy);
+                    })
+                    .ToList();
+
+                if (itemsToPickup.Count == 0)
+                {
+                    Log("AttackLoop", "No items to pickup");
+                    return;
                 }
 
-                if (ct.IsCancellationRequested) return;
+                Log("AttackLoop", $"Pickup routine — {itemsToPickup.Count} items in range");
 
-                // Send pickup packet
-                _sendPacket(BuildPickup(itemUID));
-                _session.DroppedItems.TryRemove(itemUID, out _);
-                Logger.Debug("AttackLoop", $"Pickup sent for {codeName} uid={itemUID}");
+                foreach (var kvp in itemsToPickup)
+                {
+                    if (ct.IsCancellationRequested) return;
 
-                await Task.Delay(350, ct);
+                    uint itemUID = kvp.Key;
+                    var (_, codeName, targetWorldX, targetWorldY) = kvp.Value;
+
+                    if (!_session.DroppedItems.ContainsKey(itemUID)) continue;
+
+                    pos = _getPosition();
+                    float dx = targetWorldX - pos.X;
+                    float dy = targetWorldY - pos.Y;
+                    float dist = MathF.Sqrt(dx * dx + dy * dy);
+
+                    if (dist > MAX_PICKUP_RADIUS)
+                    {
+                        Log("AttackLoop", $"Pickup skip: {codeName} uid={itemUID} dist={dist:F1} — outside radius at pickup time");
+                        continue;
+                    }
+
+                    Log("AttackLoop", $"Pickup: {codeName} uid={itemUID} dist={dist:F1}");
+
+                    float prevDist = dist;
+                    int stuckCount = 0;
+                    bool walkStuck = false;
+
+                    while (dist > PICKUP_ARRIVAL_RADIUS && !ct.IsCancellationRequested)
+                    {
+                        float stepDist = Math.Min(dist, 15f);
+                        float nx = dx / dist;
+                        float ny = dy / dist;
+                        float stepX = pos.X + nx * stepDist;
+                        float stepY = pos.Y + ny * stepDist;
+                        bool isDungeon = (pos.RegionId & 0x8000) != 0;
+                        var stepTarget = isDungeon
+                            ? BotPosition.FromDisplayWorldDungeon(stepX, stepY, pos.ZOffset, pos.RegionId)
+                            : BotPosition.FromDisplayWorld(stepX, stepY, pos.ZOffset);
+
+                        float gameSpeed = _session.GetCurrentMoveSpeed();
+                        float unitsPerSec = gameSpeed / 7.86f;
+                        int travelMs = (int)(stepDist / unitsPerSec * 1000f);
+                        int waitMs = Math.Clamp(travelMs + 200, 100, 8000);
+
+                        Log("AttackLoop", $"  Pickup move → ({stepX:F1},{stepY:F1}) waitMs={waitMs}");
+                        _sendMove(stepTarget);
+
+                        await Task.Delay(waitMs, ct);
+
+                        pos = _getPosition();
+                        Log("Pickup", $"  Arrived at pos=({pos.X:F1},{pos.Y:F1}) RawX={_session.RawX} RawY={_session.RawY}");
+
+                        dx = targetWorldX - pos.X;
+                        dy = targetWorldY - pos.Y;
+                        dist = MathF.Sqrt(dx * dx + dy * dy);
+
+                        if (dist >= prevDist - 1f)
+                        {
+                            stuckCount++;
+                            if (stuckCount >= 3)
+                            {
+                                Log("Pickup", $"  No progress after {stuckCount} steps at dist={dist:F1} — giving up on {codeName} uid={itemUID}");
+                                walkStuck = true;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            stuckCount = 0;
+                        }
+                        prevDist = dist;
+                    }
+
+                    if (ct.IsCancellationRequested) return;
+
+                    // Stuck detection broke us out before arriving
+                    // Sending pickup from dist > PICKUP_ARRIVAL_RADIUS triggers server "invalid target".
+                    if (walkStuck)
+                    {
+                        _session.DroppedItems.TryRemove(itemUID, out _);
+                        continue;
+                    }
+
+                    Log("Pickup", $"  Sending pickup for {codeName} uid={itemUID} at pos=({pos.X:F1},{pos.Y:F1})");
+                    _sendPacket(BuildPickup(itemUID));
+                    _session.DroppedItems.TryRemove(itemUID, out _);
+                    Log("AttackLoop", $"Pickup sent for {codeName} uid={itemUID}");
+
+                    await Task.Delay(350, ct);
+                }
+
+                Log("AttackLoop", "Pickup routine complete");
             }
-
-            Logger.Debug("AttackLoop", "Pickup routine complete");
-            await Task.Delay(350, ct);
+            finally
+            {
+                IsPickingUp = false;
+            }
         }
 
         /// <summary>
-        /// Wanders around the bot radius until interrupted, needs tweaking.
+        /// Advances through evenly-spaced spokes around the training radius, tracing a polygon
+        /// around the perimeter instead of zigzagging back through center. Each call moves one
+        /// spoke forward so consecutive steps travel along the edge, not inward.
+        /// Includes stuck detection: if the character hasn't moved after the expected travel
+        /// time, back-steps with alternating perpendicular offset then returns to center.
         /// </summary>
-        /// <param name="center"></param>
-        /// <param name="ct"></param>
-        /// <returns></returns>
         private async Task WanderStep(BotPosition center, CancellationToken ct)
         {
+            _stuckNotified = false; // clear any stale stuck signal from previous step
             var pos = _getPosition();
             bool isDungeon = (pos.RegionId & 0x8000) != 0;
 
-            for (int attempt = 0; attempt < 8; attempt++)
-            {
-                float angle = (float)(Random.Shared.NextDouble() * Math.PI * 2);
-                float dist = (float)(Random.Shared.NextDouble() * (TRAINING_RADIUS * 0.6f) + 5f);
+            _wanderSpoke = (_wanderSpoke + 1) % WANDER_SPOKES;
+            float spokeAngle = _wanderSpoke * (MathF.PI * 2f / WANDER_SPOKES);
+            float jitter = (float)((Random.Shared.NextDouble() - 0.5) * (MathF.PI / WANDER_SPOKES));
+            float angle = spokeAngle + jitter;
 
+            float[] distFractions = [0.95f, 0.75f, 0.55f, 0.35f];
+            foreach (float fraction in distFractions)
+            {
+                float dist = TRAINING_RADIUS * fraction;
                 float wx = center.X + MathF.Cos(angle) * dist;
                 float wy = center.Y + MathF.Sin(angle) * dist;
 
-                var wanderTarget = isDungeon
+                var target = isDungeon
                     ? BotPosition.FromDisplayWorldDungeon(wx, wy, pos.ZOffset, pos.RegionId)
                     : BotPosition.FromDisplayWorld(wx, wy, pos.ZOffset);
 
-                if (IsPathBlocked(pos, wanderTarget))
-                    continue;
+                if (IsPathBlocked(pos, target)) continue;
 
-                float mx = (pos.X + wx) * 0.5f;
-                float my = (pos.Y + wy) * 0.5f;
-                var midpoint = isDungeon
-                    ? BotPosition.FromDisplayWorldDungeon(mx, my, pos.ZOffset, pos.RegionId)
-                    : BotPosition.FromDisplayWorld(mx, my, pos.ZOffset);
+                var mid = isDungeon
+                    ? BotPosition.FromDisplayWorldDungeon((pos.X + wx) * 0.5f, (pos.Y + wy) * 0.5f, pos.ZOffset, pos.RegionId)
+                    : BotPosition.FromDisplayWorld((pos.X + wx) * 0.5f, (pos.Y + wy) * 0.5f, pos.ZOffset);
 
-                if (IsPathBlocked(pos, midpoint))
-                    continue;
+                if (IsPathBlocked(pos, mid)) continue;
 
-                Logger.Debug("AttackLoop", $"Wander → ({wx:F1},{wy:F1}) dist from center={dist:F1}");
-                _sendMove(wanderTarget);
+                Log("AttackLoop", $"Wander spoke {_wanderSpoke}/{WANDER_SPOKES} {angle * 180f / MathF.PI:F0}° → ({wx:F1},{wy:F1}) dist={dist:F1}");
 
-                int wanderWaitMs = Random.Shared.Next(500, 2000);
-                var deadline = DateTime.UtcNow.AddMilliseconds(wanderWaitMs);
-                while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
-                {
-                    await Task.Delay(200, ct);
+                _sendMove(target);
 
-                    var currentPos = _getPosition();
-                    var mobs = _getNearbyMobs();
-                    bool mobFound = mobs
-                        .Any(m => _session.MobUIDs.ContainsKey(m.Key)
-                                && !_skipList.ContainsKey(m.Key)
-                                && Distance(currentPos, m.Value) <= AGGRO_RADIUS
-                                && Distance(center, m.Value) <= TRAINING_RADIUS
-                                && !IsPathBlocked(currentPos, m.Value));
+                // time the expected journey, break early on mob
+                float speed = Math.Max(_session.GetCurrentMoveSpeed() / 7.86f, 5f);
+                int travelMs = Math.Clamp((int)(dist / speed * 1000f) + 400, 600, 5000);
+                if (await WanderWait(travelMs, center, ct)) return;
 
-                    if (mobFound)
-                    {
-                        Logger.Debug("AttackLoop", "Mob spotted during wander — breaking to attack");
-                        return;
-                    }
-                }
+                // sit at the spoke end so nearby mobs can walk into aggro range
+                if (await WanderWait(Random.Shared.Next(250, 1000), center, ct)) return;
                 return;
             }
 
-            int idleMs = Random.Shared.Next(500, 1500);
-            await Task.Delay(idleMs, ct);
+            await Task.Delay(Random.Shared.Next(300, 600), ct);
         }
-        
+
+        /// <summary>
+        /// Polls for nearby mobs every 200 ms for up to <paramref name="ms"/> milliseconds.
+        /// Returns true immediately when a valid target appears so the caller can break out.
+        /// </summary>
+        private async Task<bool> WanderWait(int ms, BotPosition center, CancellationToken ct)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(ms);
+            while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+            {
+                await Task.Delay(200, ct);
+
+                if (_stuckNotified)
+                {
+                    _stuckNotified = false;
+                    Log("AttackLoop", "Stuck correction received during wander — aborting step");
+                    return true;
+                }
+
+                var currentPos = _getPosition();
+                bool mobFound = _getNearbyMobs().Any(m =>
+                    _session.MobUIDs.ContainsKey(m.Key)
+                    && !_skipList.ContainsKey(m.Key)
+                    && Distance(currentPos, m.Value) <= AGGRO_RADIUS
+                    && Distance(center, m.Value) <= TRAINING_RADIUS
+                    && !IsPathBlocked(currentPos, m.Value));
+                if (mobFound)
+                {
+                    Log("AttackLoop", "Mob spotted during wander — breaking to attack");
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>
         /// Handles casting buffs for the trainplace, loops through assigned buffs.
         /// </summary>
@@ -424,25 +585,28 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             {
                 if (ct.IsCancellationRequested) break;
 
-                bool alreadyActive = _session.Buffs?.Any(s => s.ID == buff.ID) == true;
+                bool alreadyActive;
+                lock (_session.Buffs)
+                    alreadyActive = _session.Buffs.Any(s => s.ID == buff.ID);
+
                 if (alreadyActive)
                     continue;
 
                 if (_skillCooldowns.TryGetValue(buff.ID, out var cd) && DateTime.UtcNow < cd)
                     continue;
 
-                Logger.Debug("AttackLoop", $"Blocking cast for Buff: {buff.ReadableName} (ID={buff.ID})");
+                Log("AttackLoop", $"Blocking cast for Buff: {buff.ReadableName} (ID={buff.ID})");
                 _sendPacket(BuildBuffUse(buff.ID));
-                RecordSkillUsed(buff);
-
-                _skillCooldowns[buff.ID] = DateTime.UtcNow.AddMilliseconds(buff.ReuseDelay > 0 ? buff.ReuseDelay : 3000);
                 castAnyBuff = true;
 
+                // Minimum 250ms between consecutive buff sends. The server has a 2-slot cast queue.
+                // if buffs are sent faster than they fire, the 3rd overrides slot 2 and the previous
+                // occupant is silently lost. with 250ms spacing, each PrepTime=0 buff fires before
+                // the next is sent, so every buff gets its own queue slot.
                 int wait = buff.PreparingTime + buff.CastingTime;
-                if (wait > 0)
-                {
-                    await Task.Delay(wait + 150, ct); // Generous overhead padding for packet round-trips
-                }
+                await Task.Delay(Math.Max(wait + 350, 250), ct);
+
+                _skillCooldowns[buff.ID] = DateTime.UtcNow.AddMilliseconds(3000);
             }
 
             return castAnyBuff;
@@ -510,7 +674,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         public void OnMobKilled(uint mobUID)
         {
             if (mobUID != _currentTargetUID) return;
-            Logger.Debug("AttackLoop", $"Mob UID={mobUID} killed — waiting for queue drain");
+            Log("AttackLoop", $"Mob UID={mobUID} killed — waiting for queue drain");
             _pendingKill = true;
         }
         public void OnDurabilityChanged(byte slot, uint durability)
@@ -521,7 +685,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             // 0x0F = 15 which is clearly low on a 100-max item
             if (durability <= _session._botSettings.Maintenance.RepairDurabilityThreshold)
             {
-                Logger.Debug("AttackLoop", $"Slot {slot} durability critical ({durability}) — flagging repair needed");
+                Log("AttackLoop", $"Slot {slot} durability critical ({durability}) — flagging repair needed");
                 _needsRepair = true;
 
                 if (StopAfterCurrentKill == false)
@@ -537,7 +701,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         }
         public void OnSkillAttackResponse(byte type, byte status)
         {
-            Logger.Trace("AttackLoop", $"0xB074 type={type:X2} status={status:X2}");
+            Log("AttackLoop", $"0xB074 type={type:X2} status={status:X2}");
 
             if (type == 0x02 && status == 0x00)
             {
@@ -582,6 +746,14 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             else
                 _skillsToUse.RemoveAll(s => s.ID == skillId);
         }
+        public bool ReplaceSkillInUse(uint oldSkillId, SR_Skill newSkill, bool isBuff)
+        {
+            var list = isBuff ? _buffsToUse : _skillsToUse;
+            int idx = list.FindIndex(s => s.ID == oldSkillId);
+            if (idx < 0) return false;
+            list[idx] = newSkill;
+            return true;
+        }
         public void MoveSkillPriority(uint skillId, int direction)
         {
             var idx = _skillsToUse.FindIndex(s => s.ID == skillId);
@@ -605,9 +777,17 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             _pendingKill = false;
             StopAfterCurrentKill = false;
             _trainingCenter = null;
+            _wanderSpoke = 0;
             _needsRepair = false;
-            _killsSinceLastPickup = 0;
         }
+
+        public void NotifyStuck()
+        {
+            _stuckNotified = true;
+        }
+
+        public void ClearCooldowns() => _skillCooldowns.Clear();
+        public void ClearSkillCooldown(uint skillId) => _skillCooldowns.TryRemove(skillId, out _);
 
         #endregion
 
@@ -635,7 +815,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         }
         private void HandleTimeout()
         {
-            Logger.Debug("AttackLoop", $"Attack unconfirmed timeout UID={_currentTargetUID}, skipping");
+            Log("AttackLoop", $"Attack unconfirmed timeout UID={_currentTargetUID}, skipping");
             _skipList[_currentTargetUID] = DateTime.UtcNow.AddSeconds(5);
             _currentTargetUID = 0;
         }

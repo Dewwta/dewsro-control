@@ -730,7 +730,7 @@ namespace VSRO_CONTROL_API.VSRO.Tools
 
             var randomItem = uniqueReward.Reward[_rand.Next(uniqueReward.Reward.Count)];
             await DBConnect.GiveItemToPlayer(proxy.Session!.CharacterName!, randomItem.ItemCodename, randomItem.Plus, randomItem.Quantity, true);
-            PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null, $"You received {GameObjectNameResolver.Resolve(randomItem.ItemCodename)} for killing {GameObjectNameResolver.Resolve(baseKey)}");
+            PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null, $"You received {GameObjectNameResolver.Resolve(randomItem.ItemCodename)} for killing {GameObjectNameResolver.Resolve(baseKey)}");
         }
     }
 }

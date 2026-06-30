@@ -98,7 +98,7 @@
 		<div class="sidebar__logo">
 			<span class="sidebar__emblem">⚔</span>
 			<div class="sidebar__brand">
-				<span class="sidebar__brand-name">DSRO</span>
+				<span class="sidebar__brand-name">DewSRO</span>
 				<span class="sidebar__brand-sub">Control Panel</span>
 			</div>
 		</div>

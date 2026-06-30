@@ -16,6 +16,26 @@ link_directories("${DXSDK_DIR}/Lib/x86")
 if (MSVC)
     add_compile_options(/arch:SSE2)
     set(CMAKE_GENERATOR_PLATFORM Win32)
+
+    # The reverse-engineered struct fixtures (ENSURE_SIZE/ENSURE_OFFSET) require
+    # STL containers to carry the iterator-debugging proxy pointer, matching the
+    # original client's VS2005-era layout. Release defaults to IDL=0 which strips
+    # that pointer and shrinks every container by 4 bytes, breaking the ABI.
+    add_compile_definitions($<$<NOT:$<CONFIG:Debug>>:_ITERATOR_DEBUG_LEVEL=1>)
+
+    # Static CRT so the DLL runs on machines without the VC++ redistributable.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+    # Toolsets newer than 14.38 (VS2022 v143) dropped Windows 7 support: their
+    # STL/CRT import CopyFile2, CreateFile2, GetSystemTimePreciseAsFileTime etc.
+    # directly, so the DLL fails to load on Win7. Build with -vcvars_ver=14.38
+    # (see build-release.cmd) or the presets in CMakePresets.json.
+    if (MSVC_VERSION GREATER 1938 AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message(FATAL_ERROR
+            "MSVC toolset ${MSVC_VERSION} > 14.38: the built DLL will NOT load on Windows 7. "
+            "Build with build-release.cmd, or delete the cache and reconfigure with the "
+            "x86-Release preset / vcvars32.bat -vcvars_ver=14.38.")
+    endif()
 endif()
 
 # Dependencies
@@ -29,7 +49,6 @@ add_subdirectory(src/client/lib/NavMesh)
 add_subdirectory(src/client/lib/SimpleViewer)
 add_subdirectory(src/client/lib/TypeId)
 add_subdirectory(src/client/lib/Client)
-
 
 # Source
 set(SOURCES
@@ -68,11 +87,12 @@ set(SOURCES
 
     # Kiero
     kiero/kiero.cpp
-    src/client/RewardWindow.cpp 
-    src/client/AchievementWindow.cpp 
-)
+    src/client/RewardWindow.cpp
+    src/client/AchievementWindow.cpp
+    src/client/SROSkinWindow.cpp
+    "src/client/pk2/Pk2Reader.cpp" "src/client/pk2/Blowfish.cpp" "src/client/pk2/IconCache.cpp")
 
-add_library(DewSROToolkit SHARED ${SOURCES} "src/client/RewardWindow.h" "src/client/RewardWindow.cpp" "src/client/SoxOverlay.h"  "src/client/AchievementWindow.h" "src/client/AchievementWindow.cpp" "src/client/stb_image.h")
+add_library(DewSROToolkit SHARED ${SOURCES} "src/client/RewardWindow.h" "src/client/RewardWindow.cpp" "src/client/SoxOverlay.h" "src/client/AchievementWindow.h" "src/client/AchievementWindow.cpp" "src/client/stb_image.h" "src/client/SROSkinWindow.h" "src/client/SROSkinWindow.cpp" "src/client/pk2/Pk2Reader.h" "src/client/pk2/Pk2Reader.cpp" "src/client/pk2/Blowfish.h" "src/client/pk2/Blowfish.cpp" "src/client/pk2/IconCache.h" "src/client/pk2/IconCache.cpp")
 
 # Includes
 target_include_directories(DewSROToolkit PRIVATE

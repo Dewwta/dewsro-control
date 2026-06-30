@@ -42,7 +42,34 @@
 	<Cert>
 		<CompileCertPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\CertModule\\CertModule\\1 - compile.bat</CompileCertPath>
 	</Cert>
+
+	<Startup>
+		<CertServerPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\CertModule\\CertModule\\CustomCertificationServer.exe</CertServerPath>
+		<CertServerArgs>packt.dat</CertServerArgs> <!-- Dont change this (unless your not stupid) -->
+		<GlobalManagerPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\GlobalManager.exe</GlobalManagerPath>
+		<DownloadServerPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\DownloadServer.exe</DownloadServerPath>
+		<MachineManagerPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\MachineManager.exe</MachineManagerPath>
+		<GatewayServerPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\GatewayServer.exe</GatewayServerPath>
+		<FarmManagerPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\FarmManager.exe</FarmManagerPath>
+		<AgentServerPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\AgentServer.exe</AgentServerPath>
+		<ShardManagerPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\SR_ShardManager.exe</ShardManagerPath>
+		<GameServerPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\SR_GameServer.exe</GameServerPath>
+		<ProxyPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\Filter\\Filter\\VSROProxy.exe</ProxyPath>
+		<SMCPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\SMC_Independent\\SMC_Independent\\smc_independent.exe</SMCPath>
+		<NodeTypeIniPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\CertModule\\CertModule\\ini\\srNodeType.ini</NodeTypeIniPath>
+		<SmcUsername>redacted</SmcUsername>
+		<SmcPassword>redacted</SmcPassword>
+		<SmcMainWindowTitle>SMC</SmcMainWindowTitle>
+		<ShouldResolvePubIP>false</ShouldResolvePubIP>
+		<QuestLuaRootPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\VSRO_Control_Api\\quest_lua</QuestLuaRootPath>
+		<QuestSctTempPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\QuestTemp</QuestSctTempPath>
+		<QuestSctDestinationPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\Script\\VIETNAM</QuestSctDestinationPath>
+		<QuestTextdataReferencePath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\VSRO_Control_Api\\reference_data\\textquest_speech&amp;name.txt</QuestTextdataReferencePath>
+		<QuestTextdataOutputPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\VSRO_Control_Api\\reference_output\\textquest_speech&amp;name.txt</QuestTextdataOutputPath>
+		<QuestTextdataUpdateFolderPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\SMC_Independent\\SMC_Independent\\Patch_Internal\\media\\server_dep\\silkroad\\textdata</QuestTextdataUpdateFolderPath>
+	</Startup>
+
 	<ServerCfgPath>C:\\Users\\VSRO-Host\\Desktop\\VSRO Server\\Server\\Server\\DSRO-MAIN\\DSRO-MAIN\\server.cfg</ServerCfgPath>
 	<DebugMode>true</DebugMode>
-
+    <MinimumBotLevel>30</MinimumBotLevel>
 </ApiSettings>

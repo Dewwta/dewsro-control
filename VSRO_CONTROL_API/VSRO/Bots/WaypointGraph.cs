@@ -23,8 +23,25 @@ public class WaypointGraph
 
     public List<Node>? FindPath(BotPosition from, BotPosition to)
     {
-        var startNode = GetClosestNode(from, to);  // pass destination
-        var endNode = GetClosestNode(to, from);
+        // startNode: closest node to bot's current position (pure distance, no direction bias).
+        // Direction bias caused the algorithm to pick nodes across obstacles — A* handles routing.
+        var startNode = GetClosestNode(from, to, destWeight: 0f);
+
+        // For dungeon regions, the endNode must be in the same room as the startNode.
+        // Without this constraint, a destination that sits right at a room boundary resolves
+        // via RegionResolver to the *adjacent* room, producing a cross-room A* pair that has
+        // no edges and always falls back to a direct (graphless) walk.
+        // We extract the room prefix from startNode.Id (e.g. "qs2_15_" from "qs2_15_4") and
+        // pass it as an override so the endNode search is filtered to the same room.
+        string? roomOverride = null;
+        if (startNode != null && (from.RegionId & 0x8000) != 0)
+        {
+            var parts = startNode.Id.Split('_');
+            if (parts.Length >= 3 && int.TryParse(parts[1], out _))
+                roomOverride = $"{parts[0]}_{parts[1]}_";   // e.g. "qs2_15_"
+        }
+
+        var endNode = GetClosestNode(to, from, destWeight: 0.3f, roomOverride: roomOverride);
 
         Logger.Info("WaypointGraph", $"Start node: {startNode?.Id}");
         Logger.Info("WaypointGraph", $"End node: {endNode?.Id}");
@@ -33,148 +50,48 @@ public class WaypointGraph
         return AStar(startNode, endNode);
     }
 
-    private Node? GetClosestNode(BotPosition from, BotPosition destination)
+    // Scores each candidate as dist(from, node) + destWeight * dist(node, destination).
+    // destWeight=0   for startNode: pure closest node to bot — safe to walk to directly.
+    // destWeight=0.3 for endNode:   closest to dest, mild bias away from bot-side nodes.
+    // roomOverride: when set, bypasses region-derived room filter and uses this prefix instead.
+    private Node? GetClosestNode(BotPosition from, BotPosition destination, float destWeight, string? roomOverride = null)
     {
-        float destAngle = MathF.Atan2(
-            destination.Y - from.Y,
-            destination.X - from.X
-        );
-
         foreach (float radius in new[] { 300f, 600f, 1200f })
         {
-            var fromRegion = RegionResolver.Resolve((short)from.RegionId, from.SectorX, from.SectorY);
+            var fromRegion = ((from.RegionId & 0x8000) != 0)
+                ? RegionResolver.Resolve((short)from.RegionId, (int)(from.X / 192), (int)(from.Y / 192))
+                : RegionResolver.Resolve((short)from.RegionId, from.SectorX, from.SectorY);
             var candidate = _nodes.Values
                 .Where(n => Distance(n.Position, from) <= radius)
                 //.Where(n => CanReach(from, n.Position))
                 .Where(n => {
-                    // Please dont crucify me, i may have been drunk
-                    if (fromRegion.Contains("Qin-Shi Tomb|floor:1"))
-                    {
-                        return n.Id.Contains("qs1_");
-                    }
-                    else if (fromRegion.Contains("Qin-Shi Tomb|floor:2"))
-                    {
-                        if (fromRegion.Contains("|room:1"))
-                        {
-                            return n.Id.Contains("qs2_1_");
-                        } 
-                        else if (fromRegion.Contains("|room:2"))
-                        {
-                            return n.Id.Contains("qs2_2_");
-                        }
-                        else if (fromRegion.Contains("|room:3"))
-                        {
-                            return n.Id.Contains("qs2_3_");
-                        }
-                        else if (fromRegion.Contains("|room:4"))
-                        {
-                            return n.Id.Contains("qs2_4_");
-                        }
-                        else if (fromRegion.Contains("|room:5"))
-                        {
-                            return n.Id.Contains("qs2_5_");
-                        }
-                        else if (fromRegion.Contains("|room:6"))
-                        {
-                            return n.Id.Contains("qs2_6_");
-                        }
-                        else if (fromRegion.Contains("|room:7"))
-                        {
-                            return n.Id.Contains("qs2_7_");
-                        }
-                        else if (fromRegion.Contains("|room:8"))
-                        {
-                            return n.Id.Contains("qs2_8_");
-                        }
-                        else if (fromRegion.Contains("|room:9"))
-                        {
-                            return n.Id.Contains("qs2_9_");
-                        }
-                        else if (fromRegion.Contains("|room:10"))
-                        {
-                            return n.Id.Contains("qs2_10_");
-                        }
-                        else if (fromRegion.Contains("|room:11"))
-                        {
-                            return n.Id.Contains("qs2_11_");
-                        }
-                        else if (fromRegion.Contains("|room:12"))
-                        {
-                            return n.Id.Contains("qs2_12_");
-                        }
-                        else if (fromRegion.Contains("|room:13"))
-                        {
-                            return n.Id.Contains("qs2_13_");
-                        }
-                        else if (fromRegion.Contains("|room:14"))
-                        {
-                            return n.Id.Contains("qs2_14_");
-                        }
-                        else if (fromRegion.Contains("|room:15"))
-                        {
-                            return n.Id.Contains("qs2_15_");
-                        }
-                        else if (fromRegion.Contains("|room:16"))
-                        {
-                            return n.Id.Contains("qs2_16_");
-                        }
-                        else if (fromRegion.Contains("|room:17"))
-                        {
-                            return n.Id.Contains("qs2_17_");
-                        }
-                        else if (fromRegion.Contains("|room:18"))
-                        {
-                            return n.Id.Contains("qs2_18_");
-                        }
-                        else if (fromRegion.Contains("|room:19"))
-                        {
-                            return n.Id.Contains("qs2_19_");
-                        }
-                        else if (fromRegion.Contains("|room:20"))
-                        {
-                            return n.Id.Contains("qs2_20_");
-                        }
+                    // If the caller pinned a specific room prefix, honour it unconditionally.
+                    if (roomOverride != null)
+                        return n.Id.StartsWith(roomOverride);
 
-                        return n.Id.Contains("qs2_");
-                    }
-                    else if (fromRegion.Contains("Qin-Shi Tomb|floor:3"))
+                    if (fromRegion.Contains("Qin-Shi Tomb|floor:1"))
+                        return n.Id.StartsWith("qs1_");
+
+                    if (fromRegion.Contains("Qin-Shi Tomb|floor:2"))
                     {
-                        return n.Id.Contains("qs3_");
+                        for (int r = 20; r >= 1; r--)
+                        {
+                            if (fromRegion.Contains($"|room:{r}"))
+                                return n.Id.StartsWith($"qs2_{r}_");
+                        }
+                        return n.Id.StartsWith("qs2_");
                     }
-                    else if (fromRegion.Contains("Qin-Shi Tomb|floor:4"))
-                    {
-                        return n.Id.Contains("qs4_");
-                    }
-                    else if (fromRegion.Contains("Qin-Shi Tomb|floor:5"))
-                    {
-                        return n.Id.Contains("qs5_");
-                    }
-                    else if (fromRegion.Contains("Qin-Shi Tomb|floor:6"))
-                    {
-                        return n.Id.Contains("qs6_");
-                    }
-                    else if (fromRegion.Contains("Stone Cave"))
-                    {
-                        return n.Id.Contains("sc_");
-                    }
-                    else if (fromRegion.Contains("Alexandria Job Cave (Black/Red Eggre)"))
-                    {
-                        return n.Id.Contains("jc_");
-                    }
+
+                    if (fromRegion.Contains("Qin-Shi Tomb|floor:3")) return n.Id.StartsWith("qs3_");
+                    if (fromRegion.Contains("Qin-Shi Tomb|floor:4")) return n.Id.StartsWith("qs4_");
+                    if (fromRegion.Contains("Qin-Shi Tomb|floor:5")) return n.Id.StartsWith("qs5_");
+                    if (fromRegion.Contains("Qin-Shi Tomb|floor:6")) return n.Id.StartsWith("qs6_");
+                    if (fromRegion.Contains("Stone Cave")) return n.Id.StartsWith("sc_");
+                    if (fromRegion.Contains("Alexandria Job Cave (Black/Red Eggre)")) return n.Id.StartsWith("jc_");
 
                     return true;
                 })
-                .OrderBy(n =>
-                {
-                    float dist = Distance3D(n.Position, from);
-                    float nodeAngle = MathF.Atan2(
-                        n.Position.Y - from.Y,
-                        n.Position.X - from.X
-                    );
-                    float angleDiff = MathF.Abs(AngleDelta(destAngle, nodeAngle));
-                    float penalty = angleDiff > MathF.PI / 2 ? 2.5f : 1.0f;
-                    return dist * penalty;
-                })
+                .OrderBy(n => Distance3D(n.Position, from) + destWeight * Distance(n.Position, destination))
                 .FirstOrDefault();
 
             if (candidate != null) return candidate;
@@ -188,14 +105,6 @@ public class WaypointGraph
         float dy = a.Y - b.Y;
         float dz = a.ZOffset - b.ZOffset;
         return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-    }
-
-    private static float AngleDelta(float a, float b)
-    {
-        float d = a - b;
-        while (d > MathF.PI) d -= 2 * MathF.PI;
-        while (d < -MathF.PI) d += 2 * MathF.PI;
-        return d;
     }
 
     private List<Node>? AStar(Node start, Node goal)
@@ -255,6 +164,7 @@ public class WaypointGraph
         return MathF.Sqrt(dx * dx + dy * dy);
     }
 
+    [Obsolete]
     private bool CanReach(BotPosition from, BotPosition to)
     {
         try

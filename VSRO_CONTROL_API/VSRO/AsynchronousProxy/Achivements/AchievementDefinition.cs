@@ -33,14 +33,19 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
             [XmlElement("ItemCodeName")]
             public List<string> ItemCodeNames { get; set; } = new();
 
+            // Substring filter — matches if codeName contains any of these strings
+            [XmlElement("ItemCodeNameContains")]
+            public List<string> ItemCodeNameContainsFilters { get; set; } = new();
+
             // Helpers
             public bool MatchesMob(string codeName) =>
                 MonsterCodeNames.Count == 0 ||
                 MonsterCodeNames.Any(m => m.Equals(codeName, StringComparison.OrdinalIgnoreCase));
 
             public bool MatchesItem(string codeName) =>
-                ItemCodeNames.Count == 0 ||
-                ItemCodeNames.Any(i => i.Equals(codeName, StringComparison.OrdinalIgnoreCase));
+                (ItemCodeNames.Count == 0 && ItemCodeNameContainsFilters.Count == 0) ||
+                ItemCodeNames.Any(i => i.Equals(codeName, StringComparison.OrdinalIgnoreCase)) ||
+                ItemCodeNameContainsFilters.Any(f => codeName.Contains(f, StringComparison.OrdinalIgnoreCase));
         }
     }
 }

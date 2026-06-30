@@ -12,8 +12,8 @@ using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Framework;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.ServerCfg;
-using VSRO_CONTROL_API.VSRO.Settings;
 using VSRO_CONTROL_API.VSRO.Tools;
+using VSRO_CONTROL_API.VSRO.Enums;
 
 namespace VSRO_CONTROL_API.VSRO
 {
@@ -253,10 +253,15 @@ namespace VSRO_CONTROL_API.VSRO
 
         #region - Fields -
 
+        public static bool Debug { get; private set; } = false;
+        public static void SetDebug(bool debug) => Debug = debug;
+        private static void Log(string handler, string message) { if (Debug == true) Logger.Trace($"BotBrain:{handler}", message); }
+
+
         private static StartupSettings? ss;
         private static ApiSettings Settings => SettingsLoader.Settings;
         private static readonly object _startupShutdownLock = new object();
-        private static string dir = AppDomain.CurrentDomain.BaseDirectory;
+
 
         private static Process? CertServer     = null;
         private static Process? GlobalManager  = null;
@@ -305,10 +310,13 @@ namespace VSRO_CONTROL_API.VSRO
             {
                 DisableQuickEdit();
 
-                string configFilePath = Path.Combine(dir, "configs", "Config.json");
+                ss = SettingsLoader.Settings?.Startup ?? new StartupSettings();
+                if (SettingsLoader.Settings != null && SettingsLoader.Settings.Startup == null)
+                {
+                    SettingsLoader.Settings.Startup = ss;
+                    SettingsLoader.SaveSettings();
+                }
 
-                ss = await StartupSettings.Load(configFilePath);
-                await ss.Save(configFilePath);
                 Logger.Info(typeof(Overseer), "Overseer initialized.");
                 _publicIP = await IPTools.GetPublicIPAsync();
                 if (_publicIP == null)
@@ -364,8 +372,9 @@ namespace VSRO_CONTROL_API.VSRO
 
                 // Build the shop db
                 await BuildShopDB();
+
+                // Will uncomment when working.
                 //await BuildMallDB();
-                // ── Step 2: Start Cert module ─────────────────────────────────────
                 _stage = "Starting Cert Server";
                 CertServer = ProcessTools.LaunchProcessTracked(ss.CertServerPath!, 4000, "Cert Server", ss.CertServerArgs ?? "");
                 if (CertServer == null)
@@ -375,10 +384,10 @@ namespace VSRO_CONTROL_API.VSRO
                 }
                 _stage = "Cert Server Started";
 
-                // ── Step 3: Start all server modules in order ─────────────────────
+                //Start all server modules in order
                 Logger.Info(typeof(Overseer), "PLEASE DO NOT USE ANY INPUTS DURING STARTUP.");
 
-                // ── Deploy staged quest.sct if present ───────────────────────────
+                // Deploy staged quest.sct if present
                 if (!string.IsNullOrWhiteSpace(ss.QuestSctTempPath) && !string.IsNullOrWhiteSpace(ss.QuestSctDestinationPath))
                 {
                     string stagedSct = Path.Combine(ss.QuestSctTempPath, "Quest.sct");
@@ -425,15 +434,15 @@ namespace VSRO_CONTROL_API.VSRO
                 _stage = "Starting Game Server";
                 GameServer = ProcessTools.LaunchProcessTracked(ss.GameServerPath!, 5000, "Game Server");
 
-                // ── Step 4: Start Proxy ───────────────────────────────────────────
+                // Start Proxy
                 _stage = "Starting Proxy";
                 SetupProxy();
 
-                // ── Step 5: Start SMC ─────────────────────────────────────────────
+                // Start SMC
                 _stage = "Starting SMC";
                 SMC = ProcessTools.LaunchProcessTracked(ss.SMCPath!, 6000, "SMC");
 
-                // ── Step 6: Automate SMC Login ────────────────────────────────────
+                // Automate SMC Login
                 _stage = "SMC Login";
                 Logger.Info(typeof(Overseer), "Waiting for SMC login window...");
                 IntPtr loginHwnd = WaitForWindow("Login", timeoutMs: 8000);
@@ -456,7 +465,7 @@ namespace VSRO_CONTROL_API.VSRO
 
                 Logger.Info(typeof(Overseer), "Login submitted. Waiting for SMC main window...");
 
-                // ── Step 7: Automate SMC "Launch All Nodes" ───────────────────────
+                // Automate SMC "Launch All Nodes"
                 // Give SMC time to log in and load the node tree
                 Thread.Sleep(6000);
                 _stage = "Launching All Nodes";
@@ -738,13 +747,15 @@ namespace VSRO_CONTROL_API.VSRO
             };
         }
 
-        public static StartupSettings? GetSettings() => ss;
+        public static StartupSettings? GetSettings() => SettingsLoader.Settings?.Startup;
 
-        public static async Task UpdateSettings(StartupSettings newSettings)
+        public static Task UpdateSettings(StartupSettings newSettings)
         {
             ss = newSettings;
-            string configFilePath = Path.Combine(dir, "configs", "Config.json");
-            await ss.Save(configFilePath);
+            if (SettingsLoader.Settings != null)
+                SettingsLoader.Settings.Startup = newSettings;
+            SettingsLoader.SaveSettings();
+            return Task.CompletedTask;
         }
 
         public static bool IsProxyRunning => GatewayProxy != null;
@@ -913,10 +924,10 @@ namespace VSRO_CONTROL_API.VSRO
                 return;
 
             GatewayProxy.OnProxyConnected += (_s, _e) => {
-                Logger.Info(typeof(Overseer), "Gateway Server: Connection established (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
+                Log("Overseer", "Gateway Server: Connection established (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
             };
             GatewayProxy.OnProxyDisconnected += (_s, _e) => {
-                Logger.Info(typeof(Overseer), "Gateway Server: Connection finished (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
+                Log("Overseer", "Gateway Server: Connection finished (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
             };
 
             // Rewrite correct local or public ip to download server (this opcode is not documented, i couldnt find anything.)
@@ -1028,10 +1039,10 @@ namespace VSRO_CONTROL_API.VSRO
                 return;
 
             DownloadProxy.OnProxyConnected += (_s, _e) => {
-                Logger.Info(typeof(Overseer), "Download Server: Connection established (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
+                Log("Overseer", "Download Server: Connection established (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
             };
             DownloadProxy.OnProxyDisconnected += (_s, _e) => {
-                Logger.Info(typeof(Overseer), "Download Server: Connection finished (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
+                Log("Overseer", "Download Server: Connection finished (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
             };
             DownloadProxy.OnProxyConnection += (_s, _e) =>
             {
@@ -1087,7 +1098,7 @@ namespace VSRO_CONTROL_API.VSRO
 
             // Default
             AgentProxy.OnProxyConnected += (_s, _e) => {
-                Logger.Info(typeof(Overseer), "Agent Server: Connection established (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
+                Log("Overseer", "Agent Server: Connection established (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
             };
             AgentProxy.OnProxyDisconnected += (_s, _e) =>
             {
@@ -1099,7 +1110,7 @@ namespace VSRO_CONTROL_API.VSRO
                 {
                     try
                     {
-                        Logger.Info(typeof(Overseer),
+                        Log("Overseer",
                             $"Agent Server: Connection finished ({endpoint})");
 
                         if (proxy.Session != null && proxy != null)
@@ -1128,7 +1139,7 @@ namespace VSRO_CONTROL_API.VSRO
                                 await DBConnect.AddPlayTimeAsync(session.CharacterName, session.AccumulatedPlayTime);
                                 session.AccumulatedPlayTime = TimeSpan.Zero; // prevent double-save safety net
 
-                                Logger.Info(typeof(Overseer),
+                                Log("Overseer",
                                     $"Saved playtime for {session.CharacterName}: {session.AccumulatedPlayTime}");
 
                                 CharacterSnapshotStore.Save(session, proxy.Session.Inventory);
@@ -1142,7 +1153,7 @@ namespace VSRO_CONTROL_API.VSRO
                             await DBConnect.AddPlayTimeAsync(session.CharacterName, session.AccumulatedPlayTime);
                             session.AccumulatedPlayTime = TimeSpan.Zero; // prevent double-save safety net
 
-                            Logger.Info(typeof(Overseer),
+                            Log("Overseer",
                                 $"Saved playtime for {session.CharacterName}: {session.AccumulatedPlayTime}");
 
                             CharacterSnapshotStore.Save(session, proxy.Session.Inventory);
@@ -1214,16 +1225,19 @@ namespace VSRO_CONTROL_API.VSRO
             PlayerTools.RegisterItemUseHandler(AgentProxy);
             PlayerTools.RegisterCosSpawnHandler(AgentProxy);
             PlayerTools.RegisterGoldUpdateHandler(AgentProxy);
+            PlayerTools.RegisterVersionCheckHandler(AgentProxy);
             PlayerTools.RegisterPlayerHPMPHandler(AgentProxy);
             PlayerTools.RegisterStorageHandler(AgentProxy);
             PlayerTools.RegisterPlayerKillHandler(AgentProxy);
             PlayerTools.RegisterSTRINTUpdateHandler(AgentProxy);
+            PlayerTools.RegisterSkillLearnHandler(AgentProxy);
             PlayerTools.RegisterClientSortHandler(AgentProxy);
             PlayerTools.RegisterPlayerRewardHandler(AgentProxy);
             PlayerTools.RegisterAchievementHandler(AgentProxy);
             PlayerTools.RegisterBotHandler(AgentProxy);
             PlayerTools.RegisterBuffHandler(AgentProxy);
             PlayerTools.RegisterServerMovementHandler(AgentProxy);
+            PlayerTools.RegisterClientMovementSuppressor(AgentProxy);
             PlayerTools.RegisterAttackHandlers(AgentProxy);
 
             RegisterExploitFilter(AgentProxy, GatewayProxy!);
@@ -1383,7 +1397,7 @@ namespace VSRO_CONTROL_API.VSRO
                         string template = SettingsLoader.Settings?.Proxy?.LongestPlayerOnlineMessage ?? string.Empty;
                         
                         string msg = SettingsLoader.FormatPlayerMessage(template, longest);
-                        PlayerTools.SendToProxyChat(conn, PlayerTools.ChatType.Notice, null, msg);
+                        PlayerTools.SendToProxyChat(conn, ChatType.Notice, null, msg);
                     }
                 }
             }
@@ -1607,11 +1621,11 @@ namespace VSRO_CONTROL_API.VSRO
         /// <returns>Proxy instance</returns>
         public static Proxy? GetProxyByAccountName(string accountName)
         {
-            Logger.Debug(typeof(Overseer), $"accountName: {accountName}");
+            Log("Overseer", $"accountName: {accountName}");
 
             foreach (var proxy in AgentProxy?.Connections?.Values!)
             {
-                Logger.Debug(typeof(Overseer), $"Canidate: {proxy.Session!.AccountName}");
+                Log("Overseer", $"Canidate: {proxy.Session!.AccountName}");
             }
 
             return AgentProxy?.Connections.Values
@@ -1628,11 +1642,11 @@ namespace VSRO_CONTROL_API.VSRO
         /// <returns>Proxy instance</returns>
         public static Proxy? GetProxyByCharacterName(string charName)
         {
-            Logger.Debug(typeof(Overseer), $"charName: {charName}");
+            Log("Overseer", $"charName: {charName}");
 
             foreach (var proxy in AgentProxy?.Connections?.Values!)
             {
-                Logger.Debug(typeof(Overseer), $"Canidate: {proxy.Session!.CharacterName}");
+                Log("Overseer", $"Canidate: {proxy.Session!.CharacterName}");
             }
 
             return AgentProxy?.Connections.Values
@@ -1641,6 +1655,7 @@ namespace VSRO_CONTROL_API.VSRO
                     p.Session.CharacterName!.Equals(charName, StringComparison.OrdinalIgnoreCase));
 
         }
+
         /// <summary>
         /// Finds the (tabIndex, slotIndex) of an item in a specific NPC's shop by CodeName.
         /// Safe to call because no NPC has duplicate items across tabs.

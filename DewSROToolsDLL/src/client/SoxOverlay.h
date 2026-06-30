@@ -54,7 +54,7 @@ struct SoxOverlay
         ImVec2 uv1(col * frameW + frameW, row * frameH + frameH);
 
         ImGui::GetForegroundDrawList()->AddImage(
-            (ImTextureID)texture,
+            ImTextureRef((ImTextureID)(uintptr_t)texture),
             pos,
             ImVec2(pos.x + size.x, pos.y + size.y),
             uv0, uv1,

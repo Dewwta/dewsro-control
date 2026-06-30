@@ -12,7 +12,7 @@
 
 #pragma comment(lib, "d3dxof.lib")
 #pragma comment(lib, "dxguid.lib")
-#pragma comment(lib, "d3dx9dt.lib")
+#pragma comment(lib, "d3dx9.lib")
 #pragma comment(lib, "comctl32.lib")
 
 class CGFXVideo3d : public CD3DApplication

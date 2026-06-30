@@ -1,22 +1,21 @@
 /* ═══════════════════════════════════════════════════════════════════
    VSRO Panel — Global Stylesheet
-   Palette: old-school Silkroad Online — dark, tan parchment, crimson,
-   gold trim, green accents
+   Palette: slate purple/black with gold accents
    ═══════════════════════════════════════════════════════════════════ */
 
 :root {
 	/* ── Background layers ─────────────────────────────────────────── */
-	--bg-deep:    #080603;
-	--bg-base:    #0f0b07;
-	--bg-surface: #1a1309;
-	--bg-raised:  #241a0c;
-	--bg-hover:   #2e2210;
+	--bg-deep:    #0a0a0f;
+	--bg-base:    #0f0f1a;
+	--bg-surface: #1a1830;
+	--bg-raised:  #2a2240;
+	--bg-hover:   #3a3250;
 
 	/* ── Borders ────────────────────────────────────────────────────── */
-	--border-dark:   #2d2010;
-	--border-mid:    #4d3618;
-	--border-gold:   #7a5828;
-	--border-accent: #9a7030;
+	--border-dark:   #2a2238;
+	--border-mid:    #4a4060;
+	--border-gold:   #6a5a88;
+	--border-accent: #8a7aaa;
 
 	/* ── Gold / primary ─────────────────────────────────────────────── */
 	--gold-dim:    #7a5a25;
@@ -44,10 +43,10 @@
 	--border-steel: #1e4d6b;
 
 	/* ── Text ───────────────────────────────────────────────────────── */
-	--text-bright: #f0ddb0;
-	--text-base:   #c8a870;
-	--text-muted:  #7a6042;
-	--text-dim:    #4a3820;
+	--text-bright: #e8dab0;
+	--text-base:   #b8985a;
+	--text-muted:  #6a5a80;
+	--text-dim:    #3a3250;
 
 	/* ── Sidebar ────────────────────────────────────────────────────── */
 	--sidebar-width: 220px;

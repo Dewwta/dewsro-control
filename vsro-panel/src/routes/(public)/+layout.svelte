@@ -45,7 +45,7 @@
 	<header class="topbar">
 		<a href="/" class="topbar__brand">
 			<span class="brand-icon">⚔</span>
-			<span class="brand-name">VSRO</span>
+			<span class="brand-name">DewSRO</span>
 		</a>
 
 		<nav class="topbar__nav">
@@ -90,7 +90,7 @@
 	<!-- ── Footer ─────────────────────────────────────────────── -->
 	<footer class="site-footer">
 		<div class="footer-inner">
-			<span class="footer-copy">© {new Date().getFullYear()} VSRO. All rights reserved.</span>
+			<span class="footer-copy">© {new Date().getFullYear()} DewSRO 2026. All rights reserved. (no this isnt real LMFAO)</span>
 			<div class="footer-links">
 				<a href="/about">About</a>
 				<a href="/admin" class="footer-admin-link">Admin</a>

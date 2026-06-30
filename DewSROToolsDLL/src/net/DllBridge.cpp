@@ -6,6 +6,7 @@
 #include "Logging/Logger.h"
 
 DllBridge g_bridge;
+std::string g_bridgeHost;
 
 // reinterpret the opaque pointer back to SOCKET
 #define SOCK ((SOCKET)(size_t)m_socket)
@@ -51,7 +52,7 @@ void DllBridge::RunLoop() {
         SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
         m_socket = (void*)(size_t)s;
 
-        hostent* host = (hostent*)gethostbyname(BRIDGE_HOST);
+        hostent* host = (hostent*)gethostbyname(g_bridgeHost.c_str());
         if (!host) {
             closesocket(s);
             m_socket = nullptr;

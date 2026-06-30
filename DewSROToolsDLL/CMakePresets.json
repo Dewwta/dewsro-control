@@ -1,0 +1,31 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "x86-Debug",
+      "displayName": "x86 Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "architecture": { "value": "x86", "strategy": "external" },
+      "toolset": { "value": "v143,host=x86,version=14.38", "strategy": "external" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "x86-Release",
+      "displayName": "x86 Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "architecture": { "value": "x86", "strategy": "external" },
+      "toolset": { "value": "v143,host=x86,version=14.38", "strategy": "external" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "x86-Debug", "configurePreset": "x86-Debug" },
+    { "name": "x86-Release", "configurePreset": "x86-Release" }
+  ]
+}

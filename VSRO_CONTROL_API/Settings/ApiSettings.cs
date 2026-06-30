@@ -23,10 +23,16 @@ namespace VSRO_CONTROL_API.Settings
         [XmlElement("Cert")]
         public CertSettings? Cert { get; set; }
 
+        [XmlElement("Startup")]
+        public StartupSettings? Startup { get; set; }
+
         [XmlElement("ServerCfgPath")]
         public string? ServerCfgPath { get; set; }
 
         [XmlElement("DebugMode")]
         public bool DebugMode { get; set; } = false;
+
+        [XmlElement("MinimumBotLevel")]
+        public int MinimumBotLevel { get; set; } = 0;
     }
 }

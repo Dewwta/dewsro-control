@@ -1,5 +1,6 @@
 ﻿using CoreLib.Tools.Logging;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
+using VSRO_CONTROL_API.VSRO.Enums;
 
 namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
 {
@@ -40,7 +41,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
                 {
                     Logger.Info(typeof(AchievementService),
                         $"[ACH] {charName} completed: \"{ach.Name}\"!");
-                    PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null,
+                    PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null,
                         $"ACHIEVEMENT UNLOCKED: {ach.Name} - {ach.Description}");
                 }
             }
@@ -59,27 +60,53 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
         }
 
         /// <summary>
+        /// Called once on character load. Sets progress on all level achievements to currentLevel
+        /// (completing any whose threshold has already been passed), and seeds in-progress ones.
+        /// </summary>
+        public static async Task OnLevelCheck(string charName, int currentLevel, Proxy proxy)
+        {
+            var allLevelAchs = AchievementLoader.GetByType("level");
+
+            int credited = 0;
+            foreach (var ach in allLevelAchs)
+            {
+                bool newlyCompleted = await DBConnect.SetAchievementHighScoreProgress(
+                    charName, ach.Name, currentLevel, ach.Count);
+
+                if (newlyCompleted)
+                {
+                    Logger.Info(typeof(AchievementService),
+                        $"[ACH] {charName} retroactively completed level achievement: \"{ach.Name}\"!");
+                    credited++;
+                }
+            }
+
+            // Send one summary notice instead of one packet per achievement to avoid
+            // flooding the client during login with rapid-fire chat packets.
+            if (credited > 0)
+                PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null,
+                    $"{credited} achievement(s) retroactively credited — check your Achievement window (F7).");
+        }
+
+        /// <summary>
         /// Call when a character levels up. newLevel = the level they just reached.
-        /// Level achievements use Count as the target level threshold.
-        /// Fires for every level achievement whose Count <= newLevel (in case of multi-level jump).
+        /// Updates progress on all level achievements so in-progress ones show the correct count,
+        /// and completes any whose threshold newLevel has now met or passed.
         /// </summary>
         public static async Task OnLevelUp(string charName, int newLevel, Proxy proxy)
         {
-            var candidates = AchievementLoader.GetByType("level")
-                .Where(a => a.Count == newLevel);
+            var candidates = AchievementLoader.GetByType("level");
 
-            // Level achievements are binary (hit the level = done), upsert directly
-            // as complete by passing amount=Count, goal=Count
             foreach (var ach in candidates)
             {
-                bool newlyCompleted = await DBConnect.IncrementAchievementProgress(
-                    charName, ach.Name, ach.Count, ach.Count);
+                bool newlyCompleted = await DBConnect.SetAchievementHighScoreProgress(
+                    charName, ach.Name, newLevel, ach.Count);
 
                 if (newlyCompleted)
                 {
                     Logger.Info(typeof(AchievementService),
                         $"[ACH] {charName} completed level achievement: \"{ach.Name}\"!");
-                    PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null,
+                    PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null,
                         $"ACHIEVEMENT UNLOCKED: {ach.Name} - {ach.Description}");
                 }
             }
@@ -88,25 +115,23 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
         /// <summary>
         /// Call when a character's gold total changes (pickup, trade, etc.).
         /// currentGold = their new gold total.
-        /// Gold achievements use Count as the gold threshold.
-        /// These are one-shot: once they've crossed the threshold they complete.
         /// </summary>
         public static async Task OnGoldChanged(string charName, long currentGold, Proxy proxy)
         {
-            var candidates = AchievementLoader.GetByType("gold")
-                .Where(a => currentGold >= a.Count);
+            // Track all gold achievements as a high score (max gold ever held).
+            // Progress updates every time gold changes, not only when the threshold is crossed.
+            var candidates = AchievementLoader.GetByType("gold");
 
-            // Gold achievements are threshold-based, not incremental.
             foreach (var ach in candidates)
             {
-                bool newlyCompleted = await DBConnect.IncrementAchievementProgress(
-                    charName, ach.Name, ach.Count, ach.Count);
+                bool newlyCompleted = await DBConnect.SetAchievementHighScoreProgress(
+                    charName, ach.Name, currentGold, ach.Count);
 
                 if (newlyCompleted)
                 {
                     Logger.Info(typeof(AchievementService),
                         $"[ACH] {charName} completed gold achievement: \"{ach.Name}\"!");
-                    PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null,
+                    PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null,
                         $"ACHIEVEMENT UNLOCKED: {ach.Name} - {ach.Description}");
                 }
             }
@@ -148,12 +173,25 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
         }
 
         /// <summary>
-        /// Call each time a character fires an arrow or bolt.
+        /// Called once on character load to seed playtime progress from stored TotalPlayTime.
+        /// No minute-boundary gate — always runs.
         /// </summary>
-        public static async Task OnAmmoFired(string charName, Proxy proxy)
+        public static async Task OnPlaytimeCheck(string charName, long totalMinutesPlayed, Proxy proxy)
         {
-            var candidates = AchievementLoader.GetByType("ammo");
-            await ProcessAchievements(charName, proxy, candidates);
+            if (totalMinutesPlayed <= 0) return;
+            var candidates = AchievementLoader.GetByType("playtime");
+            foreach (var ach in candidates)
+            {
+                bool newlyCompleted = await DBConnect.SetAchievementHighScoreProgress(
+                    charName, ach.Name, totalMinutesPlayed, ach.Count);
+                if (newlyCompleted)
+                {
+                    Logger.Info(typeof(AchievementService),
+                        $"[ACH] {charName} completed playtime achievement: \"{ach.Name}\"!");
+                    PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null,
+                        $"ACHIEVEMENT UNLOCKED: {ach.Name} - {ach.Description}");
+                }
+            }
         }
 
         /// <summary>
@@ -167,19 +205,19 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
             var seconds = (long)(proxy.Session!.TotalPlayTime + proxy.Session.AccumulatedPlayTime).TotalSeconds;
             if (seconds % 60 != 0) return;
 
-            var candidates = AchievementLoader.GetByType("playtime")
-                .Where(a => totalMinutesPlayed >= a.Count);
+            // Track all playtime achievements as a high score (minutes ever played).
+            var candidates = AchievementLoader.GetByType("playtime");
 
             foreach (var ach in candidates)
             {
-                bool newlyCompleted = await DBConnect.IncrementAchievementProgress(
-                    charName, ach.Name, ach.Count, ach.Count);
+                bool newlyCompleted = await DBConnect.SetAchievementHighScoreProgress(
+                    charName, ach.Name, totalMinutesPlayed, ach.Count);
 
                 if (newlyCompleted)
                 {
                     Logger.Info(typeof(AchievementService),
                         $"[ACH] {charName} completed playtime achievement: \"{ach.Name}\"!");
-                    PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null,
+                    PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null,
                         $"ACHIEVEMENT UNLOCKED: {ach.Name} - {ach.Description}");
                 }
             }

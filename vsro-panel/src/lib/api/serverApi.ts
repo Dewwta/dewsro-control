@@ -27,6 +27,11 @@ export interface ModuleStatus {
 	isResponsive: boolean;
 }
 
+export interface ModuleDebugStatus {
+	name: string;
+	debugEnabled: boolean;
+}
+
 export interface VSROServerStatus {
 	isRunning: boolean;
 	modulesOpened: number;
@@ -49,7 +54,7 @@ export interface StartupSettings {
 	smcUsername:             string | null;
 	smcPassword:             string | null;
 	smcMainWindowTitle:      string | null;
-	shouldResolvePubIP:      boolean | null;
+	shouldResolvePubIP:      boolean;
 	questLuaRootPath:         string | null;
 	questSctTempPath:         string | null;
 	questSctDestinationPath:  string | null;
@@ -70,11 +75,13 @@ export interface LiveParty {
 }
 
 export interface LiveStats {
-    STR: number;
-    INT: number;
+    str: number;
+    int: number;
 	level: number;
 	currentHP: number;
+	maxHP?: number;
 	currentMP: number;
+	maxMP?: number;
 	zerkLevel: number;
 	unusedStatPoints: number;
 	gold: number;
@@ -83,6 +90,30 @@ export interface LiveStats {
     worldY: number;
     worldZ: number;
     currentRegion: string | null;
+	// Extended fields
+	race: string | null;
+	isMoving: boolean;
+	runSpeed: number;
+	sectorX: number;
+	sectorY: number;
+	regionId: number;
+	regionName: string | null;
+	regionReadableName: string | null;
+	sessionKills: number;
+	sessionUniqueKills: number;
+	cumulativeExp: number;
+	botState: string | null;
+	trainingDestX: number | null;
+	trainingDestY: number | null;
+	trainingDestZ: number | null;
+	trainingDestRegionId: number | null;
+	spawnedObjectCount: number;
+	mobCount: number;
+	droppedItemCount: number;
+	serverName: string | null;
+	characterUID: number;
+	agentSessionId: number;
+	lastTargetUID: number;
 }
 
 export interface LiveSession {
@@ -93,6 +124,7 @@ export interface LiveSession {
 	loginTime: string;
 	sessionSeconds: number;
 	isAfk: boolean;
+	isGM: boolean;
 	inventoryReady: boolean;
 	party: LiveParty | null;
 	stats: LiveStats | null;
@@ -201,6 +233,13 @@ export const serverApi = {
 	addLogOpcode:    (opcode: string) => request<{ message: string }>(`/server/add-log-opcode?opcode=${encodeURIComponent(opcode)}`),
 	removeLogOpcode: (opcode: string) => request<{ message: string }>(`/server/remove-log-opcode?opcode=${encodeURIComponent(opcode)}`),
 	clearLogOpcodes: ()               => request<{ message: string }>('/server/clear-log-opcodes'),
+
+	getModuleDebug:        ()                          => request<ModuleDebugStatus[]>('/server/module-debug'),
+	setModuleDebug:        (name: string, enabled: boolean) => request<{ message: string }>(`/server/module-debug/${encodeURIComponent(name)}`, {
+		method: 'PUT',
+		body: JSON.stringify({ enabled })
+	}),
+	disableAllModuleDebug: ()                          => request<{ message: string }>('/server/module-debug/disable-all', { method: 'POST' }),
     startBots:  () => request<{ message: string }>('/bot/start-bots',  { method: 'POST' }),
     stopBots:   () => request<{ message: string }>('/bot/stop-bots',   { method: 'POST' }),
     botStatus:  () => request<{ isStarting: boolean; runningBots: string[] }>('/bot/bot-status'),

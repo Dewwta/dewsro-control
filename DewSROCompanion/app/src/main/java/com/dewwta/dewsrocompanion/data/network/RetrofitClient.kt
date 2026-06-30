@@ -13,7 +13,7 @@ import javax.net.ssl.X509TrustManager
 
 object RetrofitClient {
 
-    const val DEFAULT_BASE_URL = "https://dewwta-pub.duckdns.org:5086/"
+    const val DEFAULT_BASE_URL = "https://192.168.0.11:5086/"
 
     private var _token: String? = null
     private var _baseUrl: String = DEFAULT_BASE_URL

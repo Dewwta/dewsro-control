@@ -43,6 +43,7 @@ else
 await AgentTools.Init();
 GameObjectNameResolver.Load(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "reference_data"));
 InviteCodeStore.Load();
+_ = ModuleDebugRegistry.GetAll(); // load persisted module debug flags
 
 
 await RegionResolver.InitializeAsync();

@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
-	import { logsApi, serverApi } from '$lib/api/serverApi';
+	import { logsApi, serverApi, type ModuleDebugStatus } from '$lib/api/serverApi';
 
 
 	// ── Types ──────────────────────────────────────────────────────────────────
-	type Level = 'INFO' | 'WARN' | 'ERROR' | 'UNKNOWN';
+	type Level = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG' | 'TRACE' | 'UNKNOWN';
 
 	interface LogEntry {
 		id: number;      // monotonic — used as the {#each} key to prevent duplicates
@@ -16,15 +16,17 @@
 		message: string;
 	}
 
-	// Matches: [2026-03-24 12:00:00.123] [SourceName] LEVEL: message
+	// Matches: [2026-03-24 12:00:00.123] [SourceName] Level: message
+	// Supports Info, Warn, Error, Debug, Trace in any case (Info, INFO, info, etc.)
 	// The `s` flag makes `.` match newlines so multiline exception bodies are captured.
-	const LOG_RE = /^\[([^\]]+)\] \[([^\]]+)\] (INFO|WARN|ERROR):\s*([\s\S]*)$/;
+	const LOG_RE = /^\[([^\]]+)\] \[([^\]]+)\] (Info|Warn|Error|Debug|Trace|INFO|WARN|ERROR|DEBUG|TRACE):\s*([\s\S]*)$/;
 
 	let _seq = 0;
 	function parse(raw: string): LogEntry {
 		const m = LOG_RE.exec(raw);
 		if (!m) return { id: ++_seq, raw, timestamp: '', source: '', level: 'UNKNOWN', message: raw };
-		return { id: ++_seq, raw, timestamp: m[1], source: m[2], level: m[3] as Level, message: m[4] };
+		const level = m[3].toUpperCase() as Level;
+		return { id: ++_seq, raw, timestamp: m[1], source: m[2], level, message: m[4] };
 	}
 
 	// ── State ──────────────────────────────────────────────────────────────────
@@ -40,6 +42,8 @@
 	let showInfo  = true;
 	let showWarn  = true;
 	let showError = true;
+	let showDebug = true;
+	let showTrace = true;
 	let search    = '';
 
 	// Auto-scroll
@@ -51,6 +55,8 @@
         if (e.level === 'INFO' && !showInfo) return false;
         if (e.level === 'WARN' && !showWarn) return false;
         if (e.level === 'ERROR' && !showError) return false;
+        if (e.level === 'DEBUG' && !showDebug) return false;
+        if (e.level === 'TRACE' && !showTrace) return false;
 
         if (search && search.trim().length > 0) {
             const raw = e.raw.toLowerCase();
@@ -134,16 +140,6 @@
 	}
 
 	let interval: ReturnType<typeof setInterval>;
-	onMount(async () => {
-		try {
-			trackedOpcodes = await serverApi.getLogOpcodes();
-		} catch {
-			// not critical — start empty if fetch fails
-		}
-		poll();
-		interval = setInterval(poll, 2000);
-	});
-	onDestroy(() => clearInterval(interval));
 
 	// ── Opcode logging ─────────────────────────────────────────────────────────
 	let trackedOpcodes: string[] = [];
@@ -206,6 +202,64 @@
 	function opcodeKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter') addOpcode();
 	}
+
+	// ── Module debug mode ──────────────────────────────────────────────────────
+	let allModules: ModuleDebugStatus[] = [];
+	let moduleSearch = '';
+	let moduleError = '';
+	let moduleUpdating: Set<string> = new Set();
+
+	$: filteredModules = allModules.filter(m => {
+		if (!moduleSearch.trim()) return true;
+		return m.name.toLowerCase().includes(moduleSearch.toLowerCase());
+	});
+
+	async function toggleModuleDebug(moduleName: string) {
+		const module = allModules.find(m => m.name === moduleName);
+		if (!module) return;
+
+		const newValue = !module.debugEnabled;
+		moduleUpdating.add(moduleName);
+		moduleUpdating = moduleUpdating;
+		moduleError = '';
+
+		try {
+			await serverApi.setModuleDebug(moduleName, newValue);
+			module.debugEnabled = newValue;
+			allModules = allModules;
+		} catch (e: any) {
+			moduleError = e.message;
+		} finally {
+			moduleUpdating.delete(moduleName);
+			moduleUpdating = moduleUpdating;
+		}
+	}
+
+	async function disableAllModuleDebug() {
+		moduleError = '';
+		try {
+			await serverApi.disableAllModuleDebug();
+			allModules = allModules.map(m => ({ ...m, debugEnabled: false }));
+		} catch (e: any) {
+			moduleError = e.message;
+		}
+	}
+
+	onMount(async () => {
+		try {
+			trackedOpcodes = await serverApi.getLogOpcodes();
+		} catch {
+			// not critical — start empty if fetch fails
+		}
+		try {
+			allModules = await serverApi.getModuleDebug();
+		} catch {
+			// not critical — start empty if fetch fails
+		}
+		poll();
+		interval = setInterval(poll, 2000);
+	});
+	onDestroy(() => clearInterval(interval));
 </script>
 
 <!-- ── Header ─────────────────────────────────────────────────────────────── -->
@@ -240,6 +294,16 @@
 				<input type="checkbox" bind:checked={showError} hidden />
 				ERROR
 				<span class="filter-count">{entries.filter(e => e.level === 'ERROR').length}</span>
+			</label>
+			<label class="filter-chip filter-chip--debug" class:filter-chip--off={!showDebug}>
+				<input type="checkbox" bind:checked={showDebug} hidden />
+				DEBUG
+				<span class="filter-count">{entries.filter(e => e.level === 'DEBUG').length}</span>
+			</label>
+			<label class="filter-chip filter-chip--trace" class:filter-chip--off={!showTrace}>
+				<input type="checkbox" bind:checked={showTrace} hidden />
+				TRACE
+				<span class="filter-count">{entries.filter(e => e.level === 'TRACE').length}</span>
 			</label>
 		</div>
 
@@ -329,6 +393,53 @@
 		</div>
 	</div>
 
+	<!-- ── Module debug mode panel ──────────────────────────────────────────── -->
+	<div class="module-debug-panel">
+		<div class="module-debug-panel__header">
+			<span class="module-debug-panel__title">Module Debug Mode</span>
+			{#if allModules.some(m => m.debugEnabled)}
+				<button class="tool-btn tool-btn--danger" on:click={disableAllModuleDebug}>Disable All</button>
+			{/if}
+		</div>
+		<div class="module-debug-panel__body">
+			<input
+				class="module-search"
+				type="text"
+				placeholder="Search modules…"
+				bind:value={moduleSearch}
+			/>
+			<div class="module-list">
+				{#if allModules.length === 0}
+					<span class="module-empty">No modules available</span>
+				{:else if filteredModules.length === 0}
+					<span class="module-empty">No modules match search</span>
+				{:else}
+					{#each filteredModules as module (module.name)}
+						<div class="module-item">
+							<button
+								class="module-item__toggle"
+								class:module-item__toggle--active={module.debugEnabled}
+								disabled={moduleUpdating.has(module.name)}
+								on:click={() => toggleModuleDebug(module.name)}
+								title={module.debugEnabled ? 'Debug enabled' : 'Debug disabled'}
+							>
+								{#if moduleUpdating.has(module.name)}
+									<span class="module-item__spinner"></span>
+								{:else}
+									<span class="module-item__indicator" class:module-item__indicator--on={module.debugEnabled}></span>
+								{/if}
+							</button>
+							<span class="module-item__name">{module.name}</span>
+						</div>
+					{/each}
+				{/if}
+			</div>
+			{#if moduleError}
+				<span class="module-err">{moduleError}</span>
+			{/if}
+		</div>
+	</div>
+
 	<div class="status-bar">
 		<span>{filtered.length} / {entries.length} entries shown</span>
 		{#if entries.length >= MAX_ENTRIES}
@@ -344,8 +455,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
-		height: calc(100vh - 56px); /* fill panel height */
-		box-sizing: border-box;
 	}
 
 	/* ── Live badge ── */
@@ -413,6 +522,8 @@
 	.filter-chip--info  { background: rgba(100,160,255,0.08); border-color: rgba(100,160,255,0.25); color: #93c5fd; }
 	.filter-chip--warn  { background: rgba(220,160, 20,0.08); border-color: rgba(220,160, 20,0.3);  color: #fcd34d; }
 	.filter-chip--error { background: rgba(220, 50, 50,0.08); border-color: rgba(220, 50, 50,0.3);  color: var(--red-light); }
+	.filter-chip--debug { background: rgba(150,130,200,0.08); border-color: rgba(150,130,200,0.25); color: #d8b4fe; }
+	.filter-chip--trace { background: rgba(100,200,180,0.08); border-color: rgba(100,200,180,0.25); color: #7ee8c1; }
 	.filter-chip--off   { opacity: 0.35; }
 
 	.filter-count {
@@ -467,7 +578,7 @@
 
 	/* ── Log list ── */
 	.log-wrap {
-		flex: 1;
+		height: 650px;
 		overflow-y: auto;
 		background: var(--bg-deep);
 		border: 1px solid var(--border-dark);
@@ -497,7 +608,9 @@
 	}
 	.log-row:hover { background: rgba(255,255,255,0.03); }
 	.log-row--error { background: rgba(92,16,16,0.12); }
-	.log-row--warn  { background: rgba(120,80,0,0.08); }
+	.log-row--warn  { background: rgba(95,75,130,0.08); }
+	.log-row--debug { background: rgba(60,40,80,0.08); }
+	.log-row--trace { background: rgba(40,60,60,0.06); }
 
 	.log-ts {
 		flex-shrink: 0;
@@ -529,6 +642,8 @@
 	.log-lvl--info  { background: rgba(100,160,255,0.15); color: #93c5fd; }
 	.log-lvl--warn  { background: rgba(220,160, 20,0.15); color: #fcd34d; }
 	.log-lvl--error { background: rgba(220, 50, 50,0.2);  color: var(--red-light); }
+	.log-lvl--debug { background: rgba(150,130,200,0.15); color: #d8b4fe; }
+	.log-lvl--trace { background: rgba(100,200,180,0.15); color: #7ee8c1; }
 
 	.log-msg {
 		flex: 1;
@@ -654,4 +769,141 @@
 		color: var(--red-light);
 	}
 	.tool-btn--danger:hover { background: rgba(92,16,16,0.2); }
+
+	/* ── Module debug panel ── */
+	.module-debug-panel {
+		background: var(--bg-raised);
+		border: 1px solid var(--border-dark);
+		border-radius: var(--radius);
+		padding: 0.6rem 0.75rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.45rem;
+	}
+
+	.module-debug-panel__header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.module-debug-panel__title {
+		font-family: var(--font-heading);
+		font-size: 0.63rem;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+
+	.module-debug-panel__body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+
+	.module-search {
+		width: 100%;
+		padding: 0.28rem 0.6rem;
+		background: var(--bg-deep);
+		border: 1px solid var(--border-mid);
+		border-radius: var(--radius);
+		color: var(--text-base);
+		font-family: var(--font-body);
+		font-size: 0.78rem;
+		outline: none;
+		transition: border-color 0.15s;
+	}
+	.module-search:focus { border-color: var(--border-gold); }
+	.module-search::placeholder { color: var(--text-dim); }
+
+	.module-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		max-height: 200px;
+		overflow-y: auto;
+		padding: 0.35rem 0;
+	}
+
+	.module-empty {
+		font-size: 0.72rem;
+		color: var(--text-dim);
+		font-style: italic;
+		padding: 0.5rem 0.6rem;
+	}
+
+	.module-item {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.28rem 0.5rem;
+		border-radius: var(--radius);
+		transition: background 0.1s;
+	}
+	.module-item:hover {
+		background: rgba(255,255,255,0.03);
+	}
+
+	.module-item__toggle {
+		background: none;
+		border: none;
+		padding: 0;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 18px;
+		height: 18px;
+		flex-shrink: 0;
+		transition: opacity 0.15s;
+	}
+	.module-item__toggle:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.module-item__toggle:hover:not(:disabled) {
+		opacity: 0.8;
+	}
+
+	.module-item__indicator {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background: var(--border-mid);
+		box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+		transition: background 0.15s;
+	}
+	.module-item__indicator--on {
+		background: var(--green-bright);
+		box-shadow: 0 0 6px var(--green-bright), inset 0 1px 2px rgba(0,0,0,0.3);
+	}
+
+	.module-item__spinner {
+		width: 10px;
+		height: 10px;
+		border: 1.5px solid rgba(255,255,255,0.2);
+		border-top-color: var(--gold);
+		border-radius: 50%;
+		animation: spin 0.8s linear infinite;
+	}
+
+	.module-item__name {
+		font-family: 'Consolas', 'Cascadia Code', monospace;
+		font-size: 0.76rem;
+		color: var(--text-base);
+		flex: 1;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.module-err {
+		font-size: 0.68rem;
+		color: var(--red-light);
+		padding: 0.3rem 0.6rem;
+	}
+
+	@keyframes spin {
+		to { transform: rotate(360deg); }
+	}
 </style>

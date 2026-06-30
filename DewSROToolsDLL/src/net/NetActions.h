@@ -8,6 +8,7 @@
 #define DEW_ACHIEVEMENTS 0xE103
 #define DEW_START_BOT 0xE104
 #define DEW_STOP_BOT 0xE105
+#define DEW_CLIENT_HELLO 0xE106
 #define DEW_SKILL_ADD 0xDE10
 #define DEW_SKILL_REMOVE 0xDE11
 #define DEW_SKILL_MOVE 0xDE12
@@ -79,6 +80,16 @@ public:
     static void SendStopBotRequest() {
         NEWMSG(DEW_STOP_BOT)
             SENDMSG()
+    }
+
+    static void SendClientHello(const std::string& accountName, uint16_t version)
+    {
+        NEWMSG(DEW_CLIENT_HELLO)
+            pReq << (BYTE)accountName.size();
+            for (char c : accountName)
+                pReq << (BYTE)c;
+            pReq << (WORD)version;
+        SENDMSG()
     }
 
     static void SendStartBotRequest(int x, int y, int z, int r, int regionID)

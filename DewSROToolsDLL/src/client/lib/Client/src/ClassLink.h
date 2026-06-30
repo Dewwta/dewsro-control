@@ -37,6 +37,7 @@
 
 template<typename T>
 class CClassLink {
+public:
     // TODO: Once all ClassLink references are resolved, we need to remove
     //       that structure and use the members directly
     struct Statics {

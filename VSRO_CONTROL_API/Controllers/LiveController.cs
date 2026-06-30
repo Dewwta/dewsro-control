@@ -31,6 +31,7 @@ namespace VSRO_CONTROL_API.Controllers
                     LoginTime      = p.Session.LoginTime,
                     SessionSeconds = p.Session.AccumulatedPlayTime.TotalSeconds,
                     IsAfk          = p.Session.IsAfk,
+                    IsGM           = p.Session.IsGM,
                     InventoryReady = p.Session.Inventory.IsReady,
                     Party          = p.Session.PlayerParty == null ? null : new LivePartyDTO
                     {
@@ -41,21 +42,59 @@ namespace VSRO_CONTROL_API.Controllers
                             .Select(m => m.Session?.CharacterName ?? "?")
                             .ToList()
                     },
-                    Stats = p.Session.PlayerStats == null ? null : new LiveStatsDTO
+                    Stats = new LiveStatsDTO
                     {
-                        STR              = p.Session.PlayerStats.STR,
-                        INT              = p.Session.PlayerStats.INT,
-                        Level            = p.Session.PlayerStats.CurrentLevel,
-                        CurrentHP        = p.Session.PlayerStats.CurrentHP,
-                        CurrentMP        = p.Session.PlayerStats.CurrentMP,
-                        ZerkLevel        = p.Session.PlayerStats.ZerkLevel,
-                        UnusedStatPoints = p.Session.PlayerStats.UnusedStatPoints,
-                        Gold             = p.Session.PlayerStats.RemainingGold,
-                        SkillPoints      = p.Session.PlayerStats.RemainingSkillPoints,
-                        CurrentRegion    = p.Session.RegionReadableName!,
-                        WorldX           = p.Session.WorldX,
-                        WorldY           = p.Session.WorldY,
-                        WorldZ           = p.Session.Z
+                        // PlayerStats fields — safe with null-check
+                        STR              = p.Session.PlayerStats?.STR ?? 0,
+                        INT              = p.Session.PlayerStats?.INT ?? 0,
+                        Level            = p.Session.PlayerStats?.CurrentLevel ?? 0,
+                        CurrentHP        = p.Session.PlayerStats?.CurrentHP ?? 0,
+                        MaxHP            = p.Session.PlayerStats?.MaxHP ?? 0,
+                        CurrentMP        = p.Session.PlayerStats?.CurrentMP ?? 0,
+                        MaxMP            = p.Session.PlayerStats?.MaxMP ?? 0,
+                        ZerkLevel        = p.Session.PlayerStats?.ZerkLevel ?? 0,
+                        UnusedStatPoints = p.Session.PlayerStats?.UnusedStatPoints ?? 0,
+                        Gold             = p.Session.PlayerStats?.RemainingGold ?? 0,
+                        SkillPoints      = p.Session.PlayerStats?.RemainingSkillPoints ?? 0,
+
+                        // World position
+                        CurrentRegion      = p.Session.RegionReadableName ?? "N/A",
+                        WorldX             = p.Session.WorldX,
+                        WorldY             = p.Session.WorldY,
+                        WorldZ             = p.Session.Z,
+
+                        // Identity & race
+                        Race               = p.Session.CharacterRace.ToString(),
+                        ServerName         = p.Session.ServerName,
+                        CharacterUID       = p.Session.CharacterUID,
+                        AgentSessionId     = p.Session.AgentSessionId,
+
+                        // Movement
+                        IsMoving           = p.Session.IsMoving,
+                        RunSpeed           = p.Session.RunSpeed,
+                        SectorX            = p.Session.SectorX,
+                        SectorY            = p.Session.SectorY,
+                        RegionId           = p.Session.RegionId,
+                        RegionName         = p.Session.RegionName,
+                        RegionReadableName = p.Session.RegionReadableName,
+
+                        // Session statistics
+                        SessionKills       = p.Session.SessionKills,
+                        SessionUniqueKills = p.Session.SessionUniqueKills,
+                        CumulativeExp      = p.Session.CumulativeExp,
+                        LastTargetUID      = p.Session.LastTargetUID,
+
+                        // Bot state
+                        BotState             = p.Session._botState.ToString(),
+                        TrainingDestX        = p.Session.TrainingDestination?.X,
+                        TrainingDestY        = p.Session.TrainingDestination?.Y,
+                        TrainingDestZ        = p.Session.TrainingDestination?.ZOffset,
+                        TrainingDestRegionId = p.Session.TrainingDestination?.RegionId,
+
+                        // World tracking counts
+                        SpawnedObjectCount = p.Session.SpawnedObjects.Count,
+                        MobCount           = p.Session.MobUIDs.Count,
+                        DroppedItemCount   = p.Session.DroppedItems.Count,
                     }
                 })
                 .ToList();

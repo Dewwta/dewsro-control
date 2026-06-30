@@ -42,8 +42,7 @@
 					<h2 class="section-title">Our Story</h2>
 					<div class="section-body">
 						<p>
-							<!-- TODO: Replace with your server's story -->
-							Founded in 2015, DSRO is a recreation of the original Silkroad Online experience. After the
+							Founded in 2015, DewSRO is a recreation of the original Silkroad Online experience. After the
                             company joymax buried the game to allow botters to take hold of the entire game, this server
                             is the last true 2008 experience of Silkroad Online. Please report any issues or bugs through
                             the 'about' page. DSRO the name, has no special meaning, it's just the first letter of my alias.
@@ -294,7 +293,7 @@
 		position: absolute;
 		inset: 0;
 		background:
-			radial-gradient(ellipse 60% 80% at 10% 50%, rgba(200,148,60,0.06) 0%, transparent 70%),
+			radial-gradient(ellipse 60% 80% at 10% 50%, rgba(160,130,200,0.06) 0%, transparent 70%),
 			radial-gradient(ellipse 30% 50% at 90% 20%, rgba(140,32,32,0.06) 0%, transparent 60%);
 		pointer-events: none;
 	}
@@ -304,8 +303,8 @@
 		position: absolute;
 		inset: 0;
 		background-image:
-			linear-gradient(rgba(200,148,60,0.025) 1px, transparent 1px),
-			linear-gradient(90deg, rgba(200,148,60,0.025) 1px, transparent 1px);
+			linear-gradient(rgba(160,130,200,0.025) 1px, transparent 1px),
+			linear-gradient(90deg, rgba(160,130,200,0.025) 1px, transparent 1px);
 		background-size: 40px 40px;
 		pointer-events: none;
 	}
@@ -315,7 +314,7 @@
 		font-size: clamp(1.6rem, 4vw, 2.4rem);
 		color: var(--gold-light);
 		letter-spacing: 0.12em;
-		text-shadow: 0 2px 16px rgba(200,148,60,0.25);
+		text-shadow: 0 2px 16px rgba(160,130,200,0.25);
 		margin-bottom: 0.4rem;
 		position: relative;
 	}

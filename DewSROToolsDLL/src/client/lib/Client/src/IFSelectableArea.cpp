@@ -1,5 +1,7 @@
 #include "IFSelectableArea.h"
 
+GFX_IMPLEMENT_DYNAMIC_EXISTING(CIFSelectableArea, 0x00EE96C0)
+
 void CIFSelectableArea::sub_64CE30(std::n_string a, std::n_string b, std::n_string c) {
     reinterpret_cast<void (__thiscall *)(CIFSelectableArea *, std::n_string, std::n_string, std::n_string)>(0x0064CE30)(
             this, a, b, c);

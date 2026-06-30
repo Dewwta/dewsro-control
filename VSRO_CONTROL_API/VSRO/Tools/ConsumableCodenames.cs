@@ -24,7 +24,6 @@
 
         public static readonly Dictionary<PotionType, string> VigorPotions = new()
         {
-            // Only one type in SRO — assign same string to all or just use one entry
             [PotionType.Small] = "ITEM_ETC_ALL_SPOTION_01",
             [PotionType.Medium] = "ITEM_ETC_ALL_SPOTION_01",
             [PotionType.Large] = "ITEM_ETC_ALL_SPOTION_01",
@@ -74,7 +73,7 @@
             [AmmunitionType.Bolts] = "ITEM_ETC_AMMO_BOLT_01",
         };
 
-        // HGP has no type enum — single codename
+        // HGP (pet)
         public const string HGPPotion = "ITEM_COS_P_HGP_POTION_01";
 
         // Return scrolls

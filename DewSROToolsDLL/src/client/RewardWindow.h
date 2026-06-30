@@ -2,9 +2,8 @@
 #include <string>
 #include <vector>
 #include "../Logging/Logger.h"
-#include <map>
 #include <d3d9.h>
-#include <d3dx9.h>
+#include "pk2/IconCache.h"
 #include "SoxOverlay.h"
 
 struct RewardOption
@@ -22,8 +21,7 @@ struct RewardWindow
     bool isOpen = false;
     int  level = 0;
     std::vector<RewardOption> options;
-    std::map<std::string, IDirect3DTexture9*> iconCache;
-    IDirect3DDevice9* device = nullptr;
+    IconCache* iconSource = nullptr;
     int selectedIndex = -1;
 
     static bool Contains(const std::string& str, const std::string& sub) {
@@ -41,22 +39,11 @@ struct RewardWindow
     }
 
     IDirect3DTexture9* GetIcon(const std::string& path) {
-        if (path.empty()) return nullptr;
-        auto it = iconCache.find(path);
-        if (it != iconCache.end()) return it->second;
-
-        // build full path from client root
-        std::string fullPath = "icon/" + path;
-        IDirect3DTexture9* tex = nullptr;
-        D3DXCreateTextureFromFileA(device, fullPath.c_str(), &tex);
-        iconCache[path] = tex;
-        return tex;
-    }
-
-    void ReleaseIcons() {
-        for (auto& [k, v] : iconCache)
-            if (v) v->Release();
-        iconCache.clear();
+        if (path.empty() || !iconSource) return nullptr;
+        std::string base = path;
+        size_t dot = base.rfind('.');
+        if (dot != std::string::npos) base = base.substr(0, dot);
+        return iconSource->Get("icon/" + base + ".ddj");
     }
 
     void Open(int lvl, std::vector<RewardOption> opts) {

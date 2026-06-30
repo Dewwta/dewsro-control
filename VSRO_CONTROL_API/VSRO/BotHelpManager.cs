@@ -4,21 +4,22 @@ using VSRO_CONTROL_API.VSRO.AsynchronousProxy;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
 using VSRO_CONTROL_API.VSRO.Bots.DTO;
 using VSRO_CONTROL_API.VSRO.Tools;
+using VSRO_CONTROL_API.VSRO.Enums;
 
 namespace VSRO_CONTROL_API.VSRO
 {
     public static class BotHelpManager
     {
-        // Bot name → original trainplace before it was dispatched
+        // Bot name -> original trainplace before it was dispatched
         private static readonly ConcurrentDictionary<string, BotTrainplace> _originalPlaces = new();
 
-        // Bot name → when its 1hr session expires
+        // Bot name -> when its 1hr session expires
         private static readonly ConcurrentDictionary<string, DateTime> _botExpiry = new();
 
-        // Bot name → which character it's helping
+        // Bot name -> which character it's helping
         private static readonly ConcurrentDictionary<string, string> _botAssignments = new();
 
-        // Character name → when their cooldown expires
+        // Character name -> when their cooldown expires
         private static readonly ConcurrentDictionary<string, DateTime> _playerCooldowns = new();
 
         // Bot names that are registered as available
@@ -100,11 +101,11 @@ namespace VSRO_CONTROL_API.VSRO
             var botProxy = Overseer.GetProxyByCharacterName(botName);
             if (botProxy != null)
             {
-                PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null, $"Your bot needs to go help others! It will return to X:{botProxy!.Session!.WorldX} Y:{botProxy!.Session!.WorldY} Z:{botProxy!.Session!.Z} in {RegionResolver.Resolve((short)botProxy!.Session!.RegionId)}");
+                PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null, $"Your bot needs to go help others! It will return to X:{botProxy!.Session!.WorldX} Y:{botProxy!.Session!.WorldY} Z:{botProxy!.Session!.Z} in {RegionResolver.Resolve((short)botProxy!.Session!.RegionId)}");
             }
             else
             {
-                PlayerTools.SendToProxyChat(proxy, PlayerTools.ChatType.Notice, null, $"Your bot needs to go help others! It will return to its original hunting area.");
+                PlayerTools.SendToProxyChat(proxy, ChatType.Notice, null, $"Your bot needs to go help others! It will return to its original hunting area.");
                 Logger.Warn("BotHelpManager:ReleaseBot", $"Bot proxy was null when trying to log release!!");
 
             }

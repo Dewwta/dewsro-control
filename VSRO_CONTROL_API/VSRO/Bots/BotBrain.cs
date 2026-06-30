@@ -1,5 +1,6 @@
 ﻿using CoreLib.Tools.Logging;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Framework;
+using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Tools;
 
@@ -20,6 +21,11 @@ namespace VSRO_CONTROL_API.VSRO.Bots
     {
         #region Fields
 
+        public static bool Debug { get; private set; } = false;
+        public static void SetDebug(bool debug) => Debug = debug;
+        private static void Log(string handler, string message) { if (Debug == true) Logger.Trace($"BotBrain:{handler}", message); }
+
+
         private readonly VSRO_CONTROL_API.VSRO.DTO.ISession _session;
         private readonly CancellationToken _rootCt;
         private readonly AutoWalker _walker;
@@ -29,7 +35,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         private readonly ResourceMonitor _resourceMonitor;
         private readonly Action<Packet> _sendPacket;
         private DateTime _townExitLockUntil = DateTime.MinValue;
-
+        private readonly Proxy _proxy;
         private BotMode _mode = BotMode.Idle;
         public BotMode Mode => _mode;
 
@@ -48,18 +54,20 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             AutoWalker walker,
             AttackLoop attackLoop,
             Action<Packet> sendPacket,
-            CancellationToken rootCt)
+            CancellationToken rootCt,
+            Proxy proxy)
         {
             _session = session;
             _walker = walker;
             _attackLoop = attackLoop;
+            _proxy = proxy;
             _sendPacket = sendPacket;
             _rootCt = rootCt;
 
             _resourceMonitor = new ResourceMonitor(session, () => _session._botSettings);
 
             _townLoop = new TownLoop(
-                session,
+                proxy,
                 walker,
                 sendPacket,
                 () => _session._botSettings);
@@ -71,7 +79,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
         public async Task RunAsync()
         {
-            Logger.Info("BotBrain", "Authoritative loop started");
+            Log("BotBrain", "Authoritative loop started");
 
             _ = Task.Run(() => _resourceMonitor.RunAsync(_rootCt), _rootCt);
 
@@ -90,7 +98,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             }
 
             await CleanupCurrentActionAsync();
-            Logger.Info("BotBrain", "Stopped");
+            Log("BotBrain", "Stopped");
         }
 
         private async Task TickAsync()
@@ -170,7 +178,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
         private async Task TransitionToAsync(BotMode newMode)
         {
-            Logger.Info("BotBrain", $"Transition: {_mode} -> {newMode}");
+            Log("BotBrain", $"Transition: {_mode} -> {newMode}");
             await CleanupCurrentActionAsync();
             _mode = newMode;
             _session._botState = newMode;
@@ -202,7 +210,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 case BotMode.Training:
                     if (_townSequenceCompleted)
                     {
-                        Logger.Info("BotBrain", "Arrived at training center safely. Resetting town completion flag.");
+                        Log("BotBrain", "Arrived at training center safely. Resetting town completion flag.");
                         _townSequenceCompleted = false;
                     }
 
@@ -232,17 +240,27 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
         private async Task ExecuteTeleportSequenceAsync(CancellationToken ct)
         {
+
             var dest = _session.TrainingDestination!.Value;
             var currentPos = _session.GetEstimatedPosition();
-            var currentRegion = RegionResolver.Resolve((short)currentPos.RegionId, currentPos.SectorX, currentPos.SectorY);
-            var targetRegion = RegionResolver.Resolve((short)dest.RegionId, dest.SectorX, dest.SectorY);
+            var currentRegion = ResolveDungeonAwareRegion(currentPos);
+            var targetRegion = ResolveDungeonAwareRegion(dest);
 
-            var route = _teleportGraph.FindShortestRoute(currentRegion, targetRegion, currentPos, dest);
+            
+            var route = _teleportGraph.FindShortestRoute(
+                currentRegion, targetRegion, currentPos, dest,
+                _session.CharacterRace,
+                (int)(_session.PlayerStats?.CurrentLevel ?? 0));
+
+            
             if (route == null)
             {
                 Logger.Error("BotBrain", $"No teleport route from {currentRegion} to {targetRegion}");
                 return;
             }
+
+            Log("BotBrain", $"Teleport sequence: from={currentRegion} to={targetRegion}");
+            Log("BotBrain", $"Route: {string.Join(" -> ", route.Select(h => h.ToRegion))}");
 
             foreach (var hop in route)
             {
@@ -250,7 +268,8 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
                 try
                 {
-                    await _walker.WalkTo(hop.GateApproachPosition, ct, _session);
+                    await _walker.WalkTo(hop.GateApproachPosition, ct, _session, disableStuckOnFinalLeg: hop.IsPad);
+                    _walker.ClearStuckState();
                     ct.ThrowIfCancellationRequested();
 
                     if (!hop.IsPad)
@@ -271,7 +290,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                             return;
                         }
 
-                        await Task.Delay(2000, ct);
+                        await Task.Delay(3000, ct);
 
                         var select = new Packet(0x7045);
                         select.WriteUInt(gateUID);
@@ -285,35 +304,55 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                         teleport.WriteUInt(hop.TargetTeleportId);
                         _sendPacket(teleport);
 
-                        Logger.Info("BotBrain", $"Teleport sent -- {hop.FromRegion} -> {hop.ToRegion}");
+                        Log("BotBrain", $"Teleport sent -- {hop.FromRegion} -> {hop.ToRegion}");
                     }
 
-                    var regionDeadline = DateTime.UtcNow.AddSeconds(15);
-                    string stableRegion = string.Empty;
-                    int stableCount = 0;
-                    while (DateTime.UtcNow < regionDeadline && !ct.IsCancellationRequested)
+                    if (hop.IsPad)
                     {
-                        await Task.Delay(500, ct);
-                        string resolved = RegionResolver.Resolve((short)_session.RegionId, _session!.SectorX, _session!.SectorY);
-                        if (resolved == stableRegion)
+                        var padDeadline = DateTime.UtcNow.AddSeconds(10);
+                        while (DateTime.UtcNow < padDeadline && !ct.IsCancellationRequested)
                         {
-                            stableCount++;
-                            if (stableCount >= 3) break;
+                            await Task.Delay(1000, ct);
+                            string current = ResolveDungeonAwareRegion(_session.GetEstimatedPosition());
+                            if (current == hop.ToRegion)
+                                break;
                         }
-                        else
-                        {
-                            stableRegion = resolved;
-                            stableCount = 0;
-                        }
+                        string padRegion = ResolveDungeonAwareRegion(_session.GetEstimatedPosition());
+                        Log("BotBrain", $"Pad hop landed in: {padRegion}");
                     }
-
-                    Logger.Info("BotBrain", $"Stable region: {stableRegion}");
+                    else
+                    {
+                        var regionDeadline = DateTime.UtcNow.AddSeconds(15);
+                        string stableRegion = string.Empty;
+                        int stableCount = 0;
+                        while (DateTime.UtcNow < regionDeadline && !ct.IsCancellationRequested)
+                        {
+                            await Task.Delay(1000, ct);
+                            string resolved = RegionResolver.Resolve(
+                                (short)_session.RegionId, _session.SectorX, _session.SectorY);
+                            if (resolved == stableRegion)
+                            {
+                                stableCount++;
+                                if (stableCount >= 3) break;
+                            }
+                            else
+                            {
+                                stableRegion = resolved;
+                                stableCount = 0;
+                            }
+                        }
+                        Log("BotBrain", $"Stable region: {stableRegion}");
+                    }
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
                     Logger.Error("BotBrain", $"Hop failed: {ex.Message}");
                     return;
+                }
+                finally
+                {
+                    await Task.Delay(2000);
                 }
             }
         }
@@ -335,7 +374,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 return;
             }
             var dest = townCenter.Value;
-            var route = _teleportGraph.FindShortestRoute(currentRegion, targetRegion, pos, townCenter.Value);
+            var route = _teleportGraph.FindShortestRoute(currentRegion, targetRegion, pos, townCenter.Value, _session.CharacterRace, (int)(_session.PlayerStats?.CurrentLevel ?? 0));
             if (route == null)
             {
                 Logger.Error("BotBrain", $"No route from {currentRegion} to {targetRegion}");
@@ -347,6 +386,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 ct.ThrowIfCancellationRequested();
 
                 await _walker.WalkTo(hop.GateApproachPosition, ct, _session);
+                _walker.ClearStuckState();
                 if (ct.IsCancellationRequested) return;
 
                 if (!hop.IsPad)
@@ -381,27 +421,45 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                     teleport.WriteUInt(hop.TargetTeleportId);
                     _sendPacket(teleport);
                 }
-
-                var regionDeadline = DateTime.UtcNow.AddSeconds(15);
-                string stableRegion = string.Empty;
-                int stableCount = 0;
-                while (DateTime.UtcNow < regionDeadline && !ct.IsCancellationRequested)
+                await Task.Delay(1000);
+                if (hop.IsPad)
                 {
-                    await Task.Delay(500, ct);
-                    string resolved = RegionResolver.Resolve((short)_session.RegionId, _session!.SectorX, _session!.SectorY);
-                    if (resolved == stableRegion)
+                    var padDeadline = DateTime.UtcNow.AddSeconds(10);
+                    while (DateTime.UtcNow < padDeadline && !ct.IsCancellationRequested)
                     {
-                        stableCount++;
-                        if (stableCount >= 3) break;
+                        await Task.Delay(300, ct);
+                        string current = RegionResolver.Resolve(
+                            (short)_session.RegionId, _session.SectorX, _session.SectorY);
+                        if (current == hop.ToRegion)
+                            break;
                     }
-                    else
-                    {
-                        stableRegion = resolved;
-                        stableCount = 0;
-                    }
+                    string padRegion = RegionResolver.Resolve(
+                        (short)_session.RegionId, _session.SectorX, _session.SectorY);
+                    Log("BotBrain", $"Pad hop landed in: {padRegion}");
                 }
-
-                Logger.Info("BotBrain", $"Town return: stable in {stableRegion}");
+                else
+                {
+                    var regionDeadline = DateTime.UtcNow.AddSeconds(15);
+                    string stableRegion = string.Empty;
+                    int stableCount = 0;
+                    while (DateTime.UtcNow < regionDeadline && !ct.IsCancellationRequested)
+                    {
+                        await Task.Delay(500, ct);
+                        string resolved = RegionResolver.Resolve(
+                            (short)_session.RegionId, _session.SectorX, _session.SectorY);
+                        if (resolved == stableRegion)
+                        {
+                            stableCount++;
+                            if (stableCount >= 3) break;
+                        }
+                        else
+                        {
+                            stableRegion = resolved;
+                            stableCount = 0;
+                        }
+                    }
+                    Log("BotBrain", $"Stable region: {stableRegion}");
+                }
             }
         }
 
@@ -414,13 +472,13 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             var pos = _session.GetEstimatedPosition();
             var currentRegion = RegionResolver.Resolve((short)pos.RegionId, _session!.SectorX, _session!.SectorY);
 
-            Logger.Info("BotBrain", $"Returning to town from {currentRegion}. Reason: {_resourceMonitor.ReturnReason}");
+            Log("BotBrain", $"Returning to town from {currentRegion}. Reason: {_resourceMonitor.ReturnReason}");
 
             bool needsTeleport = TownRequiresTeleport(currentRegion);
 
             if (needsTeleport)
             {
-                Logger.Info("BotBrain", $"Region {currentRegion} requires teleport to reach town");
+                Log("BotBrain", $"Region {currentRegion} requires teleport to reach town");
                 await ExecuteTownTeleportAsync(currentRegion, ct);
                 if (ct.IsCancellationRequested) return;
             }
@@ -429,7 +487,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
             if (success)
             {
-                Logger.Info("BotBrain", "Town loop complete -- setting sequence completion flag");
+                Log("BotBrain", "Town loop complete -- setting sequence completion flag");
                 _resourceMonitor.AcknowledgeReturn();
                 _townSequenceCompleted = true;
                 _townExitLockUntil = DateTime.UtcNow.AddSeconds(5);
@@ -442,12 +500,12 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
         private async Task ExecuteTownLoopAsync(CancellationToken ct)
         {
-            Logger.Info("BotBrain", "Running town loop (entered town)");
+            Log("BotBrain", "Running town loop (entered town)");
             bool success = await _townLoop.RunAsync(ct);
 
             if (success)
             {
-                Logger.Info("BotBrain", "Town loop finished successfully -- setting sequence completion flag");
+                Log("BotBrain", "Town loop finished successfully -- setting sequence completion flag");
                 _resourceMonitor.AcknowledgeReturn();
                 _townSequenceCompleted = true;
                 _townExitLockUntil = DateTime.UtcNow.AddSeconds(5);
@@ -497,9 +555,16 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
         private bool NeedsTeleport(BotPosition current, BotPosition target)
         {
-            string currentZone = RegionResolver.Resolve((short)current.RegionId, current.SectorX, current.SectorY);
-            string targetZone = RegionResolver.Resolve((short)target.RegionId, target.SectorX, target.SectorY);
+            string currentZone = ResolveDungeonAwareRegion(current);
+            string targetZone = ResolveDungeonAwareRegion(target);
             return currentZone != targetZone;
+        }
+
+        private static string ResolveDungeonAwareRegion(BotPosition pos)
+        {
+            return (pos.RegionId & 0x8000) != 0
+                ? RegionResolver.Resolve((short)pos.RegionId, (int)(pos.X / 192), (int)(pos.Y / 192))
+                : RegionResolver.Resolve((short)pos.RegionId, pos.SectorX, pos.SectorY);
         }
 
         private async Task CleanupCurrentActionAsync()

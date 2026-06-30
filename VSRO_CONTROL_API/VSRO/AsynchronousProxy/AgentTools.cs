@@ -1,15 +1,20 @@
 ﻿using CoreLib.Tools.Logging;
+using System.Diagnostics;
 using VSRO_CONTROL_API.Settings;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Framework;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
 using VSRO_CONTROL_API.VSRO.Bots;
 using VSRO_CONTROL_API.VSRO.DTO;
+using VSRO_CONTROL_API.VSRO.Enums;
 namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 {
     public class AgentTools
     {
         public static HashSet<int> _regionIds = new HashSet<int>();
-        
+        public static bool Debug { get; private set; } = false;
+        public static void SetDebug(bool debug) => Debug = debug;
+        private static void Log(string handler, string message) { if (Debug == true) Logger.Trace($"AgentTools:{handler}", message); }
+
         public static async Task Init()
         {
             try
@@ -41,6 +46,18 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                 var now = DateTime.UtcNow;
                 var userName = await DBConnect.GetUserNameByJID(acc.jid);
+                var charIdResult = await DBConnect.GetCharIdByName(charName);
+                var charDataResult = await DBConnect.GetCharDataByID(charIdResult.charId);
+                Race race;
+                if (charDataResult.character != null)
+                {
+                    var raceRes = await DBConnect.GetCharRaceByRefObjID(charDataResult.character!.RefObjID);
+                    race = raceRes.Item2; 
+                }
+                else
+                {
+                    race = Race.Unknown; 
+                }
                 if (userName.success == false)
                 {
                     Logger.Warn("PlayerLoginHandler", $"Couldnt get username by jid: {userName.reason} | JID={acc.jid}");
@@ -55,7 +72,11 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     LastActivity = now,
                     AccumulatedPlayTime = TimeSpan.Zero,
                     IsAfk = false,
+                    CharacterID = (uint)charIdResult.charId,
+                    CharacterRace = race,
                 };
+
+                Log("Login", $"Character ({charName}) Race: {e.Proxy.Session!.CharacterRace.ToString()}");
 
                 var unclaimed = await DBConnect.GetUnclaimedRewardsAsync(charName);
                 e.Proxy.Session.UnclaimedRewards = unclaimed;
@@ -78,7 +99,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     try
                     {
 
-                        Logger.Debug(p, $"{session.CharacterName} reached {session.RewardedHours} hours");
+                        Log("Proxy", $"{session.CharacterName} reached {session.RewardedHours} hours");
 
                         if (SettingsLoader.Settings?.Proxy?.SilkAmountPerHours is int amount)
                         {
@@ -86,8 +107,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                             if (result.success)
                             {
-                                Logger.Debug(p, $"Added silk to user ID {session.JID}. Silk given: {amount}. Session Time: {session.AccumulatedPlayTime}");
-                                PlayerTools.SendToProxyChat(p, PlayerTools.ChatType.Notice, null, $"You have been rewarded {amount} silk! Session time: {session.AccumulatedPlayTime}");
+                                Log("Proxy", $"Added silk to user ID {session.JID}. Silk given: {amount}. Session Time: {session.AccumulatedPlayTime}");
+                                PlayerTools.SendToProxyChat(p, ChatType.Notice, null, $"You have been rewarded {amount} silk! Session time: {session.AccumulatedPlayTime}");
                             }
                         }
                     }
@@ -182,43 +203,81 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             {
                 var proxy = e.Proxy;
                 var session = proxy.Session;
-                if (proxy.Session != null)
+                if (session == null) return;
+
+                var acc = session.AccountName!;
+
+                DllBridge.Instance.SendToDll(acc, "session_init", new
                 {
-                    DllBridge.Instance.SendToDll(session.AccountName!, "session_init", new
-                    {
-                        charName = session.CharacterName,
-                        jid = session.JID,
-                        accName = session.AccountName
-                    });
+                    charName = session.CharacterName,
+                    jid = session.JID,
+                    accName = session.AccountName
+                });
 
-                    DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "session_sync", new
-                    {
-                        sessionSeconds = (int)e.Proxy.Session.AccumulatedPlayTime.TotalSeconds,
-                        sessionKills = e.Proxy.Session.SessionKills,
-                        totalSeconds = (int)e.Proxy.Session.TotalPlayTime.TotalSeconds,
-                        isAfk = e.Proxy.Session.IsAfk ? 1 : 0,
-                        accountJID = e.Proxy.Session.JID,
-                        isGM = e.Proxy.Session.IsGM ? 1 : 0,
+                DllBridge.Instance.SendToDll(acc, "session_sync", new
+                {
+                    sessionSeconds = (int)session.AccumulatedPlayTime.TotalSeconds,
+                    sessionKills = session.SessionKills,
+                    totalSeconds = (int)session.TotalPlayTime.TotalSeconds,
+                    isAfk = session.IsAfk ? 1 : 0,
+                    accountJID = session.JID,
+                    isGM = session.IsGM ? 1 : 0,
+                });
 
-                    });
+                DllBridge.Instance.SendToDll(acc, "unclaimed_rewards", new
+                {
+                    levels = session.UnclaimedRewards.Select(b => (int)b).ToArray()
+                });
 
-                    DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "unclaimed_rewards", new
-                    {
-                        levels = e.Proxy.Session.UnclaimedRewards.Select(b => (int)b).ToArray()
-                    });
+                DllBridge.Instance.SendToDll(acc, "char_init", new
+                {
+                    hp = session.PlayerStats!.CurrentHP,
+                    mp = session.PlayerStats.CurrentMP,
+                    sessionKills = session.SessionKills,
+                    unusedStatPoints = session.PlayerStats.UnusedStatPoints,
+                    currentLevel = session.PlayerStats.CurrentLevel,
+                    gold = session.PlayerStats.RemainingGold,
+                });
 
-                    var payload = new
-                    {
-                        hp = e.Proxy.Session.PlayerStats!.CurrentHP,
-                        mp = e.Proxy.Session.PlayerStats!.CurrentMP,
-                        sessionKills = e.Proxy.Session.SessionKills,
-                        unusedStatPoints = e.Proxy.Session.PlayerStats.UnusedStatPoints,
-                        currentLevel = e.Proxy.Session.PlayerStats.CurrentLevel,
-                        gold = e.Proxy.Session.PlayerStats.RemainingGold,
-                    };
-                    DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "char_init", payload);
+                DllBridge.Instance.SendToDll(acc, "stat_init", new
+                {
+                    strength = session.PlayerStats.STR,
+                    intelligence = session.PlayerStats.INT,
+                    maxHp = session.PlayerStats.MaxHP,
+                    maxMp = session.PlayerStats.MaxMP,
+                });
 
-                }
+                DllBridge.Instance.SendToDll(acc, "movement_sync", new
+                {
+                    regionReadableName = session.RegionReadableName,
+                    regionName = session.RegionName,
+                    regionId = session.RegionId,
+                    wX = session.WorldX,
+                    wY = session.WorldY,
+                    wZ = session.Z,
+                    xSec = session.SectorX,
+                    ySec = session.SectorY,
+                });
+
+                DllBridge.Instance.SendToDll(acc, "skill_pool_sync", new
+                {
+                    skills = session.LearnedSkills
+                        .Where(s => s.Enabled)
+                        .Select(s => new { id = s.ID, name = s.ReadableName, passive = s.BasicActivity == 0, icon = s.IconFile })
+                });
+
+                DllBridge.Instance.SendToDll(acc, "bot_config_sync", new
+                {
+                    x = session._lastBotX,
+                    y = session._lastBotY,
+                    z = session._lastBotZ,
+                    r = session._lastBotR,
+                    regionId = session._lastBotRegionID,
+                });
+
+                DllBridge.Instance.SendToDll(acc, "bot_settings_sync", session._botSettings);
+
+                session.PushSkillListsToDll(acc);
             });
         }
         
@@ -242,7 +301,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             {
                                 byte flag = packet.ReadByte();
                                 uint memberUID = packet.ReadUInt();
-                                Logger.Debug("PartyChangesHandler", $"Member left (UID={memberUID})");
+                                Log("PartyChangesHandler", $"Member left (UID={memberUID})");
                                 break;
                             }
 
@@ -253,13 +312,13 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 string name = packet.ReadAscii();
                                 uint refObjId = packet.ReadUInt();
 
-                                Logger.Debug("PartyChangesHandler", $"Member joined: {name} (UID={memberUID})");
+                                Log("PartyChangesHandler", $"Member joined: {name} (UID={memberUID})");
                                 break;
                             }
 
                         default:
                             {
-                                Logger.Debug("PartyChangesHandler", $"Unknown changeType={changeType}, remaining bytes logged");
+                                Log("PartyChangesHandler", $"Unknown changeType={changeType}, remaining bytes logged");
                                 break;
                             }
                     }
@@ -282,7 +341,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     uint partyId = packet.ReadUInt();
 
                     e.Proxy.Session!.PlayerParty = null;
-                    Logger.Debug("PartyDeleteHandler", $"Party deleted: ID={partyId}");
+                    Log("PartyDeleteHandler", $"Party deleted: ID={partyId}");
                 }
                 catch (Exception ex)
                 {
@@ -313,7 +372,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         Members = { e.Proxy }
                     };
 
-                    Logger.Debug("PartyHandler",
+                    Log("PartyHandler",
                         $"Party formed: ID={partyId} msg='{message}' minLvl={minLevel}");
                 }
                 catch (Exception ex)
@@ -362,7 +421,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     while (packet.RemainingRead() >= 10)
                     {
                         uint refObjID = packet.ReadUInt();
-                        if (refObjID == 0 || refObjID > 100000) break;
+                        if (refObjID == 0) break;
 
                         var record = await DBConnect.GetItemRecord(refObjID);
                         if (record.item == null)
@@ -421,7 +480,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             packet.ReadByte(); // isBlue
 
                             proxy.Session!.DroppedItems[itemUID] = (refObjID, code, itemWorldX, itemWorldY);
-                            Logger.Debug("SpawnBody::Item", $"Tracked drop {code} uid={itemUID} gold={goldAmount} owner={ownerJID} world=({itemWorldX},{itemWorldY}) remaining={packet.RemainingRead()}");
+                            Log("SpawnBody:Item", $"Tracked drop {code} uid={itemUID} gold={goldAmount} owner={ownerJID} world=({itemWorldX},{itemWorldY}) remaining={packet.RemainingRead()}");
                             continue;
                         }
 
@@ -446,7 +505,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             proxy.Session!.SpawnedPositions[spawnUID] = (worldX, worldY);
                             packet.ReadUInt();
                             packet.ReadULong();
-                            Logger.Debug("SpawnBody", $"Parsed {code} uid={spawnUID} ObjID={refObjID} world=({worldX},{worldY}) remaining={packet.RemainingRead()}");
+                            Log("SpawnBody", $"Parsed {code} uid={spawnUID} ObjID={refObjID} world=({worldX},{worldY}) remaining={packet.RemainingRead()}");
                             continue;
                         }
 
@@ -490,7 +549,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         proxy.Session!.SpawnedObjects[spawnUID] = (refObjID, (short)regionID, refObjID);
                         proxy.Session!.SpawnedPositions[spawnUID] = (worldX, worldY);
 
-                        Logger.Debug("SpawnBody", $"Parsed {code} uid={spawnUID} world=({worldX},{worldY}) remaining={packet.RemainingRead()} hasDest={hasDestination}");
+                        Log("SpawnBody", $"Parsed {code} uid={spawnUID} world=({worldX},{worldY}) remaining={packet.RemainingRead()} hasDest={hasDestination}");
                         SkipEntityTail(packet, record.item);
                     }
                 }
@@ -572,7 +631,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     packet.ReadByte(); // isBlue
 
                     e.Proxy.Session!.DroppedItems[itemUID] = (refObjID, code, itemWorldX, itemWorldY);
-                    Logger.Debug("SpawnBody::Item", $"Tracked drop {code} uid={itemUID} gold={goldAmount} owner={ownerJID} world=({itemWorldX},{itemWorldY}) remaining={packet.RemainingRead()}");
+                    Log("SpawnBody::Item", $"Tracked drop {code} uid={itemUID} gold={goldAmount} owner={ownerJID} world=({itemWorldX},{itemWorldY}) remaining={packet.RemainingRead()}");
                     return;
                 }
 
@@ -595,7 +654,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 e.Proxy.Session!.SpawnedObjects[spawnUID] = (refObjID, (short)regionID, refObjID);
                 e.Proxy.Session!.SpawnedPositions[spawnUID] = (worldX, worldY);
 
-                Logger.Debug("SERVER_SPAWN", $"Parsed {code} uid={spawnUID} world=({worldX:F1},{worldY:F1})");
+                Log("SERVER_SPAWN", $"Parsed {code} uid={spawnUID} world=({worldX:F1},{worldY:F1})");
             });
 
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_DESPAWN, (s, e) =>
@@ -685,13 +744,15 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             {
                 var packet = e.Packet;
                 uint charUID = packet.ReadUInt();
+                // This is not correct. 
                 uint charID = packet.ReadUInt();
 
                 if (e.Proxy.Session != null)
                 {
                     e.Proxy.Session.CharacterUID = charUID;
-                    e.Proxy.Session.CharacterID = charID;
-                    Logger.Debug("CharID", $"CharacterUID=0x{charUID:X} CharacterID=0x{charID:X}");
+                    //e.Proxy.Session.CharacterID = charID;
+
+                    Log("CharID", $"CharacterUID=0x{charUID:X} CharacterID=0x{charID:X}");
                 }
             });
         }

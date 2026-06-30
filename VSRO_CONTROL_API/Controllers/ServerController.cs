@@ -5,7 +5,7 @@ using VSRO_CONTROL_API.Attributes;
 using VSRO_CONTROL_API.VSRO;
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
-using VSRO_CONTROL_API.VSRO.Settings;
+using VSRO_CONTROL_API.Settings;
 
 namespace VSRO_CONTROL_API.Controllers
 {
@@ -272,6 +272,28 @@ namespace VSRO_CONTROL_API.Controllers
             }
         }
 
+        [HttpGet("module-debug")]
+        public IActionResult GetModuleDebug()
+        {
+            return Ok(ModuleDebugRegistry.GetAll());
+        }
 
+        [HttpPut("module-debug/{name}")]
+        public IActionResult SetModuleDebug(string name, [FromBody] ModuleDebugRequest request)
+        {
+            if (!ModuleDebugRegistry.Set(name, request.Enabled))
+                return NotFound(new { message = $"Unknown module: {name}" });
+
+            return Ok(new { message = $"Debug {(request.Enabled ? "enabled" : "disabled")} for {name}." });
+        }
+
+        [HttpPost("module-debug/disable-all")]
+        public IActionResult DisableAllModuleDebug()
+        {
+            ModuleDebugRegistry.DisableAll();
+            return Ok(new { message = "All module debug modes disabled." });
+        }
+
+        public record ModuleDebugRequest(bool Enabled);
     }
 }

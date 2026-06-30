@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 public class DllBridge : IDisposable
@@ -11,6 +12,11 @@ public class DllBridge : IDisposable
     public static readonly DllBridge Instance = new();
     private readonly Dictionary<string, Func<string, JsonElement, Task>> _handlers = new();
     public void RegisterHandler(string type, Func<string, JsonElement, Task> handler) => _handlers[type] = handler;
+
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 
     private TcpListener _listener;
     private CancellationTokenSource _cts;
@@ -65,14 +71,14 @@ public class DllBridge : IDisposable
         
         try
         {
-            var payloadJson = JsonSerializer.Serialize(payload);
+            var payloadJson = JsonSerializer.Serialize(payload, _jsonOptions);
             var payloadDoc = JsonDocument.Parse(payloadJson);
 
             var merged = new Dictionary<string, object> { ["type"] = eventType };
             foreach (var prop in payloadDoc.RootElement.EnumerateObject())
                 merged[prop.Name] = prop.Value.Clone();  // clone so it survives doc disposal
 
-            writer.WriteLine(JsonSerializer.Serialize(merged));
+            writer.WriteLine(JsonSerializer.Serialize(merged, _jsonOptions));
         }
         catch { _clients.TryRemove(accountName, out _); }
     }

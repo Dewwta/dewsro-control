@@ -97,7 +97,7 @@ void RewardWindow::Render() {
             SealType seal = GetSealType(options[i].code);
 
             if (tex)
-                dl->AddImage((ImTextureID)tex,
+                dl->AddImage(ImTextureRef((ImTextureID)(uintptr_t)tex),
                     iconTL, ImVec2(iconTL.x + ICON_SIZE, iconTL.y + ICON_SIZE));
             else
                 dl->AddRectFilled(iconTL,

@@ -52,7 +52,7 @@
 <section class="hero">
 	<div class="hero__overlay" />
 	<div class="hero__content">
-		<h1 class="hero__title">DSRO: Silkroad Online</h1>
+		<h1 class="hero__title">DewSRO</h1>
 		<p class="hero__sub">Private Server — Est. 2015</p>
 		<div class="hero__stats">
 			{#each serverStats as stat}
@@ -166,7 +166,7 @@
 		position: absolute;
 		inset: 0;
 		background:
-			radial-gradient(ellipse 70% 60% at 30% 50%, rgba(200,148,60,0.07) 0%, transparent 70%),
+			radial-gradient(ellipse 70% 60% at 30% 50%, rgba(160,130,200,0.07) 0%, transparent 70%),
 			radial-gradient(ellipse 40% 40% at 80% 30%, rgba(140,32,32,0.08) 0%, transparent 60%);
 		pointer-events: none;
 	}
@@ -176,8 +176,8 @@
 		position: absolute;
 		inset: 0;
 		background-image:
-			linear-gradient(rgba(200,148,60,0.03) 1px, transparent 1px),
-			linear-gradient(90deg, rgba(200,148,60,0.03) 1px, transparent 1px);
+			linear-gradient(rgba(160,130,200,0.03) 1px, transparent 1px),
+			linear-gradient(90deg, rgba(160,130,200,0.03) 1px, transparent 1px);
 		background-size: 40px 40px;
 		pointer-events: none;
 	}
@@ -195,7 +195,7 @@
 		font-size: clamp(2rem, 5vw, 3.5rem);
 		color: var(--gold-light);
 		letter-spacing: 0.12em;
-		text-shadow: 0 2px 20px rgba(200,148,60,0.3);
+		text-shadow: 0 2px 20px rgba(160,130,200,0.3);
 		margin-bottom: 0.4rem;
 	}
 

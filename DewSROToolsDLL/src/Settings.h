@@ -86,9 +86,13 @@ public:
         showWatermark = GetPrivateProfileIntA("General", "showWatermark", 1, p) != 0;
 
         char paKeyBuf[8] = { 0 };
-        GetPrivateProfileStringA("General", "PlayerActions_Keybind", "F", paKeyBuf, sizeof(paKeyBuf), p);
-        showPlayerActionsKey = StringToVK(paKeyBuf);
-        
+        GetPrivateProfileStringA("General", "SessionStats_Keybind", "F", paKeyBuf, sizeof(paKeyBuf), p);
+        showSessionStatsKey = StringToVK(paKeyBuf);
+
+        char adminKeyBuf[8] = { 0 };
+        GetPrivateProfileStringA("General", "AdminTools_Keybind", "F6", adminKeyBuf, sizeof(adminKeyBuf), p);
+        showAdminToolsKey = StringToVK(adminKeyBuf);
+
         char settingsKeyBuf[8] = { 0 };
         GetPrivateProfileStringA("General", "Settings_Keybind", "Z", settingsKeyBuf, sizeof(settingsKeyBuf), p);
         showSettingsKey = StringToVK(settingsKeyBuf);
@@ -115,8 +119,11 @@ public:
         WritePrivateProfileStringA("General", "showFPSCounter", showFPSCounter ? "1" : "0", p);
         WritePrivateProfileStringA("General", "showWatermark", showWatermark ? "1" : "0", p);
 
-        WritePrivateProfileStringA("General", "PlayerActions_Keybind",
-            VKToString(showPlayerActionsKey).c_str(), p);
+        WritePrivateProfileStringA("General", "SessionStats_Keybind",
+            VKToString(showSessionStatsKey).c_str(), p);
+
+        WritePrivateProfileStringA("General", "AdminTools_Keybind",
+            VKToString(showAdminToolsKey).c_str(), p);
 
         WritePrivateProfileStringA("General", "Settings_Keybind",
             VKToString(showSettingsKey).c_str(), p);
@@ -131,7 +138,8 @@ public:
     static bool keepFocused;
     static bool showFPSCounter;
     static bool showWatermark;
-    static int  showPlayerActionsKey;
+    static int  showSessionStatsKey;
+    static int  showAdminToolsKey;
     static int  showSettingsKey;
     static int  showAchKey;
     static int  showBotWindow;
@@ -157,7 +165,8 @@ private:
 inline bool Settings::keepFocused = true;
 inline bool Settings::showFPSCounter = true;
 inline bool Settings::showWatermark = true;
-inline int  Settings::showPlayerActionsKey = 'Z';
-inline int  Settings::showSettingsKey = 'F';
+inline int  Settings::showSessionStatsKey = 'F';
+inline int  Settings::showAdminToolsKey = VK_F6;
+inline int  Settings::showSettingsKey = 'Z';
 inline int  Settings::showBotWindow = 'B';
 inline int  Settings::showAchKey = VK_F7;

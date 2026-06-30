@@ -9,6 +9,10 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network
 {
     public class Server
     {
+        public static bool Debug { get; private set; } = false;
+        public static void SetDebug(bool debug) => Debug = debug;
+        private static void Log(string handler, string message) { if (Debug == true) Logger.Trace($"Server:{handler}", message); }
+
         #region Private Members
 
         /// <summary>
@@ -173,13 +177,13 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network
             // From Client to Proxy
             proxy.Client.OnPacketReceived += (s, e) => {
                 // call event handlers
-                //Logger.Debug("OnClientReceived", $"Opcode[{e.Packet.Opcode.ToString("X2")}]");
+                Log("OnClientReceived", $"Opcode[{e.Packet.Opcode.ToString("X2")}]");
                 _OnPacketTransfer(e.Packet, m_ClientPacketEventHandlers, proxy.Server, proxy);
             };
             // From Server to Proxy
             proxy.Server.OnPacketReceived += (s, e) => {
                 // call event handlers
-                //Logger.Debug("OnServerReceived", $"Opcode[{e.Packet.Opcode.ToString("X2")}]");
+                Log("OnServerReceived", $"Opcode[{e.Packet.Opcode.ToString("X2")}]");
                 _OnPacketTransfer(e.Packet, m_ServerPacketEventHandlers, proxy.Client, proxy);
             };
 

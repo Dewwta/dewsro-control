@@ -10,73 +10,19 @@ using VSRO_CONTROL_API.VSRO.Bots;
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.DTO.VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Tools;
-
+using VSRO_CONTROL_API.VSRO.Enums;
 
 namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 {
     public static class PlayerTools
     {
-        #region - Enums -
+        #region - Logging -
 
-        public enum ChatType
-        {
-            General = 1,
-            PrivateMessage = 2,
-            PartyChat = 3,
-            GuildChat = 4,
-            Global = 6,
-            Notice = 7,
-            Academy = 8,
-            
-        }
-        public enum ItemMovement : byte
-        {
-            InventoryToInventory = byte.MinValue,
-            StorageToStorage = 0x01,
-            InventoryToStorage = 0x02,
-            StorageToInventory = 0x03,
-            InventoryToExchange = 0x04,
-            ExchangeToInventory = 0x05,
-            GroundToInventory = 0x06,
-            InventoryToGround = 0x07,
-            ShopToInventory = 0x08,
-            InventoryToShop = 0x09,
-            InventoryGoldToGround = 0x0A,
-            StorageGoldToInventory = 0x0B,
-            InventoryGoldToStorage = 0x0C,
-            InventoryGoldToExchange = 0x0D,
-            GameServerToInventory = 0x0E,
-            InventoryToGameServer = 0x0F,
-            PetToPet = 0x10,
-            GroundToPet = 0x11,
-            ShopToTransport = 0x13,
-            TransportToShop = 0x14,
-            ItemMallToInventory = 0x18,
-            PetToInventory = 0x1A,
-            InventoryToPet = 0x1B,
-            GroundToPetToInventory = 0x1C,
-            GuildToGuild = 0x1D,
-            InventoryToGuild = 0x1E,
-            GuildToInventory = 0x1F,
-            InventoryGoldToGuild = 0x20,
-            GuildGoldToInventory = 0x21,
-            ShopBuyBack = 0x22,
-            AvatarToInventory = 0x23,
-            InventoryToAvatar = 0x24,
-            OpenMagicCube = 0x2A,
-            ShopToInventoryCoin = 0x2B,
-            InventoryToCube = 0x27,
-            MagicCubeConsumed = 0x29
-        }
-        public enum SortResult
-        {
-            Continue,   // keep looping
-            Completed,  // finished successfully
-            Aborted     // stopped early (unsynced, error condition, etc.)
-        }
+        public static bool Debug { get; private set; } = false;
+        public static void SetDebug(bool debug) => Debug = debug;
+        private static void Log(string handler, string message) { if (Debug == true) Logger.Trace($"PlayerTools:{handler}", message); }
 
         #endregion
-
 
         #region - Handler Registry (SERVER) -
 
@@ -91,7 +37,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     CharDataReturn? data = await PacketParser.ParseCharData(packet);
                     if (data == null)
                     {
-                        Logger.Error("PlayerTools::Chardata", "Chardata object was null!");
+                        Logger.Error("Chardata", "Chardata object was null!");
                     } 
                     else
                     {
@@ -110,6 +56,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             e.Proxy.Session.CumulativeExp = baseExp + data.ExpOffset;
                         else
                             e.Proxy.Session.CumulativeExp = data.ExpOffset; // level 1, no base
+
+                        await BackfillMissedLevelRewardsAsync(e.Proxy, data.CurrentLevel);
 
                         DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "unclaimed_rewards", new
                         {
@@ -130,8 +78,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         e.Proxy.Session!.Inventory.Slots.Clear();
                         e.Proxy.Session!.Inventory.Equipment.Clear();
                         e.Proxy.Session!.Inventory.Avatars.Clear();
-                        
-                        
+                        e.Proxy.Session!.CharacterName = data.CharacterName;
 
                         e.Proxy.Session!.Inventory.Slots = data.Slots;
                         e.Proxy.Session!.Inventory.Equipment = data.Equipment;
@@ -140,7 +87,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         e.Proxy.Session.JID = (int)data.AccountJID;
                         e.Proxy.Session.IsGM = data.IsGM;
 
-                        Logger.Info("Playertools:CharData", $"Account JID: {e.Proxy.Session.JID}, IsGM: {e.Proxy.Session.IsGM} RegionId: {e.Proxy.Session.RegionId}");
                         var savedPlaytime = await DBConnect.GetPlayTimeAsync(e.Proxy.Session!.CharacterName!);
                         e.Proxy.Session.TotalPlayTime = TimeSpan.FromSeconds(savedPlaytime.seconds);
 
@@ -185,6 +131,11 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             ySec = e.Proxy.Session.SectorY,
                         });
 
+                        lock (e.Proxy.Session!.Buffs)
+                            e.Proxy.Session!.Buffs.Clear();
+
+                        e.Proxy.Session!._attackLoop?.ClearCooldowns();
+
                         e.Proxy.Session!.LearnedSkills.Clear();
                         e.Proxy.Session!.LearnedSkills.AddRange(data.LearnedSkills);
 
@@ -192,7 +143,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         {
                             skills = e.Proxy.Session.LearnedSkills
                                 .Where(s => s.Enabled)
-                                .Select(s => new { id = s.ID, name = s.ReadableName, passive = s.AutoAttackType == 0 })
+                                .Select(s => new { id = s.ID, name = s.ReadableName, passive = s.BasicActivity == 0, icon = s.IconFile })
                         });
 
                         var botData = PlayerBotDataStore.Load(e.Proxy.Session.CharacterName!);
@@ -203,32 +154,24 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             e.Proxy.Session._lastBotZ = botData.TrainZ;
                             e.Proxy.Session._lastBotR = botData.TrainR;
 
-                            e.Proxy.Session._savedAttackSkills.Clear();
-                            e.Proxy.Session._savedBuffSkills.Clear();
-
-                            foreach (var id in botData.AttackSkillIds)
-                            {
-                                var skill = e.Proxy.Session.LearnedSkills.FirstOrDefault(s => s.ID == id);
-                                if (skill != null) e.Proxy.Session._savedAttackSkills.Add(skill);
-                            }
-                            foreach (var id in botData.BuffSkillIds)
-                            {
-                                var skill = e.Proxy.Session.LearnedSkills.FirstOrDefault(s => s.ID == id);
-                                if (skill != null) e.Proxy.Session._savedBuffSkills.Add(skill);
-                            }
-
-                            // Restore into attack loop if it already exists
                             if (e.Proxy.Session._attackLoop != null)
                             {
-                                foreach (var sk in e.Proxy.Session._savedAttackSkills)
-                                    e.Proxy.Session._attackLoop.AddSkillToUse(sk, false);
-                                foreach (var sk in e.Proxy.Session._savedBuffSkills)
-                                    e.Proxy.Session._attackLoop.AddSkillToUse(sk, true);
+                                foreach (var id in botData.AttackSkillIds)
+                                {
+                                    if (!e.Proxy.Session.LearnedSkills.Any(s => s.ID == id && s.Enabled)) continue;
+                                    var skill = await DBConnect.GetSkillById(id);
+                                    if (skill != null) e.Proxy.Session._attackLoop.AddSkillToUse(skill, false);
+                                }
+                                foreach (var id in botData.BuffSkillIds)
+                                {
+                                    if (!e.Proxy.Session.LearnedSkills.Any(s => s.ID == id && s.Enabled)) continue;
+                                    var skill = await DBConnect.GetSkillById(id);
+                                    if (skill != null) e.Proxy.Session._attackLoop.AddSkillToUse(skill, true);
+                                }
                             }
 
                             e.Proxy.Session._botSettings = botData.Settings ?? new BotSettings();
 
-                            // Push coordinates to sync positions
                             DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "bot_config_sync", new
                             {
                                 x = botData.TrainX,
@@ -237,12 +180,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 r = botData.TrainR
                             });
 
-                            // Push skill states
-                            DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "skill_list_sync", new
-                            {
-                                attack = e.Proxy.Session._savedAttackSkills.Select(s => new { id = s.ID, name = s.ReadableName }),
-                                buffs = e.Proxy.Session._savedBuffSkills.Select(s => new { id = s.ID, name = s.ReadableName })
-                            });
+                            e.Proxy.Session.PushSkillListsToDll(e.Proxy.Session.AccountName!);
 
                             DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "bot_settings_sync", e.Proxy.Session._botSettings);
 
@@ -255,19 +193,32 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 regionId = botData.RegionId,
                             });
 
-                            DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "skill_list_sync", new
-                            {
-                                attack = e.Proxy.Session._savedAttackSkills.Select(s => new { id = s.ID, name = s.ReadableName }),
-                                buffs = e.Proxy.Session._savedBuffSkills.Select(s => new { id = s.ID, name = s.ReadableName })
-                            });
+                            e.Proxy.Session.PushSkillListsToDll(e.Proxy.Session.AccountName!);
                         }
+                    }
+
+                    if (data != null)
+                    {
+                        var achCharName = e.Proxy.Session?.CharacterName;
+                        var achLevel    = data.CurrentLevel;
+                        var achMinutes  = (long)(e.Proxy.Session?.TotalPlayTime.TotalMinutes ?? 0);
+                        if (achCharName != null)
+                            _ = Task.Run(async () =>
+                            {
+                                await Task.Delay(5000);
+                                await AchievementService.OnLevelCheck(achCharName, achLevel, e.Proxy);
+                                // can be 0 if gold arrives in a separate follow-up packet.
+                                var sessionGold = (long)(e.Proxy.Session?.PlayerStats?.RemainingGold ?? 0);
+                                await AchievementService.OnGoldChanged(achCharName, sessionGold, e.Proxy);
+                                await AchievementService.OnPlaytimeCheck(achCharName, achMinutes, e.Proxy);
+                            });
                     }
 
                     e.Proxy.Session!.Inventory.IsReady = true;
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error("ChardataHandler",
+                    Logger.Error("Chardata",
                         $"CRASH parsing CHARDATA: {ex.Message}\n{ex.StackTrace}");
                 }
             });
@@ -280,7 +231,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                     CharStatsReturn? data = await PacketParser.ParseCharStats(packet);
 
-                    if (proxy != null && proxy.Session != null)
+                    if (proxy != null && proxy.Session != null && proxy.Session.PlayerStats != null)
                     {
                         e.Proxy.Session!.PlayerStats!.STR = data!.STR;
                         e.Proxy.Session!.PlayerStats!.INT = data!.INT;
@@ -298,12 +249,12 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     }
                     else
                     {
-                        Logger.Error("ServerStatsHandler", $"Character session was null!");
+                        Logger.Error("ServerStats", $"Character session or PlayerStats was null!");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error("CharacterStatsHandler", $"Error occurred parsing character stats!: {ex.Message}");
+                    Logger.Error("ServerStats", $"Error occurred parsing character stats!: {ex.Message}");
                 }
             });
         }
@@ -311,812 +262,156 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
         {
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_ITEM_MOVEMENT, async (sender, e) =>
             {
-                try
+                try { await PacketParser.ParseItemMove(e.Packet.Clone(), e.Proxy); }
+                catch (Exception ex) { Logger.Error("ItemMoveHandler", ex.Message); }
+            });
+
+            // Second B034 handler - intercept ShopToInventory (0x08) while BotShopOpen=true,
+            // suppress the original, and send a fake GroundToInventory (0x06) instead.
+            //
+            // the bot suppresses B046 from the game client (to
+            // prevent an uninitialized-shop-object crash [From DMP]), so the game client never opens
+            // its shop UI. A ShopToInventory B034 would crash it trying to update that
+            // uninitialised shop object.
+            //
+            // Why send a fake GroundToInventory: type 0x06 ("picked up from ground") needs
+            // no shop context at all — the client just places the item in the slot.  The
+            // inventory display updates immediately and no relog/teleport is required.
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_ITEM_MOVEMENT, async (sender, e) =>
+            {
+                if (e.Proxy.Session?.BotShopOpen != true) return;
+
+                var pkt = e.Packet.Clone();
+                byte result      = pkt.ReadByte();
+                var movementType = (ItemMovement)pkt.ReadByte();
+
+                Logger.Trace("ItemMoveHandler",
+                    $"B034 BotShopOpen=true: result=0x{result:X2} type={movementType}(0x{(byte)movementType:X2})");
+
+                if (movementType != ItemMovement.ShopToInventory)
+                    return; // inventory moves, pet moves etc. pass through normally
+
+                // Suppress the original — must happen synchronously before first await
+                e.CancelTransfer = true;
+
+                if (result != 0x01)
                 {
-                    var packet = e.Packet.Clone();
-
-                    byte result = packet.ReadByte();
-                    ItemMovement moveType = (ItemMovement)packet.ReadByte();
-
-                    // Need success flag
-                    if (result != 1)
-                        return;
-
-                    var inv = e.Proxy.Session!.Inventory;
-
-                    switch (moveType)
-                    {
-                        case ItemMovement.InventoryToInventory:     // 0x00
-                            {
-                                byte sourceSlot = packet.ReadByte();
-                                byte destSlot = packet.ReadByte();
-                                // CORRECT --
-
-                                ushort movedQty = packet.ReadUShort();
-                                byte unk = packet.ReadByte();
-
-                                bool IsEquipmentSlot(byte slot) => slot >= 1 && slot <= 12;
-
-                                if (e.Proxy.PendingMoves.TryGetValue(sourceSlot, out var tcs))
-                                {
-                                    e.Proxy.PendingMoves.Remove(sourceSlot);
-                                    tcs.TrySetResult(true);
-                                }
-
-                                bool sourceIsEquip = IsEquipmentSlot(sourceSlot);
-                                bool destIsEquip = IsEquipmentSlot(destSlot);
-
-                                inv.Equipment.TryGetValue(sourceSlot, out var srcEquip);
-                                inv.Slots.TryGetValue(sourceSlot, out var srcInv);
-
-                                var src = sourceIsEquip ? srcEquip : srcInv;
-
-                                if (src == null || src.RefItemID == 0)
-                                    return;
-
-
-                                // Destination check
-                                inv.Equipment.TryGetValue(destSlot, out var dstEquip);
-                                inv.Slots.TryGetValue(destSlot, out var dstInv);
-
-                                var dst = destIsEquip ? dstEquip : dstInv;
-
-                                bool dstExists = dst != null && dst.RefItemID != 0;
-
-                                // STACK
-                                if (!sourceIsEquip && !destIsEquip &&
-                                    dstExists &&
-                                    dst.RefItemID == src.RefItemID &&
-                                    dst.MaxStack > 1)
-                                {
-                                    int total = dst.Stack + src.Stack;
-
-                                    if (total <= dst.MaxStack)
-                                    {
-                                        inv.Slots[destSlot] = new SR_Item()
-                                        {
-                                            RefItemID = dst.RefItemID,
-                                            CodeName128 = dst.CodeName128,
-                                            Stack = total,
-                                            MaxStack = dst.MaxStack,
-                                        };
-                                        inv.Slots.TryRemove(sourceSlot, out _);
-                                    }
-                                    else
-                                    {
-                                        int remainder = total - dst.MaxStack;
-                                        inv.Slots[destSlot] = new SR_Item()
-                                        {
-                                            RefItemID = dst.RefItemID,
-                                            CodeName128 = dst.CodeName128,
-                                            Stack = dst.MaxStack,
-                                            MaxStack = dst.MaxStack,
-                                        };
-                                        inv.Slots[sourceSlot] = new SR_Item()
-                                        {
-                                            RefItemID = src.RefItemID,
-                                            CodeName128 = src.CodeName128,
-                                            Stack = remainder,
-                                            MaxStack = src.MaxStack,
-                                        };
-                                    }
-
-                                    return;
-                                }
-
-                                // SWAP
-                                if (dstExists)
-                                {
-                                    if (sourceIsEquip)
-                                        inv.Equipment[sourceSlot] = dst;
-                                    else
-                                        inv.Slots[sourceSlot] = dst;
-
-                                    if (destIsEquip)
-                                        inv.Equipment[destSlot] = src;
-                                    else
-                                        inv.Slots[destSlot] = src;
-                                }
-                                else
-                                {
-                                    // MOVE
-                                    if (destIsEquip)
-                                        inv.Equipment[destSlot] = src;
-                                    else
-                                        inv.Slots[destSlot] = src;
-
-                                    if (sourceIsEquip)
-                                        inv.Equipment.TryRemove(sourceSlot, out _);
-                                    else
-                                        inv.Slots.TryRemove(sourceSlot, out _);
-                                }
-
-                                break;
-                            }
-
-                        case ItemMovement.GroundToInventory:        // 0x06
-                            {
-                                byte slotOrFlag = packet.ReadByte();
-                                if (slotOrFlag == 0xFE)
-                                {
-                                    uint gold = packet.ReadUInt();
-                                    Logger.Debug("ItemMoveHandler", $"Picked up {gold} gold");
-                                    break;
-                                }
-
-                                byte slot = slotOrFlag;
-                                uint rentType = packet.ReadUInt();
-                                if (rentType == 1) { packet.ReadUShort(); packet.ReadUInt(); packet.ReadUInt(); }
-                                else if (rentType == 2) { packet.ReadUShort(); packet.ReadUShort(); packet.ReadUInt(); }
-                                else if (rentType == 3) { packet.ReadUShort(); packet.ReadUInt(); packet.ReadUInt(); packet.ReadUShort(); packet.ReadUInt(); }
-
-                                uint refItemId = packet.ReadUInt();
-                                var itemInfo = await DBConnect.GetItemRecord(refItemId);
-                                if (!itemInfo.success) break;
-
-                                ushort finalStack = 1;
-                                if (itemInfo.item.T2 == 1) // Equipment
-                                {
-                                    packet.ReadByte(); packet.ReadULong(); packet.ReadUInt();
-                                    byte mag = packet.ReadByte();
-                                    for (int p = 0; p < mag; p++) { packet.ReadUInt(); packet.ReadUInt(); }
-                                    packet.ReadByte(); byte sc = packet.ReadByte();
-                                    for (int j = 0; j < sc; j++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
-                                    packet.ReadByte(); byte ac = packet.ReadByte();
-                                    for (int j = 0; j < ac; j++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
-                                }
-                                else if (itemInfo.item.T2 == 3) // ETC
-                                {
-                                    finalStack = packet.ReadUShort();
-                                    if (itemInfo.item.T3 == 11 && itemInfo.item.T4 == 1)
-                                        packet.ReadByte();
-                                    else if (itemInfo.item.T3 == 14)
-                                    {
-                                        byte cm = packet.ReadByte();
-                                        for (int p = 0; p < cm; p++) { packet.ReadUInt(); packet.ReadUInt(); }
-                                    }
-                                }
-
-                                inv.Slots[slot] = new SR_Item() 
-                                { 
-                                    RefItemID = (int)refItemId, 
-                                    CodeName128 = itemInfo.item.CodeName, 
-                                    Stack = finalStack, 
-                                    MaxStack = itemInfo.item.MaxStack 
-                                };
-                                await AchievementService.OnItemPickup(e.Proxy.Session?.CharacterName!, itemInfo.item.CodeName, e.Proxy);
-                                Logger.Debug("ItemMoveHandler", $"Picked up {itemInfo.item.CodeName} x{finalStack} → slot {slot}");
-                                break;
-                            }
-
-                        case ItemMovement.ShopToInventory:          // 0x08
-                            {
-                                byte shopTab = packet.ReadByte();
-                                byte shopSlot = packet.ReadByte();
-                                byte slotCount = packet.ReadByte();
-                                var toSlots = new List<byte>();
-                                for (int i = 0; i < slotCount; i++)
-                                    toSlots.Add(packet.ReadByte());
-                                ushort quantity = packet.ReadUShort();
-                                packet.ReadUInt(); // recipientNpcId
-
-                                uint npcObjId = 0;
-                                if (e.Proxy.Session!.SpawnedObjects.TryGetValue(e.Proxy.Session!.LastTargetUID, out var spawnInfo))
-                                    npcObjId = spawnInfo.RefObjID;
-
-                                if (Overseer.ShopLookup.TryGetValue(((int)npcObjId, shopTab, shopSlot), out var shopItem))
-                                {
-                                    var itemInfo = await DBConnect.GetItemRecord((uint)shopItem.RefItemID);
-                                    int maxStack = itemInfo.success ? itemInfo.item!.MaxStack : 1;
-
-                                    foreach (var slot in toSlots)
-                                        inv.Slots[slot] = new SR_Item()
-                                        {
-                                            RefItemID = (int)shopItem.RefItemID,
-                                            CodeName128 = itemInfo.item!.CodeName,
-                                            Stack = quantity,
-                                            MaxStack = itemInfo.item.MaxStack
-                                        };
-
-                                    Logger.Trace("ItemMoveHandler", $"Bought {shopItem.CodeName} x{quantity} → slots [{string.Join(",", toSlots)}]");
-                                }
-                                else
-                                {
-                                    Logger.Warn("ItemMoveHandler", $"BUY: unresolved NPC=0x{e.Proxy.Session!.LastTargetUID:X} objId={npcObjId} tab={shopTab} slot={shopSlot}");
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.InventoryToShop:          // 0x09
-                            {
-                                byte playerSlot = packet.ReadByte();
-                                ushort quantity = packet.ReadUShort();
-                                uint goldReceived = packet.ReadUInt();
-
-                                if (inv.Slots.TryGetValue(playerSlot, out var item))
-                                {
-                                    int remaining = item.Stack - quantity;
-                                    if (remaining <= 0)
-                                    {
-                                        inv.Slots.TryRemove(playerSlot, out _);
-                                        Logger.Debug("ItemMoveHandler", $"Sold {item.CodeName128} x{quantity} from slot {playerSlot} for {goldReceived}g (removed)");
-                                    }
-                                    else
-                                    {
-                                        inv.Slots[playerSlot] = new SR_Item()
-                                        {
-                                            RefItemID = item.RefItemID,
-                                            CodeName128 = item.CodeName128,
-                                            Stack = remaining,
-                                            MaxStack = item.MaxStack
-                                        };
-                                        Logger.Debug("ItemMoveHandler", $"Sold {item.CodeName128} x{quantity} from slot {playerSlot} for {goldReceived}g ({remaining} remain)");
-                                    }
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.GroundToPet:              // 0x11
-                            {
-                                uint petUID = packet.ReadUInt();
-                                byte slot = packet.ReadByte();
-                                uint rentType = packet.ReadUInt();
-                                if (rentType == 1) { packet.ReadUShort(); packet.ReadUInt(); packet.ReadUInt(); }
-                                else if (rentType == 2) { packet.ReadUShort(); packet.ReadUShort(); packet.ReadUInt(); }
-                                else if (rentType == 3) { packet.ReadUShort(); packet.ReadUInt(); packet.ReadUInt(); packet.ReadUShort(); packet.ReadUInt(); }
-
-                                uint refItemId = packet.ReadUInt();
-                                var itemInfo = await DBConnect.GetItemRecord(refItemId);
-                                if (!itemInfo.success) break;
-
-                                ushort finalStack = 1;
-                                if (itemInfo.item.T2 == 1)
-                                {
-                                    packet.ReadByte(); packet.ReadULong(); packet.ReadUInt();
-                                    byte mag = packet.ReadByte();
-                                    for (int p = 0; p < mag; p++) { packet.ReadUInt(); packet.ReadUInt(); }
-                                    packet.ReadByte(); byte sc = packet.ReadByte();
-                                    for (int j = 0; j < sc; j++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
-                                    packet.ReadByte(); byte ac = packet.ReadByte();
-                                    for (int j = 0; j < ac; j++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
-                                }
-                                else if (itemInfo.item.T2 == 3)
-                                {
-                                    finalStack = packet.ReadUShort();
-                                    if (itemInfo.item.T3 == 11 && itemInfo.item.T4 == 1)
-                                        packet.ReadByte();
-                                    else if (itemInfo.item.T3 == 14)
-                                    {
-                                        byte cm = packet.ReadByte();
-                                        for (int p = 0; p < cm; p++) { packet.ReadUInt(); packet.ReadUInt(); }
-                                    }
-                                }
-                                if (itemInfo.item.CodeName.Contains("SNOWFLAKE")) break;
-
-                                if (itemInfo.item.T2 == 3 && itemInfo.item.T3 == 12)
-                                {
-                                    inv.Slots[slot] = new SR_Item() 
-                                    { 
-                                        RefItemID = (int)refItemId, 
-                                        CodeName128 = itemInfo.item.CodeName, 
-                                        Stack = finalStack, 
-                                        MaxStack = itemInfo.item.MaxStack 
-                                    };
-                                    Logger.Debug("ItemMoveHandler", $"Pet picked up quest item {itemInfo.item.CodeName} x{finalStack} → PLAYER slot {slot}");
-                                }
-                                else if (itemInfo.item.T2 == 3 && itemInfo.item.T3 == 9)
-                                {
-                                    inv.Slots[slot] = new SR_Item()
-                                    {
-                                        RefItemID = (int)refItemId,
-                                        CodeName128 = itemInfo.item.CodeName,
-                                        Stack = finalStack,
-                                        MaxStack = itemInfo.item.MaxStack
-                                    };
-
-                                    Logger.Debug("ItemMoveHandler", $"Pet picked up event item {itemInfo.item.CodeName} x{finalStack} → PLAYER slot {slot}");
-
-                                }
-                                else
-                                {
-                                    if (!inv.Pets.ContainsKey(petUID))
-                                        inv.Pets[petUID] = new();
-
-                                    inv.Pets[petUID].Inventory[slot] = new SR_Item()
-                                    {
-                                        RefItemID = (int)refItemId,
-                                        CodeName128 = itemInfo.item.CodeName,
-                                        Stack = finalStack,
-                                        MaxStack = itemInfo.item.MaxStack
-                                    };
-                                    await AchievementService.OnItemPickup(e.Proxy.Session?.CharacterName!, itemInfo.item.CodeName, e.Proxy);
-                                    Logger.Debug("ItemMoveHandler", $"Pet picked up {itemInfo.item.CodeName} x{finalStack} → pet 0x{petUID:X} slot {slot}");
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.GroundToPetToInventory:   // 0x1C
-                            {
-                                uint petUID = packet.ReadUInt();
-                                byte slotOrFlag = packet.ReadByte();
-
-                                if (slotOrFlag == 0xFE)
-                                {
-                                    uint gold = packet.ReadUInt();
-                                    Logger.Debug("ItemMoveHandler", $"Pet picked up {gold} gold");
-                                    break;
-                                }
-
-                                byte slot = slotOrFlag;
-                                uint rentType = packet.ReadUInt();
-                                if (rentType == 1) { packet.ReadUShort(); packet.ReadUInt(); packet.ReadUInt(); }
-                                else if (rentType == 2) { packet.ReadUShort(); packet.ReadUShort(); packet.ReadUInt(); }
-                                else if (rentType == 3) { packet.ReadUShort(); packet.ReadUInt(); packet.ReadUInt(); packet.ReadUShort(); packet.ReadUInt(); }
-
-                                uint refItemId = packet.ReadUInt();
-                                var itemInfo = await DBConnect.GetItemRecord(refItemId);
-                                if (!itemInfo.success) break;
-
-                                ushort finalStack = 1;
-                                if (itemInfo.item.T2 == 3)
-                                {
-                                    finalStack = packet.ReadUShort();
-                                    if (itemInfo.item.T3 == 11 && itemInfo.item.T4 == 1)
-                                        packet.ReadByte();
-                                    else if (itemInfo.item.T3 == 14)
-                                    {
-                                        byte cm = packet.ReadByte();
-                                        for (int p = 0; p < cm; p++) { packet.ReadUInt(); packet.ReadUInt(); }
-                                    }
-                                }
-
-
-                                bool isQuestItem = itemInfo.item.CodeName.Contains("SNOWFLAKE") ||
-                                                   itemInfo.item.CodeName.Contains("QNO") ||
-                                                   itemInfo.item.CodeName.Contains("QSP");
-
-                                if (isQuestItem)
-                                {
-                                    // Route to PLAYER inventory
-                                    inv.Slots[slot] = new SR_Item()
-                                    {
-                                        RefItemID = (int)refItemId,
-                                        CodeName128 = itemInfo.item.CodeName,
-                                        Stack = finalStack,
-                                        MaxStack = itemInfo.item.MaxStack
-                                    };
-                                    Logger.Debug("ItemMoveHandler", $"Pet picked up quest item {itemInfo.item.CodeName} x{finalStack} → PLAYER slot {slot}");
-                                }
-                                else
-                                {
-                                    // Route to PET inventory
-                                    if (!inv.Pets.ContainsKey(petUID))
-                                        inv.Pets[petUID] = new();
-
-                                    inv.Pets[petUID].Inventory[slot] = new SR_Item()
-                                    {
-                                        RefItemID = (int)refItemId,
-                                        CodeName128 = itemInfo.item.CodeName,
-                                        Stack = finalStack,
-                                        MaxStack = itemInfo.item.MaxStack
-                                    };
-                                    await AchievementService.OnItemPickup(e.Proxy.Session?.CharacterName!, itemInfo.item.CodeName, e.Proxy);
-                                    Logger.Debug("ItemMoveHandler", $"Pet picked up {itemInfo.item.CodeName} x{finalStack} → pet 0x{petUID:X} slot {slot}");
-                                }
-
-                                break;
-                            }
-
-                        case ItemMovement.PetToInventory:           // 0x1A
-                            {
-                                uint petUID = packet.ReadUInt();
-                                byte petSlot = packet.ReadByte();
-                                byte playerSlot = packet.ReadByte();
-
-                                // Try the specific pet first
-                                bool found = false;
-                                if (inv.Pets.TryGetValue(petUID, out var petInv) &&
-                                    petInv.Inventory.TryGetValue(petSlot, out var petItem))
-                                {
-                                    inv.Slots[playerSlot] = petItem;
-                                    petInv.Inventory.TryRemove(petSlot, out _);
-                                    found = true;
-                                    Logger.Debug("ItemMoveHandler", $"Pet→Player: {petItem.CodeName128} x{petItem.Stack} → slot {playerSlot}");
-                                }
-
-                                // If not found, search all pet inventories for that slot
-                                if (!found)
-                                {
-                                    foreach (var pet in inv.Pets)
-                                    {
-                                        if (pet.Value.Inventory.TryGetValue(petSlot, out var item))
-                                        {
-                                            inv.Slots[playerSlot] = item;
-                                            pet.Value.Inventory.TryRemove(petSlot, out _);
-                                            found = true;
-                                            Logger.Debug("ItemMoveHandler", $"Pet→Player: {item.CodeName128} x{item.Stack} → slot {playerSlot} (from pet 0x{pet.Key:X})");
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                if (!found)
-                                {
-                                    inv.Slots[playerSlot] = new SR_Item()
-                                    {
-                                        RefItemID = 0,
-                                        CodeName128 = "UNKNOWN_PET_TRANSFER",
-                                        Stack = 1,
-                                        MaxStack = 1
-                                    };
-                                    Logger.Warn("ItemMoveHandler", $"Pet→Player: unknown item from pet 0x{petUID:X} slot {petSlot}");
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.InventoryToPet:           // 0x1B
-                            {
-                                uint petUID = packet.ReadUInt();
-                                byte playerSlot = packet.ReadByte();
-                                byte petSlot = packet.ReadByte();
-
-                                if (inv.Slots.TryGetValue(playerSlot, out var item))
-                                {
-                                    // Store in the correct pet
-                                    uint targetPet = petUID;
-                                    if (!inv.Pets.ContainsKey(petUID))
-                                    {
-                                        foreach (var pet in inv.Pets)
-                                        {
-                                            if (pet.Value.Inventory.Keys.Any(k => Math.Abs(k - petSlot) < 28))
-                                            {
-                                                targetPet = pet.Key;
-                                                break;
-                                            }
-                                        }
-                                    }
-
-                                    if (!inv.Pets.ContainsKey(targetPet))
-                                        inv.Pets[targetPet] = new();
-                                    inv.Pets[targetPet].Inventory[petSlot] = item;
-                                    inv.Slots.TryRemove(playerSlot, out _);
-                                    Logger.Debug("ItemMoveHandler", $"Player→Pet: {item.CodeName128} → pet 0x{targetPet:X} slot {petSlot}");
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.PetToPet:                 // 0x10
-                            {
-                                uint petUID = packet.ReadUInt();
-                                byte srcSlot = (byte)(packet.ReadByte() + 1);
-                                byte destSlot = (byte)(packet.ReadByte() + 1);
-                                ushort qty = packet.ReadUShort();
-
-                                // Resolve pending move
-                                if (e.Proxy.PendingMoves.TryGetValue(srcSlot, out var tcs))
-                                {
-                                    e.Proxy.PendingMoves.Remove(srcSlot);
-                                    tcs.TrySetResult(true);
-                                }
-
-
-                                // Find the pet inventory
-                                ConcurrentDictionary<byte, SR_Item>? petInv = null;
-                                foreach (var pet in inv.Pets)
-                                {
-                                    if (pet.Value.Inventory.ContainsKey(srcSlot))
-                                    {
-                                        petInv = pet.Value.Inventory;
-                                        break;
-                                    }
-                                }
-                                if (petInv == null && inv.Pets.TryGetValue(petUID, out var directPet))
-                                    petInv = directPet.Inventory;
-
-                                if (petInv != null && petInv.TryGetValue(srcSlot, out var src))
-                                {
-                                    petInv.TryGetValue(destSlot, out var dst);
-
-                                    if (dst.RefItemID != 0 && dst.RefItemID == src.RefItemID && dst.MaxStack > 1)
-                                    {
-                                        // Stack merge
-                                        int total = dst.Stack + qty;
-                                        if (total <= dst.MaxStack)
-                                        {
-                                            petInv[destSlot] = new SR_Item()
-                                            {
-                                                RefItemID = dst.RefItemID,
-                                                CodeName128 = dst.CodeName128,
-                                                Stack = total,
-                                                MaxStack = dst.MaxStack
-                                            };
-                                            
-                                            petInv.TryRemove(srcSlot, out _);
-                                        }
-                                        else
-                                        {
-                                            int remainder = total - dst.MaxStack;
-                                            petInv[destSlot] = new SR_Item()
-                                            {
-                                                RefItemID = dst.RefItemID,
-                                                CodeName128 = dst.CodeName128,
-                                                Stack = dst.MaxStack,
-                                                MaxStack = dst.MaxStack
-                                            };
-                                            petInv[srcSlot] = new SR_Item()
-                                            {
-                                                RefItemID = src.RefItemID,
-                                                CodeName128 = src.CodeName128,
-                                                Stack = remainder,
-                                                MaxStack = src.MaxStack
-                                            };
-                                        }
-                                    }
-                                    else if (dst.RefItemID != 0)
-                                    {
-                                        // Swap
-                                        petInv[destSlot] = src;
-                                        petInv[srcSlot] = dst;
-                                    }
-                                    else
-                                    {
-                                        // Move to empty slot
-                                        petInv[destSlot] = src;
-                                        petInv.TryRemove(srcSlot, out _);
-                                    }
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.AvatarToInventory:        // 0x23
-                            {
-                                byte avatarSlot = packet.ReadByte();
-                                byte playerSlot = packet.ReadByte();
-                                ushort qty = packet.ReadUShort();
-                                byte unk = packet.ReadByte();
-
-                                if (inv.Avatars.TryGetValue(avatarSlot, out var avatarItem))
-                                {
-                                    inv.Slots[playerSlot] = avatarItem;
-                                    inv.Avatars.TryRemove(avatarSlot, out _);
-                                    Logger.Debug("ItemMoveHandler", $"Unequipped avatar {avatarItem.CodeName128} slot {avatarSlot} → inventory slot {playerSlot}");
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.InventoryToAvatar:        // 0x24
-                            {
-                                byte playerSlot = packet.ReadByte();
-                                byte avatarSlot = packet.ReadByte();
-                                ushort qty = packet.ReadUShort();
-                                byte unk = packet.ReadByte();
-
-                                if (inv.Slots.TryGetValue(playerSlot, out var item))
-                                {
-                                    if (inv.Avatars.TryGetValue(avatarSlot, out var oldAvatar))
-                                        inv.Slots[playerSlot] = oldAvatar;
-                                    else
-                                        inv.Slots.TryRemove(playerSlot, out _);
-
-                                    inv.Avatars[avatarSlot] = item;
-                                    Logger.Debug("ItemMoveHandler", $"Equipped avatar {item.CodeName128} slot {playerSlot} → avatar slot {avatarSlot}");
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.InventoryToStorage:       // 0x02
-                            {
-                                byte playerSlot = packet.ReadByte();
-                                byte storageSlot = packet.ReadByte();
-
-                                if (inv.Slots.TryGetValue(playerSlot, out var item))
-                                {
-                                    inv.Storage[storageSlot] = item;
-                                    inv.Slots.TryRemove(playerSlot, out _);
-                                    Logger.Debug("ItemMoveHandler", $"Deposited {item.CodeName128} slot {playerSlot} → storage slot {storageSlot}");
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.StorageToInventory:       // 0x03
-                            {
-                                byte storageSlot = packet.ReadByte();
-                                byte playerSlot = packet.ReadByte();
-
-                                if (inv.Storage.TryGetValue(storageSlot, out var item))
-                                {
-                                    inv.Slots[playerSlot] = item;
-                                    inv.Storage.TryRemove(storageSlot, out _);
-                                    Logger.Debug("ItemMoveHandler", $"Withdrew {item.CodeName128} storage slot {storageSlot} → slot {playerSlot}");
-                                }
-                                else
-                                {
-                                    Logger.Warn("ItemMoveHandler", $"Withdrew unknown item from storage slot {storageSlot} → slot {playerSlot}");
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.StorageToStorage:         // 0x01
-                            {
-                                byte srcSlot = packet.ReadByte();
-                                byte destSlot = packet.ReadByte();
-                                ushort qty = packet.ReadUShort();
-
-                                if (inv.Storage.TryGetValue(srcSlot, out var src))
-                                {
-                                    inv.Storage.TryGetValue(destSlot, out var dst);
-
-                                    if (dst.RefItemID != 0)
-                                    {
-                                        inv.Storage[destSlot] = src;
-                                        inv.Storage[srcSlot] = dst;
-                                    }
-                                    else
-                                    {
-                                        inv.Storage[destSlot] = src;
-                                        inv.Storage.TryRemove(srcSlot, out _);
-                                    }
-                                    Logger.Debug("ItemMoveHandler", $"Storage move: {src.CodeName128} slot {srcSlot} → slot {destSlot}");
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.InventoryToGround:        // 0x07
-                            {
-                                byte playerSlot = packet.ReadByte();
-
-                                if (inv.Slots.TryGetValue(playerSlot, out var item))
-                                {
-                                    inv.Slots.TryRemove(playerSlot, out _);
-                                    Logger.Debug("ItemMoveHandler", $"Dropped {item.CodeName128} from slot {playerSlot}");
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.ItemMallToInventory:      // 0x18
-                            {
-                                ushort shopGroup = packet.ReadUShort();
-                                byte mallTab = packet.ReadByte(); // tab
-                                byte mallSlot = packet.ReadByte(); // slot
-                                byte mallItemInfo = packet.ReadByte(); // useless
-                                byte slotCount = packet.ReadByte(); // Sometimes a quantity of 5, will be given to you spread across 5 slots. So the 5 first open slots, and fills in any gaps, doesnt move anything around.
-
-                                var toSlots = new List<byte>();
-                                for (int i = 0; i < slotCount; i++)
-                                    toSlots.Add(packet.ReadByte());
-
-                                ushort quantity = packet.ReadUShort();
-
-                                Logger.Debug("ItemMoveHandler",
-                                    $"Mall buy: tab={mallTab} slot={mallSlot} qty={quantity} → slots [{string.Join(",", toSlots)}]");
-                                if (Overseer.MallLookup.TryGetValue((mallTab, mallSlot), out var item))
-                                {
-                                    foreach (var slot in toSlots)
-                                    {
-                                        inv.Slots[slot] = new SR_Item()
-                                        {
-                                            RefItemID = item.ID,
-                                            CodeName128 = item.CodeName,
-                                            Stack = quantity,
-                                            MaxStack = item.MaxStack
-                                        };
-                                    }
-                                }
-                                else
-                                {
-                                    Logger.Warn("ItemMoveHandler",
-                                        $"MALL unresolved tabID={mallTab} slot={mallSlot}");
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.GameServerToInventory:    // 0x0E
-                            {
-                                ushort slot = packet.ReadUShort();
-                                uint padding = packet.ReadUInt();
-                                uint itemObjId = packet.ReadUInt();
-                                byte quantity = packet.ReadByte();
-
-                                var res = await DBConnect.GetItemRecord(itemObjId);
-                                if (res.success)
-                                {
-                                    inv.Slots[(byte)slot] = new SR_Item()
-                                    {
-                                        RefItemID = (int)itemObjId,
-                                        CodeName128 = res.item!.CodeName,
-                                        Stack = quantity,
-                                        MaxStack = res.item.MaxStack
-                                    };
-                              
-                                    Logger.Debug("GameServerToInventory:ItemMoveHandler",
-                                        $"GS->Inv move slot={slot}, uid={itemObjId}, qty={quantity}, name={res.item.CodeName}");
-                                }
-                                else
-                                {
-                                    Logger.Warn("GameServerToInventory:ItemMoveHandler",
-                                        $"Item record failed for uid {itemObjId} (slot {slot})");
-
-                                    inv.Slots[(byte)slot] = new SR_Item()
-                                    {
-                                        RefItemID = (int)itemObjId,
-                                        CodeName128 = $"UNKNOWN_{itemObjId}",
-                                        Stack = quantity,
-                                        MaxStack = 500
-                                    }; 
-                                }
-                                break;
-                            }
-
-                        case ItemMovement.InventoryToGameServer:    // 0x0F
-                            {
-
-                                byte playerSlot = packet.ReadByte();
-
-                                if (inv.Slots.TryRemove(playerSlot, out var item))
-                                {
-                                    Logger.Debug("ItemMoveHandler",
-                                        $"I→G move: {item.CodeName128} slot={playerSlot}");
-                                }
-
-                                break;
-                            }
-                    }
+                    Logger.Warn("ItemMoveHandler",
+                        $"B034 ShopToInventory result=0x{result:X2} — buy failed server-side, suppressed with no fake");
+                    return;
                 }
-                catch (Exception ex)
+
+                // Parse ShopToInventory payload
+                byte shopTab   = pkt.ReadByte();
+                byte shopSlot  = pkt.ReadByte();
+                byte slotCount = pkt.ReadByte();
+                var toSlots    = new List<byte>(slotCount);
+                for (int i = 0; i < slotCount; i++) toSlots.Add(pkt.ReadByte());
+                ushort quantity = pkt.ReadUShort();
+
+                Logger.Info("ItemMoveHandler",
+                    $"B034 ShopToInventory suppressed — building fake GroundToInventory " +
+                    $"(shopTab={shopTab} shopSlot={shopSlot} qty={quantity} → inv slots [{string.Join(",", toSlots)}])");
+
+                // Resolve refItemId via ShopLookup (npcObjId → tab → slot → item)
+                uint npcObjId = 0;
+                if (e.Proxy.Session.SpawnedObjects.TryGetValue(e.Proxy.Session.LastTargetUID, out var spawnInfo))
+                    npcObjId = spawnInfo.RefObjID;
+
+                if (!Overseer.ShopLookup.TryGetValue(((int)npcObjId, shopTab, shopSlot), out var shopItem))
                 {
-                    Logger.Error("ItemMoveHandler", ex.Message);
+                    Logger.Warn("ItemMoveHandler",
+                        $"B034 fake pickup: ShopLookup miss — npcObjId={npcObjId} tab={shopTab} slot={shopSlot} — fake not sent, client inventory display will be stale until relog");
+                    return;
+                }
+
+                // DB lookup for T-values
+                var itemInfo = await DBConnect.GetItemRecord((uint)shopItem.RefItemID);
+                if (!itemInfo.success)
+                {
+                    Logger.Warn("ItemMoveHandler",
+                        $"B034 fake pickup: DB lookup failed for refItemId={shopItem.RefItemID} ({shopItem.CodeName}) — fake not sent");
+                    return;
+                }
+
+                // Build one fake GroundToInventory (0x06) per destination slot
+                foreach (var invSlot in toSlots)
+                {
+                    try
+                    {
+                        var fake = new Packet(Constant.SERVER_ITEM_MOVEMENT);
+                        fake.WriteByte(0x01);                          // success
+                        fake.WriteByte(0x06);                          // GroundToInventory (no shop UI needed)
+                        fake.WriteByte(invSlot);                       // destination inventory slot
+                        fake.WriteUInt(0);                             // rentType = 0
+                        fake.WriteUInt((uint)shopItem.RefItemID);      // item ref ID
+
+                        if (itemInfo.item.T2 == 3) // ETC / consumable
+                        {
+                            fake.WriteUShort(quantity);
+                            if (itemInfo.item.T3 == 11 && itemInfo.item.T4 == 1)
+                                fake.WriteByte(0); // extra byte for certain special items
+                            else if (itemInfo.item.T3 == 14)
+                                fake.WriteByte(0); // cm = 0 (no magic-option list)
+                        }
+                        else
+                        {
+                            Logger.Warn("ItemMoveHandler",
+                                $"B034 fake pickup: unsupported T2={itemInfo.item.T2} for {shopItem.CodeName} — skipping slot {invSlot}");
+                            continue;
+                        }
+
+                        e.Proxy.Client.Send(fake);
+                        Logger.Info("ItemMoveHandler",
+                            $"B034 fake GroundToInventory sent: {shopItem.CodeName} x{quantity} → client slot {invSlot} " +
+                            $"(T2={itemInfo.item.T2} T3={itemInfo.item.T3} T4={itemInfo.item.T4})");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error("ItemMoveHandler",
+                            $"B034 fake pickup: send failed for slot {invSlot}: {ex.Message}");
+                    }
                 }
             });
         }
         public static void RegisterItemUseHandler(Server _agentProxy)
         {
-            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_ITEM_USE, (sender, e) =>
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_ITEM_USE, async (sender, e) =>
             {
                 try
                 {
-                    var packet = e.Packet.Clone();
+                    var data = PacketParser.ParseItemUse(e.Packet.Clone());
+                    if (data == null) return;
 
-                    byte result = packet.ReadByte();
-                    byte slot = packet.ReadByte();
-
-                    if (result != 1)
+                    if (data.Result != 1)
                     {
-                        if (result == 2)
-                        {
-                            // Server Denied Flag
-                            Logger.Debug("ItemUseHandler", "Use of the item was denied by the server.");
-                            return;
-                        }
-
-                        Logger.Debug("ItemUseHandler",
-                            $"Non-standard ITEM_USE, most likely denied. result={result} | slot={slot} | remaining bytes={packet.RemainingRead()}");
+                        if (data.Result == 2)
+                            Log("ItemUseHandler", "Use of the item was denied by the server.");
+                        else
+                            Log("ItemUseHandler", $"Non-standard ITEM_USE result={data.Result} | slot={data.Slot}");
                         return;
                     }
 
-                    ushort remainingStack = packet.ReadUShort();
-                    ushort unk = packet.ReadUShort(); // required to be synchronized
-
-                    Logger.Debug("ItemUseHandler",
-                        $"result={result} | slot={slot} | remainingStack={remainingStack}");
+                    Log("ItemUseHandler", $"result={data.Result} | slot={data.Slot} | remainingStack={data.RemainingStack}");
 
                     var inv = e.Proxy.Session!.Inventory;
-
-                    if (!inv.Slots.TryGetValue(slot, out var item))
+                    if (!inv.Slots.TryGetValue(data.Slot, out var item))
                         return;
 
-                    if (remainingStack == 0)
-                    {
-                        inv.Slots.TryRemove(slot, out _);
+                    await AchievementService.OnItemUsed(e.Proxy.Session?.CharacterName!, item.CodeName128 ?? string.Empty, e.Proxy);
 
-                        Logger.Debug("ItemUseHandler", $"Removed item from slot {slot} (stack reached 0)");
+                    if (data.RemainingStack == 0)
+                    {
+                        inv.Slots.TryRemove(data.Slot, out _);
+                        Log("ItemUseHandler", $"Removed item from slot {data.Slot} (stack reached 0)");
                     }
                     else
                     {
-                        inv.Slots[slot] = new SR_Item()
+                        inv.Slots[data.Slot] = new SR_Item()
                         {
                             RefItemID = item.RefItemID,
                             CodeName128 = item.CodeName128,
-                            Stack = remainingStack,
+                            Stack = data.RemainingStack,
                             MaxStack = item.MaxStack
                         };
                     }
@@ -1292,211 +587,24 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
         }
         public static void RegisterCosSpawnHandler(Server _agentProxy)
         {
-            async Task ParseCosPage(Packet packet, byte itemCount, uint petUID, InventoryTracker inv)
-            {
-                var pet = inv.Pets[petUID];
-                for (int i = 0; i < itemCount; i++)
-                {
-                    byte indexByte = packet.ReadByte();
-                    packet.ReadUInt(); // padding
-                    uint refItemId = packet.ReadUInt();
-                    byte slot = (byte)(indexByte + 1);
-
-                    var itemInfoResult = await DBConnect.GetItemRecord(refItemId);
-                    if (!itemInfoResult.success)
-                    {
-                        Logger.Warn("CosSpawn", $"0x30C9 unknown refObjID 0x{refItemId:X} at slot {slot}");
-                        break;
-                    }
-
-                    var item = itemInfoResult.item;
-                    ushort finalStack = 1;
-
-                    if (item!.T2 == 3)
-                    {
-                        finalStack = packet.ReadUShort();
-                        if (finalStack == 0) finalStack = 1;
-                        if (item.CodeName.Contains("ATTRSTONE"))
-                            packet.ReadByte(); // assimilation byte
-
-                    }
-                    else if (item.T2 == 1)
-                    {
-                        packet.ReadByte();
-                        packet.ReadULong();
-                        packet.ReadUInt();
-                        byte magCount = packet.ReadByte();
-                        for (int m = 0; m < magCount; m++) { packet.ReadUInt(); packet.ReadUInt(); }
-                        packet.ReadByte();
-                        byte scCount = packet.ReadByte();
-                        for (int s = 0; s < scCount; s++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
-                        packet.ReadByte();
-                        byte acCount = packet.ReadByte();
-                        for (int a = 0; a < acCount; a++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
-                    }
-                    else
-                    {
-                        Logger.Warn("CosSpawn", $"0x30C9 unhandled T2={item.T2} for {item.CodeName} at slot {slot}");
-                        break;
-                    }
-                    Logger.Debug("CosSpawn", $"0x30C9 Pet 0x{petUID:X} Slot [{slot}] {item.CodeName} ({finalStack}/{item.MaxStack}) | remaining={packet.RemainingRead()}");
-                    pet.Inventory[slot] = new SR_Item()
-                    {
-                        RefItemID = (int)refItemId,
-                        CodeName128 = item.CodeName,
-                        Stack = finalStack,
-                        MaxStack = item.MaxStack
-                    };
-                        
-                    Logger.Debug("CosSpawn", $"0x30C9 Pet 0x{petUID:X} Slot [{slot}] {item.CodeName} ({finalStack}/{item.MaxStack})");
-                }
-
-                if (packet.RemainingRead() > 0)
-                {
-                    var tail = new List<string>();
-                    while (packet.RemainingRead() > 0)
-                        tail.Add(packet.ReadByte().ToString("X2"));
-                    Logger.Debug("CosSpawn", $"0x30C9 trailing bytes: {string.Join(" ", tail)}");
-                }
-            }
-
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_ANIMATION_COS_SPAWN, async (sender, e) =>
             {
                 try
                 {
-                    var packet = e.Packet;
                     var inv = e.Proxy.Session!.Inventory;
+                    var result = await PacketParser.ParseCOSSpawn(e.Packet.Clone());
+                    if (result?.Pet == null) return;
 
-                    uint petUID = packet.ReadUInt();
-                    uint refObjID = packet.ReadUInt();
-                    packet.ReadUInt(); // stat1
-                    packet.ReadUInt(); // stat2
-                    packet.ReadUInt(); // stat3
+                    inv.Pets[result.PetUID] = result.Pet;
+                    e.Proxy.Session!.ActivePetUID = result.PetUID;
 
-                    var petObjInfo = await DBConnect.GetItemRecord(refObjID);
-                    if (!petObjInfo.success)
+                    if (!result.IsAttackPet && inv.PendingCosPages.TryRemove(result.PetUID, out var pending))
                     {
-                        Logger.Warn("CosSpawn", $"Unknown refObjID 0x{refObjID:X} for pet 0x{petUID:X}");
-                        return;
-                    }
-
-                    bool isAttackPet = petObjInfo.item!.T4 == 3;
-                    Logger.Debug("CosSpawn", $"Pet 0x{petUID:X} refObjID=0x{refObjID:X} T4={petObjInfo.item.T4} isAttack={isAttackPet} remaining={packet.RemainingRead()}");
-
-                    if (isAttackPet)
-                    {
-                        packet.ReadUInt();
-                        packet.ReadByte();
-                        packet.ReadUInt();
-                        packet.ReadUShort();
-                        string attackPetName = packet.ReadAscii();
-                        packet.ReadByte();
-
-                        Logger.Debug("CosSpawn", $"Attack pet 0x{petUID:X} name='{attackPetName}'");
-
-                        inv.Pets[petUID] = new Pet
-                        {
-                            Uid = petUID,
-                            Info = new PetInfo
-                            {
-                                Name = string.IsNullOrEmpty(attackPetName) ? "No name" : attackPetName,
-                                IsAttackPet = true,
-                                CodeName = petObjInfo.item.CodeName,
-                                ReadableName = GameObjectNameResolver.Resolve(petObjInfo.item.CodeName)
-                            },
-                            Inventory = new ConcurrentDictionary<byte, SR_Item>()
-                        };
-
-                        e.Proxy.Session!.ActivePetUID = petUID;
-                        return;
-                    }
-
-                    // Pickup / growth pet
-                    string petName = packet.ReadAscii();
-                    byte invSize = packet.ReadByte();
-                    byte itemCount = packet.ReadByte();
-
-                    Logger.Debug("CosSpawn", $"Pet 0x{petUID:X} name='{(string.IsNullOrEmpty(petName) ? "No name" : petName)}' invSize={invSize} itemCount={itemCount}");
-
-                    var petSlots = new ConcurrentDictionary<byte, SR_Item>();
-
-                    for (int i = 0; i < itemCount; i++)
-                    {
-                        byte indexByte = packet.ReadByte();
-                        packet.ReadUInt();
-                        uint refItemId = packet.ReadUInt();
-                        byte slot = (byte)(indexByte + 1);
-
-                        var itemInfoResult = await DBConnect.GetItemRecord(refItemId);
-                        if (!itemInfoResult.success)
-                        {
-                            Logger.Warn("CosSpawn", $"Unknown item refObjID 0x{refItemId:X} at slot {slot}");
-                            break;
-                        }
-
-                        var item = itemInfoResult.item;
-                        ushort finalStack = 1;
-
-                        if (item!.T2 == 3)
-                        {
-                            finalStack = packet.ReadUShort();
-                            if (item.CodeName.Contains("ATTRSTONE") || item.CodeName.Contains("MAGICSTONE"))
-                                packet.ReadByte();
-                        }
-                        else if (item.T2 == 1)
-                        {
-                            packet.ReadByte();
-                            packet.ReadULong();
-                            packet.ReadUInt();
-                            byte magCount = packet.ReadByte();
-                            for (int m = 0; m < magCount; m++) { packet.ReadUInt(); packet.ReadUInt(); }
-                            packet.ReadByte();
-                            byte scCount = packet.ReadByte();
-                            for (int s = 0; s < scCount; s++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
-                            packet.ReadByte();
-                            byte acCount = packet.ReadByte();
-                            for (int a = 0; a < acCount; a++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
-                        }
-                        else
-                        {
-                            Logger.Warn("CosSpawn", $"Unhandled T2={item.T2} for item 0x{refItemId:X} ({item.CodeName}) at slot {slot}");
-                            break;
-                        }
-
-                        petSlots[slot] = new SR_Item()
-                        {
-                            RefItemID = (int)refItemId,
-                            CodeName128 = item.CodeName,
-                            Stack = finalStack,
-                            MaxStack = item.MaxStack
-                        };
-                        Logger.Debug("CosSpawn", $"Pet 0x{petUID:X} Slot [{slot}] {item.CodeName} ({finalStack}/{item.MaxStack})");
-                    }
-
-                    // Consume trailing 5 bytes
-                    packet.ReadUInt(); // linked UID
-                    packet.ReadByte(); // unknown
-
-                    inv.Pets[petUID] = new Pet
-                    {
-                        Uid = petUID,
-                        Info = new PetInfo
-                        {
-                            Name = string.IsNullOrEmpty(petName) ? "No name" : petName,
-                            IsAttackPet = false,
-                            CodeName = petObjInfo.item.CodeName,
-                            ReadableName = GameObjectNameResolver.Resolve(petObjInfo.item.CodeName)
-                        },
-                        Inventory = petSlots
-                    };
-
-                    e.Proxy.Session!.ActivePetUID = petUID;
-                    Logger.Debug("CosSpawn", $"Successfully parsed pet 0x{petUID:X} with {petSlots.Count} items");
-
-                    if (inv.PendingCosPages.TryRemove(petUID, out var pending))
-                    {
-                        Logger.Debug("CosSpawn", $"Draining pending 0x30C9 for pet 0x{petUID:X}");
-                        await ParseCosPage(pending.Packet, pending.ItemCount, petUID, inv);
+                        Log("CosSpawn", $"Draining pending 0x30C9 for pet 0x{result.PetUID:X}");
+                        var pageItems = await PacketParser.ParseCosPage(pending.Packet, pending.ItemCount);
+                        if (pageItems != null)
+                            foreach (var kvp in pageItems)
+                                inv.Pets[result.PetUID].Inventory[kvp.Key] = kvp.Value;
                     }
                 }
                 catch (Exception ex)
@@ -1507,44 +615,50 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_ANIMATION_COS_REMOVE_MENU, async (sender, e) =>
             {
-                var packet = e.Packet.Clone();
-                uint petUID = packet.ReadUInt();
-                byte type = packet.ReadByte();
-
-                var inv = e.Proxy.Session!.Inventory;
-                inv.Pets.TryGetValue(petUID, out var pet);
-                string petName = pet?.Info.Name ?? $"0x{petUID:X}";
-
-                if (type == 1)
+                try
                 {
-                    inv.Pets.TryRemove(petUID, out _);
-                    if (e.Proxy.Session?.ActivePetUID == petUID)
-                        e.Proxy.Session.ActivePetUID = 0;
-                    Logger.Debug("CosDespawnHandler", $"Pet {petName} despawned and removed");
-                    return;
-                }
+                    var packet = e.Packet.Clone();
+                    var inv = e.Proxy.Session!.Inventory;
 
-                if (type == 2 && packet.RemainingRead() == 0)
-                {
-                    Logger.Debug("CosDespawnHandler", $"Pet {petName} state change (recalled)");
-                    return;
-                }
+                    var result = PacketParser.ParseCOSDespawn(packet);
+                    if (result == null) return;
 
-                if (type == 2 && packet.RemainingRead() > 0)
-                {
-                    packet.ReadByte();              // 0x70 — unknown
-                    byte pageItemCount = packet.ReadByte(); // 0x0F = item count for this page
+                    inv.Pets.TryGetValue(result.PetUID, out var pet);
+                    string petName = pet?.Info.Name ?? $"0x{result.PetUID:X}";
 
-                    Logger.Debug("CosSpawn", $"0x30C9 inventory page for pet 0x{petUID:X} | pageItemCount={pageItemCount} remaining={packet.RemainingRead()}");
-
-                    if (pet == null)
+                    if (result.Type == 1)
                     {
-                        Logger.Debug("CosSpawn", $"0x30C9 arrived early for 0x{petUID:X}, queuing");
-                        inv.PendingCosPages[petUID] = (packet, pageItemCount);
+                        inv.Pets.TryRemove(result.PetUID, out _);
+                        if (e.Proxy.Session?.ActivePetUID == result.PetUID)
+                            e.Proxy.Session.ActivePetUID = 0;
+                        Log("CosDespawnHandler", $"Pet {petName} despawned and removed");
                         return;
                     }
 
-                    await ParseCosPage(packet, pageItemCount, petUID, inv);
+                    if (result.Type == 2 && !result.HasInventoryPage)
+                    {
+                        Log("CosDespawnHandler", $"Pet {petName} state change (recalled)");
+                        return;
+                    }
+
+                    if (result.Type == 2 && result.HasInventoryPage)
+                    {
+                        if (pet == null)
+                        {
+                            Log("CosSpawn", $"0x30C9 arrived early for 0x{result.PetUID:X}, queuing");
+                            inv.PendingCosPages[result.PetUID] = (packet, result.PageItemCount);
+                            return;
+                        }
+
+                        var pageItems = await PacketParser.ParseCosPage(packet, result.PageItemCount);
+                        if (pageItems != null)
+                            foreach (var kvp in pageItems)
+                                pet.Inventory[kvp.Key] = kvp.Value;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("CosDespawnHandler", $"Error parsing 0x30C9: {ex.Message}");
                 }
             });
         }
@@ -1554,36 +668,22 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             {
                 try
                 {
-                    var packet = e.Packet;
-                    int size = packet.RemainingRead();
+                    var data = PacketParser.ParseNewGoldAmount(e.Packet.Clone());
+                    if (data == null) return;
+
                     var session = e.Proxy.Session;
 
-                    if (size == 10)
+                    if (data.Flag == 0x01)
                     {
-                        byte flag = packet.ReadByte();
-                        if (flag != 0x01) return;
-
-                        ulong gold = packet.ReadULong();
-                        packet.ReadByte();
-
-                        e.Proxy.Session!.PlayerStats!.RemainingGold = gold;
-                        DllBridge.Instance.SendToDll(session.AccountName!, "gold_update", new { remainGold = gold });
-                        await AchievementService.OnGoldChanged(e.Proxy.Session!.CharacterName, (long)gold, e.Proxy);
-                        Logger.Debug("GoldUpdateHandler", $"Gold → {gold}");
-
+                        e.Proxy.Session!.PlayerStats!.RemainingGold = data.Gold;
+                        DllBridge.Instance.SendToDll(session!.AccountName!, "gold_update", new { remainGold = data.Gold });
+                        await AchievementService.OnGoldChanged(e.Proxy.Session!.CharacterName, (long)data.Gold, e.Proxy);
+                        Log("GoldUpdateHandler", $"Gold → {data.Gold}");
                     }
-                    else if (size == 6)
+                    else if (data.Flag == 0x02)
                     {
-                        byte flag = packet.ReadByte();
-                        uint value = packet.ReadUInt();
-                        packet.ReadByte();
-
-                        if (flag == 0x02)
-                        {
-                            e.Proxy.Session!.PlayerStats!.RemainingSkillPoints = value;
-                            Logger.Debug("SkillPointHandler", $"Skill points → {value}");
-                        }
-                        
+                        e.Proxy.Session!.PlayerStats!.RemainingSkillPoints = data.SkillPoints;
+                        Log("SkillPointHandler", $"Skill points → {data.SkillPoints}");
                     }
                 }
                 catch (Exception ex)
@@ -1596,22 +696,16 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
         {
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_HPMP_UPDATE, (sender, e) =>
             {
-                
-                var packet = e.Packet;
-                uint targetUID = packet.ReadUInt();
+                var data = PacketParser.ParseHPMPUpdate(e.Packet.Clone());
+                if (data == null) return;
 
-                if (targetUID != e.Proxy.Session?.CharacterUID)
+                if (data.TargetUID != e.Proxy.Session?.CharacterUID)
                     return;
 
-                byte flags = packet.ReadByte();
-                byte unk = packet.ReadByte();
-                byte statType = packet.ReadByte();
-                uint value = packet.ReadUInt();
-
-                if (statType == 0x01)
-                    e.Proxy.Session.PlayerStats!.CurrentHP = value;
-                else if (statType == 0x02)
-                    e.Proxy.Session.PlayerStats!.CurrentMP = value;
+                if (data.StatType == 0x01)
+                    e.Proxy.Session.PlayerStats!.CurrentHP = data.Value;
+                else if (data.StatType == 0x02)
+                    e.Proxy.Session.PlayerStats!.CurrentMP = data.Value;
             });
         }
         public static void RegisterStorageHandler(Server _agentProxy)
@@ -1620,69 +714,13 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             {
                 try
                 {
-                    var packet = e.Packet;
+                    var data = await PacketParser.ParseStorageItems(e.Packet.Clone());
+                    if (data == null) return;
+
                     var inv = e.Proxy.Session!.Inventory;
                     inv.Storage.Clear();
-
-                    byte storageSize = packet.ReadByte();
-                    byte itemCount = packet.ReadByte();
-
-                    Logger.Debug("StorageHandler", $"Storage opened: size={storageSize} items={itemCount}");
-
-                    for (int i = 0; i < itemCount; i++)
-                    {
-                        byte slot = packet.ReadByte();
-                        uint rentType = packet.ReadUInt();
-                        if (rentType == 1) { packet.ReadUShort(); packet.ReadUInt(); packet.ReadUInt(); }
-                        else if (rentType == 2) { packet.ReadUShort(); packet.ReadUShort(); packet.ReadUInt(); }
-                        else if (rentType == 3) { packet.ReadUShort(); packet.ReadUInt(); packet.ReadUInt(); packet.ReadUShort(); packet.ReadUInt(); }
-
-                        uint refItemId = packet.ReadUInt();
-                        var itemInfo = await DBConnect.GetItemRecord(refItemId);
-
-                        if (!itemInfo.success)
-                        {
-                            Logger.Warn("StorageHandler", $"DB MISS: refItemId={refItemId} slot={slot}");
-                            packet.ReadUShort();
-                            continue;
-                        }
-
-                        ushort finalStack = 1;
-
-                        if (itemInfo.item.T1 == 3)
-                        {
-                            if (itemInfo.item.T2 == 1) // Equipment
-                            {
-                                packet.ReadByte(); packet.ReadULong(); packet.ReadUInt();
-                                byte mag = packet.ReadByte();
-                                for (int p = 0; p < mag; p++) { packet.ReadUInt(); packet.ReadUInt(); }
-                                packet.ReadByte(); byte sc = packet.ReadByte();
-                                for (int j = 0; j < sc; j++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
-                                packet.ReadByte(); byte ac = packet.ReadByte();
-                                for (int j = 0; j < ac; j++) { packet.ReadByte(); packet.ReadUInt(); packet.ReadUInt(); }
-                            }
-                            else if (itemInfo.item.T2 == 3) // ETC
-                            {
-                                finalStack = packet.ReadUShort();
-                                if (itemInfo.item.T3 == 11 && itemInfo.item.T4 == 1)
-                                    packet.ReadByte();
-                                else if (itemInfo.item.T3 == 14)
-                                {
-                                    byte cm = packet.ReadByte();
-                                    for (int p = 0; p < cm; p++) { packet.ReadUInt(); packet.ReadUInt(); }
-                                }
-                            }
-                        }
-
-                        inv.Storage[slot] = new SR_Item()
-                        {
-                            RefItemID = (int)refItemId,
-                            CodeName128 = itemInfo.item.CodeName,
-                            Stack = finalStack,
-                            MaxStack = itemInfo.item.MaxStack
-                        };
-                        Logger.Debug("StorageHandler", $"Storage [{slot}] {itemInfo.item.CodeName} ({finalStack}/{itemInfo.item.MaxStack})");
-                    }
+                    foreach (var kvp in data.Storage)
+                        inv.Storage[kvp.Key] = kvp.Value;
                 }
                 catch (Exception ex)
                 {
@@ -1694,16 +732,25 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
         {
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_EXP, (sender, e) =>
             {
-                var packet = e.Packet.Clone();
-                var proxy = e.Proxy;
+                var data = PacketParser.ParseEXP(e.Packet.Clone());
+                if (data == null) return;
 
-                uint mobUID = packet.ReadUInt();
-                ulong exp = packet.ReadULong();
-                ulong sExp = packet.ReadULong();
+                var proxy = e.Proxy;
+                uint mobUID = data.MobUID;
+                ulong exp = data.Exp;
+                ulong sExp = data.SExp;
 
                 if (!e.Proxy.Session!.SpawnedObjects.TryGetValue(mobUID, out var spawnInfo))
                 {
-                    Logger.Debug("KillTracker", $"Missing refObjID for UID=0x{mobUID:X}, most likely NPC.");
+                    Log("KillTracker", $"Missing refObjID for UID=0x{mobUID:X} — GM exp or untracked source, still checking level-up.");
+                    _ = Task.Run(() =>
+                    {
+                        lock (proxy.Session!)
+                        {
+                            proxy.Session!.CumulativeExp += exp;
+                        }
+                        _ = Task.Run(() => PlayerTools.CheckLevelUp(proxy));
+                    });
                     return;
                 }
 
@@ -1734,7 +781,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                     if (!result.codeName.StartsWith("NPC"))
                     {
-                        Logger.Debug("KillTracker",
+                        Log("KillTracker",
                             $"{proxy.Session?.CharacterName} killed mob {GameObjectNameResolver.Resolve(result.codeName)}");
                     }
 
@@ -1759,25 +806,19 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             {
                 try
                 {
-                    var packet = e.Packet.Clone();
-                    var proxy = e.Proxy;
+                    var data = PacketParser.ParseSTRUpdate(e.Packet.Clone());
+                    if (data == null) return;
 
-                    byte result = packet.ReadByte();
-
-                    if (result != 0)
+                    if (data.Result != 0)
                     {
-                        if (proxy.Session != null)
-                        {
-                            proxy.Session.PlayerStats!.UnusedStatPoints--;
-                        }
+                        if (e.Proxy.Session != null)
+                            e.Proxy.Session.PlayerStats!.UnusedStatPoints--;
                         else
-                        {
-                            Logger.Error("STRHandler", $"Could not update STR on unkown user!");
-                        }
+                            Logger.Error("STRHandler", "Could not update STR on unknown user!");
                     }
                     else
                     {
-                        Logger.Debug("STRHandler", $"Could not update STR with a success flag of 0");
+                        Log("STRHandler", "Could not update STR with a success flag of 0");
                     }
                 }
                 catch (Exception ex)
@@ -1789,25 +830,19 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             {
                 try
                 {
-                    var packet = e.Packet.Clone();
-                    var proxy = e.Proxy;
+                    var data = PacketParser.ParseINTUpdate(e.Packet.Clone());
+                    if (data == null) return;
 
-                    byte result = packet.ReadByte();
-
-                    if (result != 0)
+                    if (data.Result != 0)
                     {
-                        if (proxy.Session != null)
-                        {
-                            proxy.Session.PlayerStats!.UnusedStatPoints--;
-                        }
+                        if (e.Proxy.Session != null)
+                            e.Proxy.Session.PlayerStats!.UnusedStatPoints--;
                         else
-                        {
-                            Logger.Error("INTHandler", $"Could not update STR on unkown user!");
-                        }
+                            Logger.Error("INTHandler", "Could not update INT on unknown user!");
                     }
                     else
                     {
-                        Logger.Debug("INTHandler", $"Could not update INT with a success flag of 0");
+                        Log("INTHandler", "Could not update INT with a success flag of 0");
                     }
                 }
                 catch (Exception ex)
@@ -1816,94 +851,155 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 }
             });
         }
+        public static void RegisterSkillLearnHandler(Server _agentProxy)
+        {
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_SKILLUPDATE, async (sender, e) =>
+            {
+                try
+                {
+                    var data = PacketParser.ParseSkillUpdate(e.Packet.Clone());
+                    if (data == null || !data.Success) return;
+
+                    uint newSkillId = data.SkillId;
+                    var session = e.Proxy.Session;
+                    if (session == null) return;
+
+                    var newSkillData = await DBConnect.GetSkillById(newSkillId);
+                    if (newSkillData == null)
+                    {
+                        Log("SkillLearnHandler", $"Unknown skill ID {newSkillId} in 0xB0A1");
+                        return;
+                    }
+
+                    // Find the old version in the active bot loops before mutating the list
+                    var oldAttack = session._attackLoop?.SkillsToUse.FirstOrDefault(s => s.Group == newSkillData.Group);
+                    var oldBuff   = session._attackLoop?.BuffsToUse.FirstOrDefault(s => s.Group == newSkillData.Group);
+
+                    // Replace in-place to preserve list order/priority
+                    if (oldAttack != null)
+                        session._attackLoop!.ReplaceSkillInUse(oldAttack.ID, newSkillData, false);
+                    if (oldBuff != null)
+                        session._attackLoop!.ReplaceSkillInUse(oldBuff.ID, newSkillData, true);
+                    if (oldAttack != null || oldBuff != null)
+                        session.SaveBotConfig();
+
+                    // Replace in learned skills list
+                    session.LearnedSkills.RemoveAll(s => s.Group == newSkillData.Group);
+                    session.LearnedSkills.Add(new SR_Skill
+                    {
+                        ID = newSkillData.ID,
+                        CodeName = newSkillData.CodeName,
+                        Group = newSkillData.Group,
+                        Level = newSkillData.Level,
+                        BasicActivity = newSkillData.BasicActivity,
+                        PreparingTime = newSkillData.PreparingTime,
+                        CastingTime = newSkillData.CastingTime,
+                        ActionDuration = newSkillData.ActionDuration,
+                        ReuseDelay = newSkillData.ReuseDelay,
+                        CoolTime = newSkillData.CoolTime,
+                        Range = newSkillData.Range,
+                        AutoAttackType = newSkillData.AutoAttackType,
+                        CanUseInTown = newSkillData.CanUseInTown,
+                        RequiresTarget = newSkillData.RequiresTarget,
+                        ConsumeHP = newSkillData.ConsumeHP,
+                        ConsumeMP = newSkillData.ConsumeMP,
+                        AIAttackChance = newSkillData.AIAttackChance,
+                        AISkillType = newSkillData.AISkillType,
+                        MoveSpeedPercent = newSkillData.MoveSpeedPercent,
+                        Params = newSkillData.Params,
+                        Enabled = true,
+                        ReadableName = newSkillData.ReadableName,
+                        IconFile = newSkillData.IconFile
+                    });
+
+                    // Re-sync the skill pool to the DLL
+                    DllBridge.Instance.SendToDll(session.AccountName!, "skill_pool_sync", new
+                    {
+                        skills = session.LearnedSkills
+                            .Where(s => s.Enabled)
+                            .Select(s => new { id = s.ID, name = s.ReadableName, passive = s.BasicActivity == 0, icon = s.IconFile })
+                    });
+                    session.PushSkillListsToDll(session.AccountName!);
+
+                    Log("SkillLearnHandler", $"Skill upgraded to ID {newSkillId} ({newSkillData.ReadableName})");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("SkillLearnHandler", $"Error: {ex.Message}");
+                }
+            });
+
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_MASTERYUPDATE, (sender, e) =>
+            {
+                try
+                {
+                    var packet = e.Packet;
+                    byte success = packet.ReadByte();
+                    if (success != 0x01) return;
+
+                    uint masteryId = packet.ReadUInt();
+                    byte newLevel = packet.ReadByte();
+
+                    Log("MasteryHandler", $"Mastery {masteryId} → level {newLevel}");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("MasteryHandler", $"Error: {ex.Message}");
+                }
+            });
+        }
         public static void RegisterServerMovementHandler(Server _agentProxy)
         {
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_MOVEMENT, (sender, e) =>
             {
-                var packet = e.Packet.Clone();
-
                 try
                 {
-                    uint uniqueId = packet.ReadUInt();
-                    bool hasMovement = packet.ReadByte() == 1;
+                    var data = PacketParser.ParseServerMovement(e.Packet.Clone());
+                    if (data == null || !data.HasMovement) return;
 
-                    if (!hasMovement)
+                    if (e.Proxy.Session != null && data.UniqueId == e.Proxy.Session.CharacterUID)
                     {
-                        //Logger.Debug("B021", $"UID=0x{uniqueId:X8} hasMovement=false — skipping");
-                        return;
-                    }
-
-                    ushort regionId = packet.ReadUShort();
-                    bool isDungeon = IsDungeon(regionId);
-
-                    uint rawX, rawY;
-                    int rawZ;
-                    if (isDungeon)
-                    {
-                        rawX = packet.ReadUInt();
-                        rawZ = packet.ReadInt();
-                        rawY = packet.ReadUInt();
-                    }
-                    else
-                    {
-                        rawX = packet.ReadUShort();
-                        rawZ = (int)packet.ReadShort();
-                        rawY = packet.ReadUShort();
-                    }
-
-                    bool hasDestination = packet.ReadByte() == 1;
-                    if (hasDestination)
-                    {
-                        packet.ReadUShort(); // dest region
-                        packet.ReadUShort();
-                        packet.ReadUShort();
-                        packet.ReadUShort();
-                    }
-
-                    byte sx = (byte)(regionId & 0xFF);
-                    byte sy = (byte)((regionId >> 8) & 0xFF);
-
-                    var (botPos, outSX, outSY) = BotPosition.FromRawOffsets(sx, sy, (float)(int)rawX, (float)(int)rawY, rawZ);
-                    int worldX = (int)botPos.X;
-                    int worldY = (int)botPos.Y;
-                    sx = outSX;
-                    sy = outSY;
-
-
-                    if (e.Proxy.Session != null &&
-                        uniqueId == e.Proxy.Session.CharacterUID)
-                    {
-                        e.Proxy.Session.RegionId = regionId;
-                        e.Proxy.Session.RawX = (short)rawX;
-                        e.Proxy.Session.RawY = (short)rawY;
-                        e.Proxy.Session.Z = (short)rawZ;
-                        e.Proxy.Session.SectorX = sx;
-                        e.Proxy.Session.SectorY = sy;
-                        e.Proxy.Session.WorldX = worldX;
-                        e.Proxy.Session.WorldY = worldY;
-                        e.Proxy.Session.RegionReadableName = RegionResolver.ResolveReadable(sx, sy, (short)regionId);
-                        e.Proxy.Session.RegionName = RegionResolver.Resolve((short)regionId, e.Proxy.Session!.SectorX, e.Proxy.Session!.SectorY); // The specific code name for dungeons, Qin-Shi with floors, or Stone Cave using Z based floor math. 
-                        e.Proxy.Session.LastMovementUpdate = DateTime.UtcNow;
-
-                        DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "movement_sync", new
+                        bool isZeroPos = (data.RegionId & 0x8000) == 0 && data.RawX == 0 && data.RawY == 0;
+                        if (isZeroPos)
                         {
-                            regionReadableName = e.Proxy.Session!.RegionReadableName,
-                            regionName = e.Proxy.Session!.RegionName,
-                            regionId = e.Proxy.Session!.RegionId,
-                            wX = worldX,
-                            wY = worldY,
-                            wZ = (short)rawZ,
-                            xSec = sx,
-                            ySec = sy,
-                        });
+                            e.CancelTransfer = true;
+                            Logger.Warn("B021", $"[{DateTime.UtcNow:HH:mm:ss.fff}] GUARDED (0,0) uid={data.UniqueId} region=0x{data.RegionId:X4} — session kept rawX={e.Proxy.Session.RawX} rawY={e.Proxy.Session.RawY} regionId=0x{e.Proxy.Session.RegionId:X4}");
+                        }
+                        else
+                        {
+                            e.Proxy.Session.RegionId = data.RegionId;
+                            e.Proxy.Session.Z = (short)data.WorldZ;
+                            e.Proxy.Session.SectorX = data.SectorX;
+                            e.Proxy.Session.SectorY = data.SectorY;
+                            e.Proxy.Session.WorldX = data.WorldX;
+                            e.Proxy.Session.WorldY = data.WorldY;
+                            if ((data.RegionId & 0x8000) == 0)
+                            {
+                                e.Proxy.Session.RawX = (short)data.RawX;
+                                e.Proxy.Session.RawY = (short)data.RawY;
+                                Logger.Debug("B021", $"[{DateTime.UtcNow:HH:mm:ss.fff}] pos uid={data.UniqueId} region=0x{data.RegionId:X4} rawX={data.RawX} rawY={data.RawY}");
+                            }
+                            e.Proxy.Session.LastMovementUpdate = DateTime.UtcNow;
+                            e.Proxy.Session.RegionReadableName = RegionResolver.ResolveReadable(data.SectorX, data.SectorY, (short)data.RegionId);
+                            e.Proxy.Session.RegionName = RegionResolver.Resolve((short)data.RegionId, data.SectorX, data.SectorY);
+
+                            DllBridge.Instance.SendToDll(e.Proxy.Session.AccountName!, "movement_sync", new
+                            {
+                                regionReadableName = e.Proxy.Session.RegionReadableName,
+                                regionName = e.Proxy.Session.RegionName,
+                                regionId = e.Proxy.Session.RegionId,
+                                wX = data.WorldX,
+                                wY = data.WorldY,
+                                wZ = (short)data.WorldZ,
+                                xSec = data.SectorX,
+                                ySec = data.SectorY,
+                            });
+                        }
                     }
-                    else if (e.Proxy.Session != null &&
-                        e.Proxy.Session.SpawnedObjects.ContainsKey(uniqueId))
+                    else if (e.Proxy.Session != null && e.Proxy.Session.SpawnedObjects.ContainsKey(data.UniqueId))
                     {
-                        e.Proxy.Session.SpawnedPositions[uniqueId] = (worldX, worldY);
+                        e.Proxy.Session.SpawnedPositions[data.UniqueId] = (data.WorldX, data.WorldY);
                     }
-
-
                 }
                 catch (Exception ex)
                 {
@@ -1911,97 +1007,196 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 }
             });
         }
+        /// <summary>
+        /// Blocks the game client's own 0x7021 move packets from reaching the server while
+        /// the pickup routine is running. The client independently heartbeats its last stored
+        /// destination, which fights the pickup loop's proxy-injected _sendMove commands and
+        /// causes the character to oscillate between the item and the prior position.
+        /// </summary>
+        public static void RegisterClientMovementSuppressor(Server _agentProxy)
+        {
+            _agentProxy.RegisterClientPacketHandler(Constant.CLIENT_MOVEMENT, (sender, e) =>
+            {
+                if (e.Proxy.Session?._attackLoop?.IsPickingUp == true)
+                {
+                    e.CancelTransfer = true;
+                    Logger.Debug("PickupMove", $"[{DateTime.UtcNow:HH:mm:ss.fff}] Blocked client 0x7021 during pickup");
+                }
+            });
+        }
+        /// <summary>
+        /// Handles the DLL client hello handshake. Fires before any session exists
+        /// (character select screen). Reads account name + client version from the packet,
+        /// cancels the transfer so the game server never sees it, and notifies the DLL
+        /// via DllBridge if the version is incompatible.
+        /// </summary>
+        public static void RegisterVersionCheckHandler(Server _agentProxy)
+        {
+            _agentProxy.RegisterClientPacketHandler(Constant.DEW_CLIENT_HELLO, (sender, e) =>
+            {
+                e.CancelTransfer = true;
+
+                try
+                {
+                    var packet = e.Packet.Clone();
+                    byte nameLen = packet.ReadByte();
+                    var nameBytes = new byte[nameLen];
+                    for (int i = 0; i < nameLen; i++) nameBytes[i] = packet.ReadByte();
+                    string accountName = System.Text.Encoding.ASCII.GetString(nameBytes);
+                    ushort clientVersion = packet.ReadUShort();
+
+                    string fmtExpected = $"{Constant.COMPAT_CLIENT / 100}.{Constant.COMPAT_CLIENT % 100:D2}";
+                    string fmtGot      = $"{clientVersion / 100}.{clientVersion % 100:D2}";
+
+                    if (clientVersion != Constant.COMPAT_CLIENT)
+                    {
+                        Logger.Warn("VersionCheck", $"Version mismatch for '{accountName}': client={fmtGot} required={fmtExpected}");
+                        DllBridge.Instance.SendToDll(accountName, "version_mismatch", new
+                        {
+                            expected = fmtExpected,
+                            got = fmtGot
+                        });
+                    }
+                    else
+                    {
+                        Logger.Info("VersionCheck", $"Client version OK for '{accountName}': v{fmtGot}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("VersionCheck", $"Failed to parse DEW_CLIENT_HELLO: {ex.Message}");
+                }
+            });
+        }
+
         public static void RegisterBuffHandler(Server _agentProxy)
         {
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_BUFF_START, (sender, e) =>
             {
-                var packet = e.Packet;
-                uint targetUID = packet.ReadUInt();
+                var data = PacketParser.ParseBuffStart(e.Packet.Clone());
+                if (data == null) return;
 
-                if (targetUID != e.Proxy.Session?.CharacterUID)
+                if (data.TargetUID != e.Proxy.Session?.CharacterUID)
                     return;
-
-                uint refSkillId = packet.ReadUInt();
-                uint timedJobId = packet.ReadUInt();
 
                 _ = Task.Run(async () =>
                 {
-                    var skill = await DBConnect.GetSkillById(refSkillId);
-                    if (skill == null) return;
+                    var cached = await DBConnect.GetSkillById(data.RefSkillId);
+                    if (cached == null) return;
 
-                    skill.TimedJobId = timedJobId;
+                    var entry = new SR_Skill
+                    {
+                        ID = cached.ID,
+                        CodeName = cached.CodeName,
+                        Group = cached.Group,
+                        Level = cached.Level,
+                        ReadableName = cached.ReadableName,
+                        BasicActivity = cached.BasicActivity,
+                        PreparingTime = cached.PreparingTime,
+                        CastingTime = cached.CastingTime,
+                        ActionDuration = cached.ActionDuration,
+                        ReuseDelay = cached.ReuseDelay,
+                        CoolTime = cached.CoolTime,
+                        Range = cached.Range,
+                        AutoAttackType = cached.AutoAttackType,
+                        CanUseInTown = cached.CanUseInTown,
+                        RequiresTarget = cached.RequiresTarget,
+                        ConsumeHP = cached.ConsumeHP,
+                        ConsumeMP = cached.ConsumeMP,
+                        AIAttackChance = cached.AIAttackChance,
+                        AISkillType = cached.AISkillType,
+                        MoveSpeedPercent = cached.MoveSpeedPercent,
+                        Params = cached.Params,
+                        Enabled = true,
+                        TimedJobId = data.TimedJobId
+                    };
 
-                    e.Proxy.Session!.Buffs.RemoveAll(b => b.ID == refSkillId);
-                    e.Proxy.Session!.Buffs.Add(skill);
+                    lock (e.Proxy.Session!.Buffs)
+                    {
+                        e.Proxy.Session!.Buffs.RemoveAll(b => b.ID == data.RefSkillId);
+                        e.Proxy.Session!.Buffs.Add(entry);
+                    }
 
-                    Logger.Debug("BuffHandler", $"Buff added: {skill.CodeName} TimedJobId={timedJobId} MoveSpeed={skill.MoveSpeedPercent}%");
+                    e.Proxy.Session!.ActiveBuffTimedJobToSkillId[data.TimedJobId] = data.RefSkillId;
+                    Log("BuffHandler", $"Buff added: {entry.CodeName} (ID={data.RefSkillId}) TimedJobId={data.TimedJobId}");
                 });
             });
 
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_BUFF_END, (sender, e) =>
             {
-                var packet = e.Packet;
-                byte unk = packet.ReadByte();
-                uint timedJobId = packet.ReadUInt();
+                var data = PacketParser.ParseBuffEnd(e.Packet.Clone());
+                if (data == null) return;
 
-                var removed = e.Proxy.Session?.Buffs.FirstOrDefault(b => b.TimedJobId == timedJobId);
-                if (removed != null)
+                lock (e.Proxy.Session!.Buffs)
                 {
-                    e.Proxy.Session!.Buffs.Remove(removed);
-                    Logger.Debug("BuffHandler", $"Buff removed: {removed.CodeName} TimedJobId={timedJobId}");
+                    var removed = e.Proxy.Session?.Buffs.FirstOrDefault(b => b.TimedJobId == data.TimedJobId);
+                    if (removed != null)
+                    {
+                        e.Proxy.Session!.Buffs.Remove(removed);
+                        Logger.Info("BuffHandler", $"Buff removed: {removed.CodeName} (ID={removed.ID}) TimedJobId={data.TimedJobId}");
+                    }
+                }
+
+                if (e.Proxy.Session!.ActiveBuffTimedJobToSkillId.TryRemove(data.TimedJobId, out uint expiredSkillId))
+                {
+                    e.Proxy.Session!._attackLoop?.ClearSkillCooldown(expiredSkillId);
+                    Logger.Info("BuffHandler", $"Buff expired: SkillId={expiredSkillId} TimedJobId={data.TimedJobId} — cooldown cleared");
                 }
             });
         }
-
-        #endregion
-
-        #region - Handler Registry (CUSTOM PACKETS)
-
         public static void RegisterAttackHandlers(Server _agentProxy)
         {
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_SKILL_ATTACK, (sender, e) =>
             {
                 try
                 {
-                    var packet = e.Packet;
-                    byte type = packet.ReadByte();
-                    byte status = packet.ReadByte();
-                    Logger.Trace("AttackHandler", $"0xB074 type={type:X2} status={status:X2}");
-                    e.Proxy.Session!._attackLoop?.OnSkillAttackResponse(type, status);
+                    var data = PacketParser.ParseSkillAttack(e.Packet.Clone());
+                    if (data == null) return;
+                    Log("AttackHandler", $"0xB074 type={data.Type:X2} status={data.Status:X2}");
+                    e.Proxy.Session!._attackLoop?.OnSkillAttackResponse(data.Type, data.Status);
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error("ServerAttack:0xb070", $"Error in SERVER_ATTACK!!!: {ex.Message}");
+                    Logger.Error("ServerAttack:0xb074", $"Error in SERVER_SKILL_ATTACK: {ex.Message}");
                 }
-                
             });
 
             _agentProxy.RegisterServerPacketHandler(Constant.SERVER_ATTACK, (sender, e) =>
             {
                 try
                 {
-                    var packet = e.Packet;
-                    if (packet.RemainingRead() < 19)
+                    var data = PacketParser.ParseAttack(e.Packet.Clone());
+                    if (data == null) return;
+                    if (data.IsShortVariant)
                     {
-                        Logger.Trace("AttackHandler", $"0xB070 short variant ({packet.RemainingRead()} bytes) — skipping");
+                        Log("AttackHandler", "0xB070 short variant — skipping");
                         return;
                     }
-                    packet.ReadByte();
-                    packet.ReadByte();
-                    packet.ReadByte();
-                    packet.ReadUInt();
-                    uint attackerUID = packet.ReadUInt();
-                    packet.ReadUInt();
-                    uint targetUID = packet.ReadUInt();
-                    Logger.Trace("AttackHandler", $"0xB070 attacker={attackerUID} target={targetUID}");
-                    e.Proxy.Session!._attackLoop?.OnAttackResult(attackerUID, targetUID);
+                    Log("AttackHandler", $"0xB070 attacker={data.AttackerUID} target={data.TargetUID}");
+                    e.Proxy.Session!._attackLoop?.OnAttackResult(data.AttackerUID, data.TargetUID);
+
+                    // A mob that attacks the player is provably within melee/skill range.
+                    var sess = e.Proxy.Session;
+                    if (sess != null
+                        && data.AttackerUID != sess.CharacterUID
+                        && data.TargetUID == sess.CharacterUID
+                        && sess.SpawnedObjects.ContainsKey(data.AttackerUID))
+                    {
+                        sess.SpawnedPositions[data.AttackerUID] = (sess.WorldX, sess.WorldY);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error("ServerAttack:0xb070", $"Error in SERVER_ATTACK!!!: {ex.Message}");
+                    Logger.Error("ServerAttack:0xb070", $"Error in SERVER_ATTACK: {ex.Message}");
                 }
             });
         }
+        
+        #endregion
+
+        #region - Handler Registry (CUSTOM PACKETS)
+
+        
         public static void RegisterClientSortHandler(Server _agentProxy)
         {
             _agentProxy.RegisterClientPacketHandler(Constant.DEW_SORT, (sender, e) =>
@@ -2287,9 +1482,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                 var codeNames = options.Select(o => o.CodeName);
                 var iconPaths = await DBConnect.GetItemIconPaths(codeNames);
-                Logger.Debug("OnPlayerLevelUp", $"Icon paths fetched: {iconPaths.Count} for codes: {string.Join(", ", codeNames)}");
+                Log("OnPlayerLevelUp", $"Icon paths fetched: {iconPaths.Count} for codes: {string.Join(", ", codeNames)}");
                 foreach (var kvp in iconPaths)
-                    Logger.Debug("OnPlayerLevelUp", $"  {kvp.Key} -> {kvp.Value}");
+                    Log("OnPlayerLevelUp", $"  {kvp.Key} -> {kvp.Value}");
 
                 DllBridge.Instance.SendToDll(accountName, "level_reward", new
                 {
@@ -2335,14 +1530,43 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                 DllBridge.Instance.SendToDll(session.AccountName!, "achievements", new { items = payload });
             });
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_DEAD, async (sender, e) =>
+            {
+                try
+                {
+                    var session = e.Proxy.Session;
+                    if (session == null) return;
+
+                    byte deathType = e.Packet.ReadByte();
+                    Log("DeathHandler", $"Character died, type={deathType}");
+
+                    await AchievementService.OnDeath(session.CharacterName!, e.Proxy!);
+                    Interlocked.Increment(ref session.PlayerDeaths);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(typeof(PlayerTools), $"Error occurred in death handler!: {ex.Message}");
+                }
+                
+            });
+
         }
         public static void RegisterBotHandler(Server _agentProxy)
         {
             _agentProxy.RegisterClientPacketHandler(Constant.DEW_START_BOT, async (sender, e) =>
             {
                 e.CancelTransfer = true;
+
+
                 var session = e.Proxy.Session;
+                
                 if (session == null) return;
+
+                if (session.PlayerStats!.CurrentLevel < SettingsLoader.Settings!.MinimumBotLevel)
+                {
+                    PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, $"Your level is too low to use botting features, unlocks at level {SettingsLoader.Settings.MinimumBotLevel}");
+                    return;
+                }
 
                 // Cancel old Brain if it exists
                 if (session._walkerCts != null)
@@ -2376,6 +1600,27 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                 session.TrainingDestination = destination;
 
+                string teleportDest = RegionResolver.Resolve((short)destination.RegionId, destination.SectorX, destination.SectorY);
+                if (teleportDest.Contains("Qin-Shi") && session.PlayerStats!.CurrentLevel < 70)
+                {
+                    PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, $"Your level is too low to bot in Qin-Shi Tomb.");
+                    return;
+                }
+                else if (teleportDest.Contains("Stone Cave") && session.PlayerStats!.CurrentLevel < 50)
+                {
+                    PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, $"Your level is too low to bot in the Stone Cave.");
+                    return;
+                }
+                else if ((teleportDest.Contains("Kings Valley") ||
+                        teleportDest.Contains("Holy Water Temple") ||
+                        teleportDest.Contains("Alexandria") ||
+                        teleportDest.Contains("Alexandria Job Cave (Black/Red Eggre)")) &&
+                        session.PlayerStats!.CurrentLevel < 95)
+                {
+                    PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null, $"Your level is too low to bot in {teleportDest}.");
+                    return;
+                }
+                
                 // Create a new cancellation token for brain lifetime (ignore name lol)
                 session._walkerCts = new CancellationTokenSource();
                 var ct = session._walkerCts.Token;
@@ -2397,14 +1642,14 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                                 uint rx = (uint)(int)pos.XOffset;
                                 uint ry = (uint)(int)pos.YOffset;
                                 int rz = (int)pos.ZOffset;
-                                Logger.Debug("SendMove", $"DUNGEON SX={pos.SectorX} SY={pos.SectorY} rawX={rx} rawZ={rz} rawY={ry} | worldX={pos.X:F1} worldY={pos.Y:F1}");
+                                Log("SendMove", $"DUNGEON SX={pos.SectorX} SY={pos.SectorY} rawX={rx} rawZ={rz} rawY={ry} | worldX={pos.X:F1} worldY={pos.Y:F1}");
                                 p.WriteUInt(rx);
                                 p.WriteInt(rz);
                                 p.WriteUInt(ry);
                             }
                             else
                             {
-                                Logger.Debug("SendMove", $"OVERWORLD SX={pos.SectorX} SY={pos.SectorY} XOff={pos.XOffset:F1} YOff={pos.YOffset:F1}");
+                                Log("SendMove", $"OVERWORLD SX={pos.SectorX} SY={pos.SectorY} XOff={pos.XOffset:F1} YOff={pos.YOffset:F1}");
                                 p.WriteShort((short)pos.XOffset);
                                 p.WriteShort((short)pos.ZOffset);
                                 p.WriteShort((short)pos.YOffset);
@@ -2437,7 +1682,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     session,
                     session._walker,
                     session._attackLoop!,
-                    sendPacket: p => proxy.Server.Send(p), // Inject packet sending for teleports
+                    proxy: proxy,
+                    sendPacket: p => proxy.Server.Send(p),
                     rootCt: ct
                 );
 
@@ -2473,7 +1719,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 session._botState = BotMode.Idle;
                 session.LastTargetUID = 0; // Clear the target UID tracker
 
-                // 3. Immediately push a definitive final "Idle" state broadcast to ImGui
                 if (!string.IsNullOrEmpty(session.AccountName))
                 {
                     DllBridge.Instance.SendToDll(session.AccountName, "bot_state_update", new
@@ -2499,7 +1744,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 var skill = await DBConnect.GetSkillById(skillId);
                 if (skill == null) return;
 
-                skill.ReadableName = GameObjectNameResolver.Resolve(skill.CodeName);
                 session._attackLoop?.AddSkillToUse(skill, isBuff);
                 session.PushSkillListsToDll(session.AccountName!);
                 session.SaveBotConfig();
@@ -2538,7 +1782,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 var packet = e.Packet;
                 byte slot = packet.ReadByte();
                 uint durability = packet.ReadUInt();
-                Logger.Debug("DurabilityHandler", $"Slot {slot} durability → {durability}");
+                Log("DurabilityHandler", $"Slot {slot} durability -> {durability}");
                 e.Proxy.Session!._attackLoop?.OnDurabilityChanged(slot, durability);
             });
 
@@ -2682,10 +1926,21 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     ZOffset = z
                 };
 
-                Logger.Debug("0xB023", $"Stuck at region=0x{region:X4} world=({authPos.X:F1},{authPos.Y:F1})");
+                Log("0xB023", $"Stuck at region=0x{region:X4} world=({authPos.X:F1},{authPos.Y:F1}) xOff={xOffset} yOff={yOffset}");
+
+                if ((region & 0x8000) == 0 && xOffset == 0f && yOffset == 0f)
+                {
+                    Logger.Warn("0xB023", $"GUARDED (0,0) stuck uid={uid} region=0x{region:X4} — session kept at ({e.Proxy.Session?.WorldX},{e.Proxy.Session?.WorldY})");
+                    return;
+                }
 
                 if (e.Proxy.Session != null)
                 {
+                    // Capture prior world position before overwriting — needed for the
+                    // HandleStuckPacket threshold check below.
+                    float prevX = e.Proxy.Session.WorldX;
+                    float prevY = e.Proxy.Session.WorldY;
+
                     e.Proxy.Session.RegionId = region;
                     e.Proxy.Session.RawX = (short)xOffset;
                     e.Proxy.Session.RawY = (short)yOffset;
@@ -2695,9 +1950,50 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     e.Proxy.Session.WorldX = (int)authPos.X;
                     e.Proxy.Session.WorldY = (int)authPos.Y;
 
-                    e.Proxy.Session._walker?.HandleStuckPacket(authPos);
+                    bool pickingUp = e.Proxy.Session._attackLoop?.IsPickingUp == true;
+                    float stuckDx = authPos.X - prevX;
+                    float stuckDy = authPos.Y - prevY;
+                    bool meaningfulCorrection = MathF.Sqrt(stuckDx * stuckDx + stuckDy * stuckDy) > 5f;
+                    if (!pickingUp && meaningfulCorrection)
+                    {
+                        e.Proxy.Session._walker?.HandleStuckPacket(authPos);
+                        e.Proxy.Session._attackLoop?.NotifyStuck();
+                    }
                 }
             });
+
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_OPEN_SHOP, (sender, e) =>
+            {
+                if (e.Proxy.Session != null)
+                {
+                    // If the bot owns this open, suppress B046 from the game client.
+                    bool botOwned = e.Proxy.Session!.ShopOpenGate != null;
+                    e.Proxy.Session!.ShopOpenGate?.TrySetResult(true);
+                    if (botOwned)
+                        e.CancelTransfer = true;
+                }
+            });
+
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_CLOSE_SHOP, (sender, e) =>
+            {
+                if (e.Proxy.Session != null)
+                {
+                    bool botOwned = e.Proxy.Session!.ShopCloseGate != null;
+                    e.Proxy.Session!.ShopCloseGate?.TrySetResult(true);
+                    if (botOwned)
+                        e.CancelTransfer = true;
+                }
+            });
+
+            _agentProxy.RegisterServerPacketHandler(Constant.SERVER_TARGET, (sender, e) =>
+            {
+
+                if (e.Proxy.Session != null)
+                    e.Proxy.Session!.TargetGate?.TrySetResult(true);
+            });
+            
+            
+
         }
 
         #endregion
@@ -3126,7 +2422,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 .OrderByDescending(s => s.Value.Stack)
                 .FirstOrDefault();
 
-            // Build ordered list exactly in the sequence you wanted
+            // Build ordered list
             var sorted = new List<KeyValuePair<byte, SR_Item>>();
 
             // Pet Scrolls
@@ -3244,6 +2540,16 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             ChatType.Notice,
                             null,
                             SettingsLoader.FormatPlayerMessage(afk, proxy));
+
+                            DllBridge.Instance.SendToDll(proxy.Session!.AccountName!, "session_sync", new
+                            {
+                                sessionSeconds = (int)proxy.Session.AccumulatedPlayTime.TotalSeconds,
+                                sessionKills = proxy.Session.SessionKills,
+                                totalSeconds = (int)proxy.Session.TotalPlayTime.TotalSeconds,
+                                isAfk = proxy.Session.IsAfk ? 1 : 0,
+                                accountJID = proxy.Session.JID,
+                                isGM = proxy.Session.IsGM ? 1 : 0,
+                            });
                     }
                     else
                     {
@@ -3254,6 +2560,16 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             ChatType.Notice,
                             null,
                             SettingsLoader.FormatPlayerMessage(back, proxy));
+
+                        DllBridge.Instance.SendToDll(proxy.Session!.AccountName!, "session_sync", new
+                        {
+                            sessionSeconds = (int)proxy.Session.AccumulatedPlayTime.TotalSeconds,
+                            sessionKills = proxy.Session.SessionKills,
+                            totalSeconds = (int)proxy.Session.TotalPlayTime.TotalSeconds,
+                            isAfk = proxy.Session.IsAfk ? 1 : 0,
+                            accountJID = proxy.Session.JID,
+                            isGM = proxy.Session.IsGM ? 1 : 0,
+                        });
                     }
                 }
 
@@ -3306,6 +2622,29 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
         #region - Helpers -
         
+        private static async Task BackfillMissedLevelRewardsAsync(Proxy proxy, byte currentLevel)
+        {
+            var session = proxy.Session!;
+            var charName = session.CharacterName!;
+
+            foreach (var rewardLevel in Overseer.LevelRewardOptions.Keys)
+            {
+                if (rewardLevel > currentLevel) continue;
+                if (session.UnclaimedRewards.Contains(rewardLevel)) continue;
+
+                bool alreadyClaimed = await DBConnect.HasClaimedLevelRewardAsync(charName, rewardLevel);
+                if (alreadyClaimed) continue;
+
+                Logger.Info("BackfillRewards", $"{charName} missed reward for level {rewardLevel}, backfilling");
+
+                bool claimed = await DBConnect.ClaimLevelRewardAsync(charName, rewardLevel);
+                if (!claimed) continue;
+
+                await DBConnect.AddUnclaimedRewardAsync(charName, rewardLevel);
+                session.UnclaimedRewards.Add(rewardLevel);
+            }
+        }
+
         public static async Task CheckLevelUp(Proxy proxy)
         {
             var session = proxy.Session;
@@ -3333,11 +2672,11 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         Logger.Warn("LevelTracker", $"CheckLevelUp: no cumulative threshold for level {currentLevel}");
                         return;
                     }
-                    Logger.Debug("LevelTracker", $"CheckLevelUp: level={currentLevel} cumExp={currentExp} threshold={threshold}");
+                    Log("LevelTracker", $"CheckLevelUp: level={currentLevel} cumExp={currentExp} threshold={threshold}");
 
                     if (session.CumulativeExp < threshold)
                     {
-                        Logger.Debug("LevelTracker", $"CheckLevelUp: not enough exp ({currentExp} < {threshold}), done");
+                        Log("LevelTracker", $"CheckLevelUp: not enough exp ({currentExp} < {threshold}), done");
                         return;
                     }
 
@@ -3347,14 +2686,14 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 bool alreadyClaimed = await DBConnect.HasClaimedLevelRewardAsync(session.CharacterName!, nextLevel);
                 if (alreadyClaimed)
                 {
-                    Logger.Debug("LevelTracker", $"CheckLevelUp: level {nextLevel} already claimed, continuing");
+                    Log("LevelTracker", $"CheckLevelUp: level {nextLevel} already claimed, continuing");
                     continue;
                 }
 
                 bool claimed = await DBConnect.ClaimLevelRewardAsync(session.CharacterName!, nextLevel);
                 if (!claimed)
                 {
-                    Logger.Debug("LevelTracker", $"CheckLevelUp: claim insert failed for level {nextLevel} (race), continuing");
+                    Log("LevelTracker", $"CheckLevelUp: claim insert failed for level {nextLevel} (race), continuing");
                     continue;
                 }
 
@@ -3364,8 +2703,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
         }
         private static async Task OnPlayerLevelUp(Proxy proxy, byte newLevel)
         {
-            // Level up
             DllBridge.Instance.SendToDll(proxy.Session!.AccountName!, "lvl_update", new { lvl = (int)newLevel });
+            await AchievementService.OnLevelUp(proxy.Session!.CharacterName!, newLevel, proxy);
 
             // Reward logic and stuff
             if (!Overseer.LevelRewardOptions.TryGetValue(newLevel, out var options) || options.Count == 0)

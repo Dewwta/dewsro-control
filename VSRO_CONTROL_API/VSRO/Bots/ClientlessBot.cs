@@ -6,7 +6,7 @@ using VSRO_CONTROL_API.VSRO.AsynchronousProxy.Network;
 using VSRO_CONTROL_API.VSRO.Bot.DTO;
 using VSRO_CONTROL_API.VSRO.DTO;
 using VSRO_CONTROL_API.VSRO.Tools;
-using static System.Collections.Specialized.BitVector32;
+using VSRO_CONTROL_API.VSRO.Enums;
 
 /// NOT USED YET
 namespace VSRO_CONTROL_API.VSRO.Bots
@@ -351,6 +351,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         {
             try
             {
+                // uh, we should use the new BotBrain probably here.
                 var walker = new AutoWalker(
                     getPosition: () => BotPosition.FromSession(CharState),
                     sendMove: pos => SendMove(pos),
@@ -405,14 +406,5 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
     }
 
-    public enum ClientlessBotState
-    {
-        Disconnected,
-        ConnectingGateway,
-        LoggingIn,
-        SelectingServer,
-        SelectingCharacter,
-        LoadingCharData,
-        Botting
-    }
+    
 }

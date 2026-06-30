@@ -914,7 +914,7 @@
 	}
 	.region-row:last-child { border-bottom: none; }
 	.region-row:hover { background: var(--bg-raised); }
-	.region-row--dirty { background: rgba(139, 94, 28, 0.07); }
+	.region-row--dirty { background: rgba(106, 90, 140, 0.07); }
 
 	.region-name {
 		flex: 1;

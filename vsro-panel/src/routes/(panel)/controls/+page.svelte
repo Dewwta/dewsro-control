@@ -685,7 +685,7 @@
         align-items: center;
         gap: 0.7rem;
         padding: 0.55rem 0.9rem;
-        background: rgba(139, 94, 28, 0.1);
+        background: rgba(106, 90, 140, 0.1);
         border: 1px solid var(--border-gold);
         border-radius: var(--radius);
     }
@@ -819,7 +819,7 @@
         color: var(--red-light);
     }
     .msg--info {
-        background: rgba(122, 90, 37, 0.15);
+        background: rgba(95, 75, 130, 0.15);
         border-color: var(--border-gold);
         color: var(--gold);
     }
@@ -975,7 +975,7 @@
         transition: background 0.15s;
     }
     .bot-row__restart:hover {
-        background: rgba(122, 90, 37, 0.15);
+        background: rgba(95, 75, 130, 0.15);
         color: var(--gold);
     }
     .bot-row__restart:disabled {

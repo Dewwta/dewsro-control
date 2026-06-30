@@ -12,5 +12,17 @@ namespace VSRO_CONTROL_API.Settings
 
         [XmlElement("BackupDatabases")]
         public string? BackupDatabases { get; set; }
+
+        [XmlElement("SecondaryHost")]
+        public string? SecondaryHost { get; set; }
+
+        [XmlElement("SecondaryUser")]
+        public string? SecondaryUser { get; set; }
+
+        [XmlElement("SecondaryPath")]
+        public string? SecondaryPath { get; set; }
+
+        [XmlElement("SecondaryKeyFile")]
+        public string? SecondaryKeyFile { get; set; }
     }
 }

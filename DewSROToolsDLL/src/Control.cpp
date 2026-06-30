@@ -4,12 +4,35 @@
 #include "Windows.h"
 #include <iostream>
 #include "net/DllBridge.h"
+#include "net/NetActions.h"
+#include "ClientVersion.h"
 #include "Logging/Logger.h"
 #include "client/RewardWindow.h"
 #include <sstream>
 #include "Settings.h"
 #include "client/AchievementWindow.h"
+#include "client/pk2/Pk2Reader.h"
 
+
+static std::string ExtractHostFromDivisionInfo(const std::vector<uint8_t>& data)
+{
+    std::string best, cur;
+    for (uint8_t b : data) {
+        char c = (char)b;
+        bool valid = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                     (c >= '0' && c <= '9') || c == '-' || c == '.';
+        if (valid) {
+            cur += c;
+        } else {
+            if (cur.find('.') != std::string::npos && cur.size() > best.size())
+                best = cur;
+            cur.clear();
+        }
+    }
+    if (cur.find('.') != std::string::npos && cur.size() > best.size())
+        best = cur;
+    return best;
+}
 
 static int DetectStoneCaveFloor(float worldZ)
 {
@@ -22,7 +45,20 @@ static int DetectStoneCaveFloor(float worldZ)
 void RegisterAllHandlers() {
     g_bridge.RegisterHandler("login_ack", [](const std::string& _) {
         auto& log = GetLogger();
-        log.Info("Control_Handler::login_ack", "Proxy connection acknowledged");
+        log.Info("Control_Handler::login_ack", "Proxy connection acknowledged — sending client hello");
+        NetActions::SendClientHello(g_bridge.m_username, DLL_COMPAT_VERSION);
+    });
+
+    g_bridge.RegisterHandler("version_mismatch", [](const std::string& json) {
+        std::string expected = g_bridge.ExtractStr(json, "expected");
+        std::string got      = g_bridge.ExtractStr(json, "got");
+        std::string msg =
+            "This client is not compatible with the server.\n\n"
+            "Client version:   " + got + "\n"
+            "Required version: " + expected + "\n\n"
+            "Please update your client files and try again.";
+        MessageBoxA(NULL, msg.c_str(), "DewSRO - Version Mismatch", MB_OK | MB_ICONERROR);
+        ExitProcess(1);
     });
 
     g_bridge.RegisterHandler("session_init", [](const std::string& json) {
@@ -265,6 +301,18 @@ void RegisterAllHandlers() {
             size_t passiveVal = arr.find_first_not_of(' ', passiveColon + 1);
             sk.isPassive = arr.substr(passiveVal, 4) == "true";
 
+            size_t iconPos = arr.find("\"icon\"", pos);
+            size_t nextIdPos = arr.find("\"id\"", pos + 1);
+            if (iconPos != std::string::npos && (nextIdPos == std::string::npos || iconPos < nextIdPos)) {
+                size_t iconColon = arr.find(':', iconPos);
+                size_t iconQ1 = arr.find('"', iconColon + 1);
+                if (iconQ1 != std::string::npos) {
+                    size_t iconQ2 = arr.find('"', iconQ1 + 1);
+                    if (iconQ2 != std::string::npos)
+                        sk.iconFile = arr.substr(iconQ1 + 1, iconQ2 - iconQ1 - 1);
+                }
+            }
+
             ss.availableSkills.push_back(sk);
             pos = nameEnd;
         }
@@ -275,15 +323,19 @@ void RegisterAllHandlers() {
             log.Info("skill_list_sync", "Resolving ID " + std::to_string(sk.id));
             auto it = std::find_if(ss.availableSkills.begin(), ss.availableSkills.end(),
                 [&](const SkillEntry& a) { return a.id == sk.id; });
-            if (it != ss.availableSkills.end())
+            if (it != ss.availableSkills.end()) {
                 sk.readableName = it->readableName;
+                sk.iconFile = it->iconFile;
+            }
         }
         for (auto& sk : ss.buffSkills) {
             log.Info("skill_list_sync", "Resolving ID " + std::to_string(sk.id));
             auto it = std::find_if(ss.availableSkills.begin(), ss.availableSkills.end(),
                 [&](const SkillEntry& a) { return a.id == sk.id; });
-            if (it != ss.availableSkills.end())
+            if (it != ss.availableSkills.end()) {
                 sk.readableName = it->readableName;
+                sk.iconFile = it->iconFile;
+            }
         }
     });
 
@@ -329,8 +381,10 @@ void RegisterAllHandlers() {
                 auto it = std::find_if(ss.availableSkills.begin(), ss.availableSkills.end(),
                     [&](const SkillEntry& a) { return a.id == sk.id; });
 
-                if (it != ss.availableSkills.end())
+                if (it != ss.availableSkills.end()) {
                     sk.readableName = it->readableName;
+                    sk.iconFile = it->iconFile;
+                }
             }
 
             for (auto& sk : ss.buffSkills)
@@ -338,8 +392,10 @@ void RegisterAllHandlers() {
                 auto it = std::find_if(ss.availableSkills.begin(), ss.availableSkills.end(),
                     [&](const SkillEntry& a) { return a.id == sk.id; });
 
-                if (it != ss.availableSkills.end())
+                if (it != ss.availableSkills.end()) {
                     sk.readableName = it->readableName;
+                    sk.iconFile = it->iconFile;
+                }
             }
         });
 
@@ -453,6 +509,28 @@ void Control::Initialize()
     log.Alloc();
     log.SetState(true);
     Settings::Load();
+
+    {
+        char exePath[MAX_PATH];
+        GetModuleFileNameA(NULL, exePath, MAX_PATH);
+        std::string dir(exePath);
+        dir = dir.substr(0, dir.find_last_of("\\/"));
+        std::wstring pk2Path(dir.begin(), dir.end());
+        pk2Path += L"\\media.pk2";
+
+        Pk2Reader pk2;
+        std::vector<uint8_t> divData;
+        if (pk2.Open(pk2Path) && pk2.ReadFile("DIVISIONINFO.TXT", divData))
+        {
+            g_bridgeHost = ExtractHostFromDivisionInfo(divData);
+            log.Info("Control::Initialize", "Bridge host: " + g_bridgeHost);
+        }
+        else
+        {
+            log.Err("Control::Initialize", "Failed to read DIVISIONINFO.TXT from media.pk2 — bridge will not connect");
+        }
+    }
+
     dx9_hook::init();
     log.Info("Control::Initialize", "Initialzed d3d9_hook.");
 

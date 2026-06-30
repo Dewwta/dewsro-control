@@ -14,12 +14,14 @@ namespace VSRO_CONTROL_API.VSRO
         public const string GetSkillById_q = @"
             USE SRO_VT_SHARD
             SELECT ID, Basic_Code, Basic_Group, ReqCommon_MasteryLevel1,
+                   Basic_Activity,
                    Action_PreparingTime, Action_CastingTime, Action_ActionDuration,
                    Action_ReuseDelay, Action_CoolTime, Action_Range,
                    Action_AutoAttackType, Action_InTown,
                    Target_Required,
                    Consume_HP, Consume_MP,
                    AI_AttackChance, AI_SkillType,
+                   UI_IconFile,
                    Param1,  Param2,  Param3,  Param4,  Param5,
                    Param6,  Param7,  Param8,  Param9,  Param10,
                    Param11, Param12, Param13, Param14, Param15,
@@ -170,6 +172,26 @@ namespace VSRO_CONTROL_API.VSRO
                     CASE WHEN @Amount >= @Goal THEN 1 ELSE 0 END,
                     CASE WHEN @Amount >= @Goal THEN GETDATE() ELSE NULL END
                 );";
+        // MERGE that sets progress to MAX(existing, @Amount). Used for high-score style achievements (e.g. gold).
+        public const string SetAchievementHighScoreProgress_q = @"
+            USE SRO_VT_PROXY;
+            MERGE AchievementProgress AS target
+            USING (SELECT @CharName AS CharName, @AchievementName AS AchievementName) AS source
+            ON target.CharName = source.CharName AND target.AchievementName = source.AchievementName
+            WHEN MATCHED AND target.Completed = 0 THEN
+                UPDATE SET
+                    target.Progress = IIF(@Amount > target.Progress, @Amount, target.Progress),
+                    target.Completed = IIF(IIF(@Amount > target.Progress, @Amount, target.Progress) >= @Goal, 1, 0),
+                    target.CompletedAt = IIF(IIF(@Amount > target.Progress, @Amount, target.Progress) >= @Goal, GETDATE(), NULL)
+            WHEN NOT MATCHED THEN
+                INSERT (CharName, AchievementName, Progress, Completed, CompletedAt)
+                VALUES (
+                    @CharName,
+                    @AchievementName,
+                    @Amount,
+                    IIF(@Amount >= @Goal, 1, 0),
+                    IIF(@Amount >= @Goal, GETDATE(), NULL)
+                );";
         public const string GetItemTypeId_q = @"
             USE SRO_VT_SHARD
             SELECT 
@@ -247,6 +269,66 @@ namespace VSRO_CONTROL_API.VSRO
                  WHERE
                      c.CodeName128 LIKE @ITEMCODE;";
         public const string GetCharIdByName_q = "USE SRO_VT_SHARD\r\nSELECT CharID FROM _Char WHERE CharName16 = @CharName AND Deleted = 0";
+        public const string GetCharDataById_q = @"
+                USE SRO_VT_SHARD
+
+                SELECT
+                    CharID,
+                    Deleted,
+                    RefObjID,
+                    CharName16,
+                    NickName16,
+                    Scale,
+                    CurLevel,
+                    MaxLevel,
+                    ExpOffset,
+                    SExpOffset,
+                    Strength,
+                    Intellect,
+                    RemainGold,
+                    RemainSkillPoint,
+                    RemainStatPoint,
+                    RemainHwanCount,
+                    GatheredExpPoint,
+                    HP,
+                    MP,
+                    LatestRegion,
+                    PosX,
+                    PosY,
+                    PosZ,
+                    AppointedTeleport,
+                    AutoInvestExp,
+                    InventorySize,
+                    DailyPK,
+                    TotalPK,
+                    PKPenaltyPoint,
+                    TPP,
+                    PenaltyForfeit,
+                    JobPenaltyTime,
+                    JobLvl_Trader,
+                    Trader_Exp,
+                    JobLvl_Hunter,
+                    Hunter_Exp,
+                    JobLvl_Robber,
+                    Robber_Exp,
+                    GuildID,
+                    LastLogout,
+                    TelRegion,
+                    TelPosX,
+                    TelPosY,
+                    TelPosZ,
+                    DiedRegion,
+                    DiedPosX,
+                    DiedPosY,
+                    DiedPosZ,
+                    WorldID,
+                    TelWorldID,
+                    DiedWorldID,
+                    HwanLevel
+                FROM _Char
+                WHERE CharID = @characterId
+                AND Deleted = 0";
+        public const string GetCharacterModelCodeNameByID_q = "USE SRO_VT_SHARD\r\nSELECT CodeName128 FROM _RefObjCommon\r\nWHERE ID = @refObjID";
         public const string GetInventoryByCharId_q = "USE SRO_VT_SHARD\r\nSELECT Slot, ItemID FROM _Inventory WHERE CharID = @CharID ORDER BY Slot";
         public const string GetInventorySize_q = "USE SRO_VT_SHARD\r\nSELECT InventorySize FROM _Char WHERE CharID = @CharID";
         public const string GetInventoryWithNames_q = @"
@@ -821,7 +903,8 @@ namespace VSRO_CONTROL_API.VSRO
 
                  SERVER_CHAT = 0x3026,
                  SERVER_CHAT_ACCEPT = 0xB025,
-
+                 SERVER_SHOP_ITEM_REMOVE = 0x30D7,
+                 SERVER_SHOP_ITEM_ADD = 0x30D6,
                  SERVER_TARGET = 0xB045,
                  SERVER_MOVEMENT = 0xB021,
                  SERVER_UNIQUE = 0x300C,
@@ -879,9 +962,17 @@ namespace VSRO_CONTROL_API.VSRO
                  DEW_SKILL_ADD = 0xDE10,
                  DEW_SKILL_REMOVE = 0xDE11,
                  DEW_SKILL_MOVE = 0xDE12,
-                 DEW_BOT_SETTINGS = 0xDE13;
+                 DEW_BOT_SETTINGS = 0xDE13,
+                 DEW_CLIENT_HELLO = 0xE106;
 
         #endregion
 
+        #region - Server -
+
+        // Version format: major * 100 + minor  (100 = v1.00, 105 = v1.05, 200 = v2.00)
+        public const ushort API_VERSION = 104;      // 1.04
+        public const ushort COMPAT_CLIENT = 102;    // 1.02
+
+        #endregion
     }
 }

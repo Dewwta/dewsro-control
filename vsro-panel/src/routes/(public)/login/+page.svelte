@@ -186,7 +186,7 @@
 		padding: 3rem 1rem 4rem;
 		min-height: calc(100vh - 56px - 60px); /* subtract topbar + footer */
 		background:
-			radial-gradient(ellipse 60% 50% at 50% 0%, rgba(200,148,60,0.05) 0%, transparent 70%);
+			radial-gradient(ellipse 60% 50% at 50% 0%, rgba(160,130,200,0.05) 0%, transparent 70%);
 	}
 
 	.login-card {

@@ -15,6 +15,11 @@ namespace VSRO_CONTROL_API.VSRO.Bots
     {
         #region - Var -
 
+        public static bool Debug { get; private set; } = false;
+        public static void SetDebug(bool debug) => Debug = debug;
+        private static void Log(string handler, string message) { if (Debug == true) Logger.Trace($"AutoWalker:{handler}", message); }
+
+
         // For disabling collisions on useless points
         private static readonly HashSet<(string, string)> _collisionExemptEdges = new()
         {
@@ -55,9 +60,11 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             graph = BuildGraph();
         }
 
-        public async Task WalkTo(BotPosition destination, CancellationToken ct, VSRO.DTO.ISession session)
+        public async Task WalkTo(BotPosition destination, CancellationToken ct, VSRO.DTO.ISession session, bool disableStuckOnFinalLeg = false)
         {
             _activeRegionId = (ushort)session.RegionId;
+            ushort startRegionId = _activeRegionId;
+
             if (_session._botSettings.Autowalker.CastSpeedBuffWhileWalking == true)
                 await HandleBuffs();
 
@@ -65,92 +72,97 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
             var sinceUpdate = DateTime.UtcNow - session.LastMovementUpdate;
 
-            // If the server updated recently, trust the confirmed position.
-            // Otherwise fallback to estimated/interpolated position.
-            if (sinceUpdate.TotalMilliseconds < 350 &&
-                session.LastConfirmedBotPosition != null)
-            {
+            if (sinceUpdate.TotalMilliseconds < 350 && session.LastConfirmedBotPosition != null)
                 current = session.LastConfirmedBotPosition.Value;
-            }
             else
-            {
                 current = _getPosition();
-            }
 
-            Logger.Trace("AutoWalker", $"--- AutoWalk Starting Up ---");
-            Logger.Trace("AutoWalker", $"Current  : RegionId=0x{current.RegionId:X4} ({current.RegionId}) SX={current.SectorX} SY={current.SectorY} XOff={current.XOffset:F1} YOff={current.YOffset:F1} X={current.X:F1} Y={current.Y:F1}");
-            Logger.Trace("AutoWalker", $"Dest     : RegionId=0x{destination.RegionId:X4} ({destination.RegionId}) SX={destination.SectorX} SY={destination.SectorY} XOff={destination.XOffset:F1} YOff={destination.YOffset:F1} X={destination.X:F1} Y={destination.Y:F1}");
-            Logger.Trace("AutoWalker", $"DirectDist={Distance(current, destination):F1}");
+            Log("WalkTo", $"--- AutoWalk Starting Up ---");
+            Log("WalkTo", $"Current  : RegionId=0x{current.RegionId:X4} ({current.RegionId}) SX={current.SectorX} SY={current.SectorY} XOff={current.XOffset:F1} YOff={current.YOffset:F1} X={current.X:F1} Y={current.Y:F1}");
+            Log("WalkTo", $"Dest     : RegionId=0x{destination.RegionId:X4} ({destination.RegionId}) SX={destination.SectorX} SY={destination.SectorY} XOff={destination.XOffset:F1} YOff={destination.YOffset:F1} X={destination.X:F1} Y={destination.Y:F1}");
+            Log("WalkTo", $"DirectDist={Distance(current, destination):F1}");
 
             var diagT = new NavMeshTransform(new RID(current.RegionId),
                 new Vector3(current.XOffset, current.ZOffset, current.YOffset));
             bool diagResolve = NavMeshManager.ResolveCellAndHeight(diagT);
-            Logger.Trace("AutoWalker", $"NavMesh resolve for starting position: {diagResolve} (region=0x{current.RegionId:X4})");
+            Log("WalkTo", $"NavMesh resolve for starting position: {diagResolve} (region=0x{current.RegionId:X4})");
             if (!diagResolve)
-                Logger.Warn("AutoWalker", $"!!! Starting region 0x{current.RegionId:X4} does NOT resolve in navmesh — HasCollision will always return true !!!");
+                Logger.Warn("WalkTo", $"!!! Starting region 0x{current.RegionId:X4} does NOT resolve in navmesh — HasCollision will always return true !!!");
 
             var diagTDest = new NavMeshTransform(new RID(destination.RegionId),
                 new Vector3(destination.XOffset, destination.ZOffset, destination.YOffset));
             bool diagResolveDest = NavMeshManager.ResolveCellAndHeight(diagTDest);
-            Logger.Trace("AutoWalker", $"NavMesh resolve for destination: {diagResolveDest} (region=0x{destination.RegionId:X4})");
+            Log("WalkTo", $"NavMesh resolve for destination: {diagResolveDest} (region=0x{destination.RegionId:X4})");
 
             float directDist = Distance(current, destination);
             var graphPath = graph.FindPath(current, destination);
 
             if (graphPath == null || graphPath.Count == 0)
             {
-                Logger.Warn("AutoWalker", "No graph path found — walking direct");
+                Logger.Warn("WalkTo", "No graph path found — walking direct");
                 var lineStartDirect = _getPosition();
-                await WalkToPoint(lineStartDirect, destination, ct, session);
+                await WalkToPoint(lineStartDirect, destination, ct, session, disableStuck: disableStuckOnFinalLeg, startRegionId: startRegionId);
                 return;
             }
 
             while (graphPath.Count > 0 && Distance(graphPath[0].Position, destination) >= Distance(current, destination))
             {
-                Logger.Trace("AutoWalker", $"Pruning {graphPath[0].Id} — farther from dest than current pos");
+                Log("WalkTo", $"Pruning {graphPath[0].Id} — farther from dest than current pos");
                 graphPath.RemoveAt(0);
             }
 
             int prunedCount = 0;
             while (graphPath.Count > 0 && Distance(current, graphPath[0].Position) >= directDist)
             {
-                Logger.Trace("AutoWalker", $"Pruning {graphPath[0].Id} (dist={Distance(current, graphPath[0].Position):F1}) — destination is closer at {directDist:F1}");
+                Log("WalkTo", $"Pruning {graphPath[0].Id} (dist={Distance(current, graphPath[0].Position):F1}) — destination is closer at {directDist:F1}");
                 graphPath.RemoveAt(0);
                 prunedCount++;
             }
-            Logger.Trace("AutoWalker", $"Pruned {prunedCount} leading nodes");
+            Log("WalkTo", $"Pruned {prunedCount} leading nodes");
 
             if (graphPath.Count == 0)
             {
-                Logger.Trace("AutoWalker", "All nodes pruned — walking direct");
+                Log("WalkTo", "All nodes pruned — walking direct");
                 var lineStartDirect = _getPosition();
-                await WalkToPoint(lineStartDirect, destination, ct, session);
+                await WalkToPoint(lineStartDirect, destination, ct, session, disableStuck: disableStuckOnFinalLeg, startRegionId: startRegionId);
                 return;
             }
 
-            Logger.Trace("AutoWalker", $"Path ({graphPath.Count} nodes): {string.Join(" -> ", graphPath.Select(n => n.Id))}");
-            BotPosition prevPosition = current;
+            Log("WalkTo", $"Path ({graphPath.Count} nodes): {string.Join(" -> ", graphPath.Select(n => n.Id))}");
 
             WaypointGraph.Node? prevNode = null;
             foreach (var node in graphPath)
             {
+                if (IsRegionChangeTeleport(startRegionId, (ushort)session.RegionId))
+                {
+                    Log("WalkTo", $"Region changed mid-graph (0x{startRegionId:X4} -> 0x{session.RegionId:X4}) — aborting graph walk");
+                    return;
+                }
+
                 var lineStart = _getPosition();
                 if (_session._botSettings.Autowalker.CastSpeedBuffWhileWalking == true)
                     await HandleBuffs();
-                Logger.Trace("AutoWalker", $"--- Leg to {node.Id} world=({node.Position.X:F1},{node.Position.Y:F1}) ---");
+                Log("WalkTo", $"--- Leg to {node.Id} world=({node.Position.X:F1},{node.Position.Y:F1}) ---");
 
                 _collisionDisabled = prevNode != null &&
                     _collisionExemptEdges.Contains((prevNode.Id, node.Id));
 
                 if (_collisionDisabled)
-                    Logger.Info("AutoWalker", $"Collision disabled for edge {prevNode!.Id} -> {node.Id}");
+                    Logger.Info("WalkTo", $"Collision disabled for edge {prevNode!.Id} -> {node.Id}");
 
                 var subPoints = NavMeshPathfinder.StringPull(lineStart, node.Position, skipCollision: _collisionDisabled);
                 for (int i = 1; i < subPoints.Count; i++)
                 {
+                    if (IsRegionChangeTeleport(startRegionId, (ushort)session.RegionId))
+                    {
+                        Log("WalkTo", $"Region changed mid-subpoint (0x{startRegionId:X4} -> 0x{session.RegionId:X4}) — aborting");
+                        _collisionDisabled = false;
+                        return;
+                    }
+
                     var subPoint = subPoints[i];
                     var segStart = _getPosition();
-                    bool arrived = await WalkToPoint(segStart, subPoint, ct, session);
+                    bool arrived = await WalkToPoint(segStart, subPoint, ct, session, startRegionId: startRegionId);
                     if (!arrived || ct.IsCancellationRequested)
                     {
                         _collisionDisabled = false;
@@ -160,34 +172,57 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
                 prevNode = node;
                 _collisionDisabled = false;
+            }
 
+            if (IsRegionChangeTeleport(startRegionId, (ushort)session.RegionId))
+            {
+                Log("WalkTo", $"Region changed before final leg (0x{startRegionId:X4} -> 0x{session.RegionId:X4}) — aborting");
+                return;
             }
 
             {
                 var finalStart = _getPosition();
-                Logger.Trace("AutoWalker", "--- Final destination leg ---");
+                Log("WalkTo", $"--- Final destination leg --- disableStuckOnFinalLeg={disableStuckOnFinalLeg}");
                 var finalPoints = NavMeshPathfinder.StringPull(finalStart, destination);
                 for (int i = 1; i < finalPoints.Count; i++)
                 {
+                    if (IsRegionChangeTeleport(startRegionId, (ushort)session.RegionId))
+                    {
+                        Log("WalkTo", $"Region changed mid-final-subpoint (0x{startRegionId:X4} -> 0x{session.RegionId:X4}) — aborting");
+                        return;
+                    }
+
                     var subPoint = finalPoints[i];
-                    Logger.Trace("AutoWalker", $"  Final sub-point [{i}/{finalPoints.Count - 1}]: world=({subPoint.X:F1},{subPoint.Y:F1})");
+                    Log("WalkTo", $"  Final sub-point [{i}/{finalPoints.Count - 1}]: world=({subPoint.X:F1},{subPoint.Y:F1})");
                     var segStart = _getPosition();
-                    bool arrived = await WalkToPoint(segStart, subPoint, ct, session);
+                    bool arrived = await WalkToPoint(segStart, subPoint, ct, session, startRegionId: startRegionId);
                     if (!arrived || ct.IsCancellationRequested) return;
+                    if ((startRegionId & 0x8000) != 0 && Distance(_getPosition(), subPoint) > 200f)
+                    {
+                        Log("WalkTo", $"Dungeon teleport detected mid-final-subpoint — aborting");
+                        return;
+                    }
                 }
+            }
+
+            if (IsRegionChangeTeleport(startRegionId, (ushort)session.RegionId))
+            {
+                Log("WalkTo", $"Region changed before final direct walk (0x{startRegionId:X4} -> 0x{session.RegionId:X4}) — aborting");
+                return;
             }
 
             var finalLineStart = _getPosition();
 
-            if (Distance(finalLineStart, destination) > 1.0f)
+            if ((startRegionId & 0x8000) != 0 && Distance(finalLineStart, destination) > 100f)
             {
-                Logger.Trace("AutoWalker", "--- Heading to final destination ---");
-                await WalkToPoint(finalLineStart, destination, ct, session);
+                Log("WalkTo", $"Dungeon teleport detected before final walk (dist={Distance(finalLineStart, destination):F1}) — aborting");
+                return;
             }
-            else
-            {
-                Logger.Trace("AutoWalker", "Already at final destination");
-            }
+
+            Log("WalkTo", "--- Heading to final destination ---");
+            _stuckPacketReceived = false;
+            while (_stuckSignal.CurrentCount > 0) _stuckSignal.Wait(0);
+            await WalkToPoint(finalLineStart, destination, ct, session, disableStuck: disableStuckOnFinalLeg, startRegionId: startRegionId);
         }
 
         #endregion
@@ -225,7 +260,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 _sendPacket(BuildBuffUse(movementBuff.ID));
             }
         }
-        private async Task<bool> WalkToPoint(BotPosition lineStart, BotPosition destination, CancellationToken ct, VSRO.DTO.ISession session)
+        private async Task<bool> WalkToPoint(BotPosition lineStart, BotPosition destination, CancellationToken ct, VSRO.DTO.ISession session, bool disableStuck = false, ushort startRegionId = 0)
         {
             int stuckCount = 0;
             int iteration = 0;
@@ -233,28 +268,34 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             if (Distance(lineStart, destination) < ARRIVAL_RADIUS)
                 return true;
 
-            Logger.Trace("AutoWalker", $"WalkToPoint ENTER: dest=({destination.X:F1},{destination.Y:F1})");
+            Log("WalkToPoint", $"WalkToPoint ENTER: dest=({destination.X:F1},{destination.Y:F1})");
 
             while (!ct.IsCancellationRequested)
             {
                 iteration++;
 
+                if (IsRegionChangeTeleport(startRegionId, (ushort)session.RegionId))
+                {
+                    Log("WalkToPoint", $"  [iter={iteration}] Region changed (0x{startRegionId:X4} -> 0x{session.RegionId:X4}) — exiting leg as success");
+                    return true;
+                }
+
                 var current = _getPosition();
                 float dist = Distance(current, destination);
 
-                Logger.Trace("AutoWalker", $"  [iter={iteration}] pos=({current.X:F1},{current.Y:F1}) dist={dist:F1}");
+                Log("WalkToPoint", $"  [iter={iteration}] pos=({current.X:F1},{current.Y:F1}) dist={dist:F1}");
 
                 var trackingTarget = GetLineTrackingTarget(lineStart, destination, current, lookAhead: 80f);
                 var nextStep = FindNextStep(current, lineStart, destination);
-                Logger.Trace("AutoWalker", $"  [iter={iteration}] trackingTarget=({trackingTarget.X:F1},{trackingTarget.Y:F1}) lineStart=({lineStart.X:F1},{lineStart.Y:F1})");
+                Log("WalkToPoint", $"  [iter={iteration}] trackingTarget=({trackingTarget.X:F1},{trackingTarget.Y:F1}) lineStart=({lineStart.X:F1},{lineStart.Y:F1})");
 
                 if (nextStep == null)
                 {
                     stuckCount++;
-                    Logger.Warn("AutoWalker", $"  [iter={iteration}] FindNextStep returned null — back-stepping #{stuckCount}");
+                    Logger.Warn("WalkToPoint", $"  [iter={iteration}] FindNextStep returned null — back-stepping #{stuckCount}");
                     if (stuckCount >= MAX_STUCK_COUNT)
                     {
-                        Logger.Error("AutoWalker", $"  [iter={iteration}] GIVING UP");
+                        Logger.Error("WalkToPoint", $"  [iter={iteration}] GIVING UP");
                         return false;
                     }
 
@@ -271,15 +312,14 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                     _sendMove(backStep);
                     float escSpeed = session.GetCurrentMoveSpeed() / 7.86f;
                     int escWait = Math.Clamp((int)(Distance(current, backStep) / escSpeed * 1000f) + 300, 800, 3000);
-                    await Task.Delay(escWait, ct);
+                    await WaitForRegionChangeOrDelay(escWait, startRegionId, session, ct);
                     continue;
                 }
 
                 float stepDist = Distance(current, nextStep.Value);
-                Logger.Trace("AutoWalker", $"  [iter={iteration}] SEND: nextStep=({nextStep.Value.X:F1},{nextStep.Value.Y:F1}) stepDist={stepDist:F1}");
+                Log("WalkToPoint", $"  [iter={iteration}] SEND: nextStep=({nextStep.Value.X:F1},{nextStep.Value.Y:F1}) stepDist={stepDist:F1}");
 
                 _stuckPacketReceived = false;
-                // Drain any leftover signal from a previous stuck
                 while (_stuckSignal.CurrentCount > 0) _stuckSignal.Wait(0);
 
                 var beforeTime = DateTime.UtcNow;
@@ -290,39 +330,59 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 int travelMs = (int)(stepDist / unitsPerSec * 1000f);
                 int waitMs = Math.Clamp(travelMs + 150, 100, 8000);
 
-                Logger.Trace("AutoWalker", $"  [iter={iteration}] Speed={gameSpeed:F1} ({unitsPerSec:F2} u/s) waitMs={waitMs}");
+                Log("WalkToPoint", $"  [iter={iteration}] Speed={gameSpeed:F1} ({unitsPerSec:F2} u/s) waitMs={waitMs}");
 
-                // Wait for travel time, but wake early if 0xB023 fires
                 await Task.WhenAny(
-                    Task.Delay(waitMs, ct),
+                    WaitForRegionChangeOrDelay(waitMs, startRegionId, session, ct),
                     _stuckSignal.WaitAsync(ct)
                 );
 
-                if (_stuckPacketReceived)
+                if (IsRegionChangeTeleport(startRegionId, (ushort)session.RegionId))
                 {
-                    Logger.Warn("AutoWalker", $"  [iter={iteration}] 0xB023 received — running pillar avoidance");
+                    Log("WalkToPoint", $"  [iter={iteration}] Region changed after wait (0x{startRegionId:X4} -> 0x{session.RegionId:X4}) — exiting leg as success");
+                    return true;
+                }
+
+                if (_stuckPacketReceived && !disableStuck)
+                {
+                    Logger.Warn("WalkToPoint", $"  [iter={iteration}] 0xB023 received — running pillar avoidance");
+
+                    ushort regionBeforeAvoidance = (ushort)session.RegionId;
 
                     bool cleared = await RunPillarAvoidance(
                         _stuckPacketPosition, lineStart, destination, session, ct);
 
-                    // Drain everything that arrived during or right after avoidance
                     _stuckPacketReceived = false;
                     while (_stuckSignal.CurrentCount > 0) _stuckSignal.Wait(0);
 
-                    // Brief settle — server sometimes sends a trailing B023 immediately after movement resumes
                     await Task.Delay(300, ct);
 
-                    // Drain again after settle
                     _stuckPacketReceived = false;
                     while (_stuckSignal.CurrentCount > 0) _stuckSignal.Wait(0);
 
                     if (!cleared || ct.IsCancellationRequested)
                     {
-                        Logger.Error("AutoWalker", $"  [iter={iteration}] Pillar avoidance failed — giving up leg");
+                        Logger.Error("WalkToPoint", $"  [iter={iteration}] Pillar avoidance failed — giving up leg");
                         return false;
                     }
 
-                    Logger.Trace("AutoWalker", $"  [iter={iteration}] Pillar cleared — resuming normal walk");
+                    if ((ushort)session.RegionId != regionBeforeAvoidance)
+                    {
+                        Log("WalkToPoint", $"  [iter={iteration}] Region changed after avoidance (0x{regionBeforeAvoidance:X4} -> 0x{session.RegionId:X4}) — teleport completed, exiting leg as success");
+                        return true;
+                    }
+
+                    if ((startRegionId & 0x8000) != 0)
+                    {
+                        float avoidanceJump = Distance(_getPosition(), current);
+                        if (avoidanceJump > 100f)
+                        {
+                            Log("WalkToPoint", $"  [iter={iteration}] Dungeon position jump during avoidance ({avoidanceJump:F1} units) — pad teleport, exiting leg");
+                            return true;
+                        }
+                    }
+
+                    Log("WalkToPoint", $"  [iter={iteration}] Pillar cleared — resuming normal walk");
                     continue;
                 }
 
@@ -330,16 +390,22 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 float arrivedAt = Distance(after, nextStep.Value);
                 bool serverResponded = session.LastMovementUpdate > beforeTime;
 
-                Logger.Trace("AutoWalker", $"  [iter={iteration}] After wait: pos=({after.X:F1},{after.Y:F1}) distToNextStep={arrivedAt:F1} serverResponded={serverResponded}");
+                Log("WalkToPoint", $"  [iter={iteration}] After wait: pos=({after.X:F1},{after.Y:F1}) distToNextStep={arrivedAt:F1} serverResponded={serverResponded}");
+
+                if (serverResponded && arrivedAt > 200f && (startRegionId & 0x8000) != 0)
+                {
+                    Log("WalkToPoint", $"  [iter={iteration}] Large position jump in dungeon (distToNextStep={arrivedAt:F1}) — pad teleport detected, exiting leg");
+                    return true;
+                }
 
                 if (!serverResponded)
                 {
                     stuckCount++;
-                    Logger.Warn("AutoWalker", $"  [iter={iteration}] NO SERVER RESPONSE STUCK #{stuckCount}");
+                    Logger.Warn("WalkToPoint", $"  [iter={iteration}] NO SERVER RESPONSE STUCK #{stuckCount}");
 
                     if (stuckCount >= MAX_STUCK_COUNT)
                     {
-                        Logger.Error("AutoWalker", $"  [iter={iteration}] GIVING UP");
+                        Logger.Error("WalkToPoint", $"  [iter={iteration}] GIVING UP");
                         return false;
                     }
 
@@ -354,46 +420,52 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                     float backY = current.Y - ny * 20f + nx * 15f * sideSign;
                     var backStep = MakePosition(backX, backY, current.ZOffset);
 
-                    Logger.Trace("AutoWalker", $"  [iter={iteration}] BACK-STEP to ({backX:F1},{backY:F1}) sideSign={sideSign}");
+                    Log("WalkToPoint", $"  [iter={iteration}] BACK-STEP to ({backX:F1},{backY:F1}) sideSign={sideSign}");
 
                     _sendMove(backStep);
 
                     float escSpeed = session.GetCurrentMoveSpeed() / 7.86f;
                     float escDist = Distance(current, backStep);
                     int escWait = Math.Clamp((int)(escDist / escSpeed * 1000f) + 300, 800, 3000);
-                    await Task.Delay(escWait, ct);
+                    await WaitForRegionChangeOrDelay(escWait, startRegionId, session, ct);
                     continue;
                 }
                 else if (arrivedAt > ARRIVAL_RADIUS)
                 {
                     stuckCount++;
-                    Logger.Warn("AutoWalker", $"  [iter={iteration}] STUCK #{stuckCount} arrivedAt={arrivedAt:F1}");
+                    Logger.Warn("WalkToPoint", $"  [iter={iteration}] STUCK #{stuckCount} arrivedAt={arrivedAt:F1}");
                 }
                 else
                 {
                     stuckCount = 0;
                     if (Distance(after, destination) <= ARRIVAL_RADIUS)
                     {
-                        Logger.Trace("AutoWalker", $"  [iter={iteration}] ARRIVED (dist={Distance(after, destination):F1})");
-
-                        // Allow server movement interpolation to settle before next leg.
-                        // Prevents early-corner chaining at high speed buffs.
+                        Log("WalkToPoint", $"  [iter={iteration}] ARRIVED (dist={Distance(after, destination):F1})");
                         await Task.Delay(120, ct);
-
                         return true;
                     }
                 }
 
                 if (stuckCount >= MAX_STUCK_COUNT)
                 {
-                    Logger.Error("AutoWalker", $"  [iter={iteration}] GIVING UP");
+                    Logger.Error("WalkToPoint", $"  [iter={iteration}] GIVING UP");
                     return false;
                 }
             }
 
             return false;
         }
-
+        private async Task WaitForRegionChangeOrDelay(int ms, ushort expectedRegion, VSRO.DTO.ISession session, CancellationToken ct)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(ms);
+            while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+            {
+                if (IsRegionChangeTeleport(expectedRegion, (ushort)session.RegionId))
+                    return;
+                int remaining = (int)(deadline - DateTime.UtcNow).TotalMilliseconds;
+                await Task.Delay(Math.Min(100, remaining), ct);
+            }
+        }
         #endregion
 
         #region - Packets -
@@ -405,7 +477,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             // Release the signal so WalkToPoint can wake early from its delay
             if (_stuckSignal.CurrentCount == 0)
                 _stuckSignal.Release();
-            Logger.Warn("AutoWalker", $"Server forced a stuck position update. Flagging walker to abort current leg.");
+            Log("AutoWalker", $"Server forced a stuck position update. Flagging walker to abort current leg.");
         }
         private static Packet BuildBuffUse(uint skillId)
         {
@@ -470,7 +542,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 bool leftRayBlocked = RaycastBlocked(srcL, dstL);
                 bool rightRayBlocked = RaycastBlocked(srcR, dstR);
 
-                Logger.Trace("HasCollision", $"  [Main Raycast blocked={mainRayBlocked}, LRay={leftRayBlocked}, RRay={rightRayBlocked}");
+                Log("HasCollision", $"  [Main Raycast blocked={mainRayBlocked}, LRay={leftRayBlocked}, RRay={rightRayBlocked}");
 
                 if (leftRayBlocked && rightRayBlocked)
                     return true; // Completely blocked down the center lane
@@ -496,7 +568,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 return false;
             }
 
-            Logger.Trace("HasCollision", $"  [Main Raycast blocked=True, LRay=N/A, RRay=N/A");
+            Log("HasCollision", $"  [Main Raycast blocked=True, LRay=N/A, RRay=N/A");
             return true;
         }
         private bool RaycastBlocked(BotPosition src, BotPosition dst)
@@ -528,7 +600,12 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         #endregion
 
         #region - Internal/Private -
-
+        private bool IsRegionChangeTeleport(ushort startRegionId, ushort currentRegionId)
+        {
+            if (startRegionId == 0 || currentRegionId == startRegionId)
+                return false;
+            return (startRegionId & 0x8000) != 0 || (currentRegionId & 0x8000) != 0;
+        }
         private async Task<bool> RunPillarAvoidance(
             BotPosition stuckPos,
             BotPosition lineStart,
@@ -536,7 +613,12 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             VSRO.DTO.ISession session,
             CancellationToken ct)
         {
-            // Travel direction unit vector
+            ushort regionAtStart = (ushort)session.RegionId;
+            var startAvoidPos = _getPosition();
+            string? startRoomKey = (startAvoidPos.RegionId & 0x8000) != 0
+                ? RegionResolver.Resolve((short)startAvoidPos.RegionId, (int)(startAvoidPos.X / 192), (int)(startAvoidPos.Y / 192))
+                : null;
+
             float tdx = destination.X - lineStart.X;
             float tdy = destination.Y - lineStart.Y;
             float tdlen = MathF.Sqrt(tdx * tdx + tdy * tdy);
@@ -544,26 +626,29 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             float tnx = tdx / tdlen;
             float tny = tdy / tdlen;
 
-            // Projection of stuck position onto travel axis (used for cleared check)
             float stuckT = (stuckPos.X - lineStart.X) * tnx + (stuckPos.Y - lineStart.Y) * tny;
 
             float speed = session.GetCurrentMoveSpeed() / 7.86f;
 
-            // Step 1: back-step ~8 units opposite to travel direction
             var current = _getPosition();
             float bx = current.X - tnx * 8f;
             float by = current.Y - tny * 8f;
             var backPos = MakePosition(bx, by, current.ZOffset);
 
-            Logger.Trace("AutoWalker", $"  [Avoidance] Back-step to ({bx:F1},{by:F1})");
-           
+            Log("AutoWalker", $"  [Avoidance] Back-step to ({bx:F1},{by:F1})");
+
             _sendMove(backPos);
             int backWait = Math.Clamp((int)(8f / speed * 1000f) + 300, 600, 2500);
             await Task.Delay(backWait, ct);
 
-            // Step 2: diagonal loop — alternate left/right at ±30°, up to 8 attempts
+            if ((ushort)session.RegionId != regionAtStart || HasTeleportedRoom(startRoomKey))
+            {
+                Logger.Info("AutoWalker", $"  [Avoidance] Teleport detected during back-step — treating as success");
+                return true;
+            }
+
             const float DIAG_DIST = 12f;
-            const float DIAG_ANGLE = MathF.PI / 6f; // 30°
+            const float DIAG_ANGLE = MathF.PI / 6f;
             const float CLEAR_THRESHOLD = 3f;
             const int MAX_DIAG_ATTEMPTS = 8;
 
@@ -573,9 +658,13 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             {
                 if (ct.IsCancellationRequested) return false;
 
-                // Alternate left (positive angle offset) and right (negative)
+                if ((ushort)session.RegionId != regionAtStart || HasTeleportedRoom(startRoomKey))
+                {
+                    Logger.Info("AutoWalker", $"  [Avoidance] Teleport detected before diagonal {attempt + 1} — treating as success");
+                    return true;
+                }
+
                 float sign = (attempt % 2 == 0) ? 1f : -1f;
-                // Widen the angle slightly each pair of attempts if still stuck
                 float angleMult = 1f + (attempt / 2) * 0.3f;
                 float angle = baseAngle + sign * DIAG_ANGLE * angleMult;
 
@@ -584,12 +673,11 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 float dy = MathF.Sin(angle) * DIAG_DIST;
                 var diagPos = MakePosition(current.X + dx, current.Y + dy, current.ZOffset);
 
-                Logger.Trace("AutoWalker", $"  [Avoidance] Diagonal attempt {attempt + 1} angle={MathF.Round(angle * 180f / MathF.PI, 1)}° to ({diagPos.X:F1},{diagPos.Y:F1})");
+                Log("AutoWalker", $"  [Avoidance] Diagonal attempt {attempt + 1} angle={MathF.Round(angle * 180f / MathF.PI, 1)}° to ({diagPos.X:F1},{diagPos.Y:F1})");
 
                 _stuckPacketReceived = false;
                 while (_stuckSignal.CurrentCount > 0) _stuckSignal.Wait(0);
 
-     
                 _sendMove(diagPos);
                 int diagWait = Math.Clamp((int)(DIAG_DIST / speed * 1000f) + 300, 600, 3000);
 
@@ -598,6 +686,12 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                     _stuckSignal.WaitAsync(ct)
                 );
 
+                if ((ushort)session.RegionId != regionAtStart || HasTeleportedRoom(startRoomKey))
+                {
+                    Logger.Info("AutoWalker", $"  [Avoidance] Teleport detected after diagonal {attempt + 1} — treating as success");
+                    return true;
+                }
+
                 if (_stuckPacketReceived)
                 {
                     Logger.Warn("AutoWalker", $"  [Avoidance] Still stuck on diagonal attempt {attempt + 1} — widening angle");
@@ -605,12 +699,11 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                     continue;
                 }
 
-                // Check if we've cleared the stuck point on the travel axis
                 current = _getPosition();
                 float currentT = (current.X - lineStart.X) * tnx + (current.Y - lineStart.Y) * tny;
                 float clearance = currentT - stuckT;
 
-                Logger.Trace("AutoWalker", $"  [Avoidance] currentT={currentT:F1} stuckT={stuckT:F1} clearance={clearance:F1}");
+                Log("AutoWalker", $"  [Avoidance] currentT={currentT:F1} stuckT={stuckT:F1} clearance={clearance:F1}");
 
                 if (clearance >= CLEAR_THRESHOLD)
                 {
@@ -621,6 +714,14 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
             Logger.Error("AutoWalker", $"  [Avoidance] Failed to clear pillar after {MAX_DIAG_ATTEMPTS} attempts");
             return false;
+        }
+        private bool HasTeleportedRoom(string? startRoom)
+        {
+            if (startRoom == null) return false;
+            var cur = _getPosition();
+            if ((cur.RegionId & 0x8000) == 0) return false;
+            string curRoom = RegionResolver.Resolve((short)cur.RegionId, (int)(cur.X / 192), (int)(cur.Y / 192));
+            return curRoom != startRoom;
         }
 
         private BotPosition OffsetPosition(BotPosition origin, float angle, float distance)
@@ -717,8 +818,6 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
                         if (i <= 24 || IsProgressingToward(projPoint, wideProbe, lineEnd))
                         {
-                            // Return a 15-unit physical movement step, but angled safely away 
-                            // from the upcoming obstacle found by our long predictive probe!
                             return OffsetPosition(projPoint, finalAngle, STEP_DISTANCE);
                         }
                     }
@@ -731,6 +830,11 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             if ((_activeRegionId & 0x8000) != 0)
                 return BotPosition.FromDisplayWorldDungeon(worldX, worldY, z, _activeRegionId);
             return BotPosition.FromDisplayWorld(worldX, worldY, z);
+        }
+        public void ClearStuckState()
+        {
+            _stuckPacketReceived = false;
+            while (_stuckSignal.CurrentCount > 0) _stuckSignal.Wait(0);
         }
         private static WaypointGraph BuildGraph()
         {
@@ -1123,6 +1227,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             _graph.AddNode("ch_383", BotPosition.FromDisplayWorld(6490, 562));
             _graph.AddNode("ch_384", BotPosition.FromDisplayWorld(6490, 432));
             _graph.AddNode("ch_385", BotPosition.FromDisplayWorld(6382, 473));
+            _graph.AddNode("ch_386", BotPosition.FromDisplayWorld(7200, 1975));
             _graph.AddEdge("ch_0", "ch_1");
             _graph.AddEdge("ch_1", "ch_2");
             _graph.AddEdge("ch_2", "ch_3");
@@ -1855,7 +1960,14 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             _graph.AddEdge("ch_384", "ch_385");
             _graph.AddEdge("ch_385", "ch_381");
             _graph.AddEdge("ch_385", "ch_382");
-
+            _graph.AddEdge("ch_51", "ch_55");
+            _graph.AddEdge("ch_58", "ch_56");
+            _graph.AddEdge("ch_51", "ch_55");
+            _graph.AddEdge("ch_58", "ch_56");
+            _graph.AddEdge("ch_57", "ch_386");
+            _graph.AddEdge("ch_386", "ch_59");
+            _graph.AddEdge("ch_386", "ch_58");
+            _graph.AddEdge("ch_386", "ch_56");
 
             #endregion
 
@@ -9028,10 +9140,10 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
             #region - Qin-Shit -
 
-            BotPosition.CurrentDungeonRegionId = 0x8006;
-            
+
             #region - B1 -
 
+            BotPosition.CurrentDungeonRegionId = 0x8007;
             _graph.AddNode("qs1_0", BotPosition.FromDisplayWorld(24574, 24282));
             _graph.AddNode("qs1_1", BotPosition.FromDisplayWorld(24724, 24278));
             _graph.AddNode("qs1_2", BotPosition.FromDisplayWorld(24743, 24351));
@@ -9163,11 +9275,12 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             _graph.AddEdge("qs1_45", "qs1_28");
             _graph.AddEdge("qs1_45", "qs1_46");
             _graph.AddEdge("qs1_46", "qs1_26");
-
+            BotPosition.CurrentDungeonRegionId = 0;
             #endregion
 
             #region - B2 -
 
+            BotPosition.CurrentDungeonRegionId = 0x8006;
             // Room 1 - start left to right, top to bottom.
             #region - Room 1 -
 
@@ -10168,19 +10281,1128 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
             #endregion
 
+            BotPosition.CurrentDungeonRegionId = 0;
+
             #endregion
 
             #region - B3 -
 
-
+            BotPosition.CurrentDungeonRegionId = 0x8005;
+            _graph.AddNode("qs3_0", BotPosition.FromDisplayWorld(24637, 24538));
+            _graph.AddNode("qs3_1", BotPosition.FromDisplayWorld(24726, 24613));
+            _graph.AddNode("qs3_2", BotPosition.FromDisplayWorld(24607, 24717));
+            _graph.AddNode("qs3_3", BotPosition.FromDisplayWorld(24506, 24594));
+            _graph.AddNode("qs3_4", BotPosition.FromDisplayWorld(24321, 24541));
+            _graph.AddNode("qs3_5", BotPosition.FromDisplayWorld(24100, 24501));
+            _graph.AddNode("qs3_6", BotPosition.FromDisplayWorld(23960, 24514));
+            _graph.AddNode("qs3_7", BotPosition.FromDisplayWorld(23920, 24623));
+            _graph.AddNode("qs3_8", BotPosition.FromDisplayWorld(24153, 24709));
+            _graph.AddNode("qs3_9", BotPosition.FromDisplayWorld(24121, 24892));
+            _graph.AddNode("qs3_10", BotPosition.FromDisplayWorld(24055, 25026));
+            _graph.AddNode("qs3_11", BotPosition.FromDisplayWorld(24180, 25148));
+            _graph.AddNode("qs3_12", BotPosition.FromDisplayWorld(23984, 25239));
+            _graph.AddNode("qs3_13", BotPosition.FromDisplayWorld(23868, 25113));
+            _graph.AddNode("qs3_14", BotPosition.FromDisplayWorld(23908, 25330));
+            _graph.AddNode("qs3_15", BotPosition.FromDisplayWorld(23983, 25525));
+            _graph.AddNode("qs3_16", BotPosition.FromDisplayWorld(23926, 25614));
+            _graph.AddNode("qs3_17", BotPosition.FromDisplayWorld(23752, 25542));
+            _graph.AddNode("qs3_18", BotPosition.FromDisplayWorld(23651, 25625));
+            _graph.AddNode("qs3_19", BotPosition.FromDisplayWorld(23567, 25533));
+            _graph.AddNode("qs3_20", BotPosition.FromDisplayWorld(23644, 25313));
+            _graph.AddNode("qs3_21", BotPosition.FromDisplayWorld(23625, 25228));
+            _graph.AddNode("qs3_22", BotPosition.FromDisplayWorld(23464, 25178));
+            _graph.AddNode("qs3_23", BotPosition.FromDisplayWorld(23589, 25077));
+            _graph.AddNode("qs3_24", BotPosition.FromDisplayWorld(23532, 24820));
+            _graph.AddNode("qs3_25", BotPosition.FromDisplayWorld(23767, 24703));
+            _graph.AddNode("qs3_26", BotPosition.FromDisplayWorld(23668, 24576));
+            _graph.AddNode("qs3_27", BotPosition.FromDisplayWorld(23466, 24623));
+            _graph.AddNode("qs3_28", BotPosition.FromDisplayWorld(23274, 24649));
+            _graph.AddNode("qs3_29", BotPosition.FromDisplayWorld(23080, 24575));
+            _graph.AddNode("qs3_30", BotPosition.FromDisplayWorld(22999, 24720));
+            _graph.AddNode("qs3_31", BotPosition.FromDisplayWorld(22757, 24697));
+            _graph.AddNode("qs3_32", BotPosition.FromDisplayWorld(22632, 24827));
+            _graph.AddNode("qs3_33", BotPosition.FromDisplayWorld(22629, 25016));
+            _graph.AddNode("qs3_34", BotPosition.FromDisplayWorld(22459, 25116));
+            _graph.AddNode("qs3_35", BotPosition.FromDisplayWorld(22461, 25433));
+            _graph.AddNode("qs3_36", BotPosition.FromDisplayWorld(22570, 25492));
+            _graph.AddNode("qs3_37", BotPosition.FromDisplayWorld(22769, 25458));
+            _graph.AddNode("qs3_38", BotPosition.FromDisplayWorld(22916, 25556));
+            _graph.AddNode("qs3_39", BotPosition.FromDisplayWorld(23002, 25402));
+            _graph.AddNode("qs3_40", BotPosition.FromDisplayWorld(22817, 25408));
+            _graph.AddNode("qs3_41", BotPosition.FromDisplayWorld(23181, 25390));
+            _graph.AddNode("qs3_42", BotPosition.FromDisplayWorld(23183, 25187));
+            _graph.AddNode("qs3_43", BotPosition.FromDisplayWorld(23200, 25094));
+            _graph.AddNode("qs3_44", BotPosition.FromDisplayWorld(23334, 25146));
+            _graph.AddNode("qs3_45", BotPosition.FromDisplayWorld(22924, 25827));
+            _graph.AddNode("qs3_46", BotPosition.FromDisplayWorld(23045, 25921));
+            _graph.AddNode("qs3_47", BotPosition.FromDisplayWorld(23210, 25936));
+            _graph.AddNode("qs3_48", BotPosition.FromDisplayWorld(23226, 26163));
+            _graph.AddNode("qs3_49", BotPosition.FromDisplayWorld(22984, 26309));
+            _graph.AddNode("qs3_50", BotPosition.FromDisplayWorld(23082, 26469));
+            _graph.AddNode("qs3_51", BotPosition.FromDisplayWorld(23159, 26338));
+            _graph.AddNode("qs3_52", BotPosition.FromDisplayWorld(23252, 26398));
+            _graph.AddNode("qs3_53", BotPosition.FromDisplayWorld(23210, 26289));
+            _graph.AddNode("qs3_54", BotPosition.FromDisplayWorld(24460, 24820));
+            _graph.AddNode("qs3_55", BotPosition.FromDisplayWorld(24435, 25035));
+            _graph.AddNode("qs3_56", BotPosition.FromDisplayWorld(24417, 25136));
+            _graph.AddNode("qs3_57", BotPosition.FromDisplayWorld(24525, 25250));
+            _graph.AddNode("qs3_58", BotPosition.FromDisplayWorld(24596, 25137));
+            _graph.AddNode("qs3_59", BotPosition.FromDisplayWorld(24626, 25044));
+            _graph.AddNode("qs3_60", BotPosition.FromDisplayWorld(24826, 25044));
+            _graph.AddNode("qs3_61", BotPosition.FromDisplayWorld(24933, 25105));
+            _graph.AddNode("qs3_62", BotPosition.FromDisplayWorld(25042, 24973));
+            _graph.AddNode("qs3_63", BotPosition.FromDisplayWorld(25203, 25127));
+            _graph.AddNode("qs3_64", BotPosition.FromDisplayWorld(25013, 25287));
+            _graph.AddNode("qs3_65", BotPosition.FromDisplayWorld(25286, 25253));
+            _graph.AddNode("qs3_66", BotPosition.FromDisplayWorld(25480, 25169));
+            _graph.AddNode("qs3_67", BotPosition.FromDisplayWorld(25554, 25255));
+            _graph.AddNode("qs3_68", BotPosition.FromDisplayWorld(25473, 25400));
+            _graph.AddNode("qs3_69", BotPosition.FromDisplayWorld(25560, 25509));
+            _graph.AddNode("qs3_70", BotPosition.FromDisplayWorld(25483, 25595));
+            _graph.AddNode("qs3_71", BotPosition.FromDisplayWorld(25199, 25510));
+            _graph.AddNode("qs3_72", BotPosition.FromDisplayWorld(25132, 25661));
+            _graph.AddNode("qs3_73", BotPosition.FromDisplayWorld(24967, 25585));
+            _graph.AddNode("qs3_74", BotPosition.FromDisplayWorld(24718, 25607));
+            _graph.AddNode("qs3_75", BotPosition.FromDisplayWorld(24678, 25406));
+            _graph.AddNode("qs3_76", BotPosition.FromDisplayWorld(24587, 25413));
+            _graph.AddNode("qs3_77", BotPosition.FromDisplayWorld(24505, 25521));
+            _graph.AddNode("qs3_78", BotPosition.FromDisplayWorld(24563, 25670));
+            _graph.AddNode("qs3_79", BotPosition.FromDisplayWorld(24589, 25939));
+            _graph.AddNode("qs3_80", BotPosition.FromDisplayWorld(24505, 26070));
+            _graph.AddNode("qs3_81", BotPosition.FromDisplayWorld(24646, 26159));
+            _graph.AddNode("qs3_82", BotPosition.FromDisplayWorld(24272, 26093));
+            _graph.AddNode("qs3_83", BotPosition.FromDisplayWorld(24167, 26024));
+            _graph.AddNode("qs3_84", BotPosition.FromDisplayWorld(24123, 25808));
+            _graph.AddNode("qs3_85", BotPosition.FromDisplayWorld(23961, 25784));
+            _graph.AddNode("qs3_86", BotPosition.FromDisplayWorld(23852, 25810));
+            _graph.AddNode("qs3_87", BotPosition.FromDisplayWorld(23835, 25959));
+            _graph.AddNode("qs3_88", BotPosition.FromDisplayWorld(23698, 26009));
+            _graph.AddNode("qs3_89", BotPosition.FromDisplayWorld(23786, 26157));
+            _graph.AddNode("qs3_90", BotPosition.FromDisplayWorld(23827, 26070));
+            _graph.AddNode("qs3_91", BotPosition.FromDisplayWorld(24656, 26303));
+            _graph.AddNode("qs3_92", BotPosition.FromDisplayWorld(24631, 26410));
+            _graph.AddNode("qs3_93", BotPosition.FromDisplayWorld(24754, 26536));
+            _graph.AddNode("qs3_94", BotPosition.FromDisplayWorld(24957, 26530));
+            _graph.AddNode("qs3_95", BotPosition.FromDisplayWorld(25048, 26708));
+            _graph.AddNode("qs3_96", BotPosition.FromDisplayWorld(25270, 26717));
+            _graph.AddNode("qs3_97", BotPosition.FromDisplayWorld(25424, 26621));
+            _graph.AddNode("qs3_98", BotPosition.FromDisplayWorld(25399, 26434));
+            _graph.AddNode("qs3_99", BotPosition.FromDisplayWorld(25490, 26248));
+            _graph.AddNode("qs3_100", BotPosition.FromDisplayWorld(25347, 26170));
+            _graph.AddNode("qs3_101", BotPosition.FromDisplayWorld(25730, 26239));
+            _graph.AddNode("qs3_102", BotPosition.FromDisplayWorld(25854, 26123));
+            _graph.AddNode("qs3_103", BotPosition.FromDisplayWorld(25872, 25942));
+            _graph.AddNode("qs3_104", BotPosition.FromDisplayWorld(26129, 25976));
+            _graph.AddNode("qs3_105", BotPosition.FromDisplayWorld(26286, 26206));
+            _graph.AddNode("qs3_106", BotPosition.FromDisplayWorld(26392, 26059));
+            _graph.AddNode("qs3_107", BotPosition.FromDisplayWorld(26304, 25858));
+            _graph.AddNode("qs3_108", BotPosition.FromDisplayWorld(24674, 24351));
+            _graph.AddNode("qs3_109", BotPosition.FromDisplayWorld(24692, 24098));
+            _graph.AddNode("qs3_110", BotPosition.FromDisplayWorld(24769, 24023));
+            _graph.AddNode("qs3_111", BotPosition.FromDisplayWorld(24655, 23867));
+            _graph.AddNode("qs3_112", BotPosition.FromDisplayWorld(24569, 23926));
+            _graph.AddNode("qs3_113", BotPosition.FromDisplayWorld(24545, 24083));
+            _graph.AddNode("qs3_114", BotPosition.FromDisplayWorld(24334, 24083));
+            _graph.AddNode("qs3_115", BotPosition.FromDisplayWorld(24246, 24028));
+            _graph.AddNode("qs3_116", BotPosition.FromDisplayWorld(24088, 24123));
+            _graph.AddNode("qs3_117", BotPosition.FromDisplayWorld(23946, 23901));
+            _graph.AddNode("qs3_118", BotPosition.FromDisplayWorld(24157, 23831));
+            _graph.AddNode("qs3_119", BotPosition.FromDisplayWorld(23856, 23879));
+            _graph.AddNode("qs3_120", BotPosition.FromDisplayWorld(23679, 23944));
+            _graph.AddNode("qs3_121", BotPosition.FromDisplayWorld(23602, 23870));
+            _graph.AddNode("qs3_122", BotPosition.FromDisplayWorld(23629, 23780));
+            _graph.AddNode("qs3_123", BotPosition.FromDisplayWorld(23682, 23726));
+            _graph.AddNode("qs3_124", BotPosition.FromDisplayWorld(23651, 23662));
+            _graph.AddNode("qs3_125", BotPosition.FromDisplayWorld(23594, 23609));
+            _graph.AddNode("qs3_126", BotPosition.FromDisplayWorld(23677, 23525));
+            _graph.AddNode("qs3_127", BotPosition.FromDisplayWorld(23922, 23589));
+            _graph.AddNode("qs3_128", BotPosition.FromDisplayWorld(23975, 23584));
+            _graph.AddNode("qs3_129", BotPosition.FromDisplayWorld(24034, 23434));
+            _graph.AddNode("qs3_130", BotPosition.FromDisplayWorld(24153, 23549));
+            _graph.AddNode("qs3_131", BotPosition.FromDisplayWorld(24404, 23488));
+            _graph.AddNode("qs3_132", BotPosition.FromDisplayWorld(24453, 23574));
+            _graph.AddNode("qs3_133", BotPosition.FromDisplayWorld(24511, 23718));
+            _graph.AddNode("qs3_134", BotPosition.FromDisplayWorld(24589, 23683));
+            _graph.AddNode("qs3_135", BotPosition.FromDisplayWorld(24660, 23562));
+            _graph.AddNode("qs3_136", BotPosition.FromDisplayWorld(24602, 23478));
+            _graph.AddNode("qs3_137", BotPosition.FromDisplayWorld(24560, 23200));
+            _graph.AddNode("qs3_138", BotPosition.FromDisplayWorld(24653, 23045));
+            _graph.AddNode("qs3_139", BotPosition.FromDisplayWorld(24512, 22961));
+            _graph.AddNode("qs3_140", BotPosition.FromDisplayWorld(24522, 22691));
+            _graph.AddNode("qs3_141", BotPosition.FromDisplayWorld(24400, 22575));
+            _graph.AddNode("qs3_142", BotPosition.FromDisplayWorld(24182, 22570));
+            _graph.AddNode("qs3_143", BotPosition.FromDisplayWorld(24103, 22408));
+            _graph.AddNode("qs3_144", BotPosition.FromDisplayWorld(23858, 22387));
+            _graph.AddNode("qs3_145", BotPosition.FromDisplayWorld(23739, 22468));
+            _graph.AddNode("qs3_146", BotPosition.FromDisplayWorld(23749, 22802));
+            _graph.AddNode("qs3_147", BotPosition.FromDisplayWorld(23643, 22871));
+            _graph.AddNode("qs3_148", BotPosition.FromDisplayWorld(23818, 22956));
+            _graph.AddNode("qs3_149", BotPosition.FromDisplayWorld(23836, 23139));
+            _graph.AddNode("qs3_150", BotPosition.FromDisplayWorld(23980, 23152));
+            _graph.AddNode("qs3_151", BotPosition.FromDisplayWorld(24067, 23132));
+            _graph.AddNode("qs3_152", BotPosition.FromDisplayWorld(24125, 23196));
+            _graph.AddNode("qs3_153", BotPosition.FromDisplayWorld(24064, 23282));
+            _graph.AddNode("qs3_154", BotPosition.FromDisplayWorld(23358, 22897));
+            _graph.AddNode("qs3_155", BotPosition.FromDisplayWorld(23295, 23025));
+            _graph.AddNode("qs3_156", BotPosition.FromDisplayWorld(23274, 23173));
+            _graph.AddNode("qs3_157", BotPosition.FromDisplayWorld(23045, 23186));
+            _graph.AddNode("qs3_158", BotPosition.FromDisplayWorld(22988, 23129));
+            _graph.AddNode("qs3_159", BotPosition.FromDisplayWorld(22904, 22915));
+            _graph.AddNode("qs3_160", BotPosition.FromDisplayWorld(22722, 23028));
+            _graph.AddNode("qs3_161", BotPosition.FromDisplayWorld(22841, 23092));
+            _graph.AddNode("qs3_162", BotPosition.FromDisplayWorld(24909, 23027));
+            _graph.AddNode("qs3_163", BotPosition.FromDisplayWorld(25013, 23130));
+            _graph.AddNode("qs3_164", BotPosition.FromDisplayWorld(25024, 23290));
+            _graph.AddNode("qs3_165", BotPosition.FromDisplayWorld(25279, 23336));
+            _graph.AddNode("qs3_166", BotPosition.FromDisplayWorld(25317, 23161));
+            _graph.AddNode("qs3_167", BotPosition.FromDisplayWorld(25455, 23111));
+            _graph.AddNode("qs3_168", BotPosition.FromDisplayWorld(25339, 22955));
+            _graph.AddNode("qs3_169", BotPosition.FromDisplayWorld(23069, 24334));
+            _graph.AddNode("qs3_170", BotPosition.FromDisplayWorld(23185, 24216));
+            _graph.AddNode("qs3_171", BotPosition.FromDisplayWorld(23352, 24179));
+            _graph.AddNode("qs3_172", BotPosition.FromDisplayWorld(23388, 23935));
+            _graph.AddNode("qs3_173", BotPosition.FromDisplayWorld(23198, 23895));
+            _graph.AddNode("qs3_174", BotPosition.FromDisplayWorld(23152, 23766));
+            _graph.AddNode("qs3_175", BotPosition.FromDisplayWorld(22991, 23864));
+            _graph.AddNode("qs3_176", BotPosition.FromDisplayWorld(24828, 24695));
+            _graph.AddNode("qs3_177", BotPosition.FromDisplayWorld(24977, 24698));
+            _graph.AddNode("qs3_178", BotPosition.FromDisplayWorld(25086, 24775));
+            _graph.AddNode("qs3_179", BotPosition.FromDisplayWorld(25224, 24707));
+            _graph.AddNode("qs3_180", BotPosition.FromDisplayWorld(25229, 24592));
+            _graph.AddNode("qs3_181", BotPosition.FromDisplayWorld(25047, 24559));
+            _graph.AddNode("qs3_182", BotPosition.FromDisplayWorld(25024, 24406));
+            _graph.AddNode("qs3_183", BotPosition.FromDisplayWorld(25103, 24258));
+            _graph.AddNode("qs3_184", BotPosition.FromDisplayWorld(25208, 24043));
+            _graph.AddNode("qs3_185", BotPosition.FromDisplayWorld(25249, 23893));
+            _graph.AddNode("qs3_186", BotPosition.FromDisplayWorld(24989, 24074));
+            _graph.AddNode("qs3_187", BotPosition.FromDisplayWorld(25287, 24183));
+            _graph.AddNode("qs3_188", BotPosition.FromDisplayWorld(25186, 23697));
+            _graph.AddNode("qs3_189", BotPosition.FromDisplayWorld(25254, 23622));
+            _graph.AddNode("qs3_190", BotPosition.FromDisplayWorld(25338, 23657));
+            _graph.AddNode("qs3_191", BotPosition.FromDisplayWorld(25399, 23698));
+            _graph.AddNode("qs3_192", BotPosition.FromDisplayWorld(25514, 23622));
+            _graph.AddNode("qs3_193", BotPosition.FromDisplayWorld(25591, 23674));
+            _graph.AddNode("qs3_194", BotPosition.FromDisplayWorld(25519, 23981));
+            _graph.AddNode("qs3_195", BotPosition.FromDisplayWorld(25675, 24051));
+            _graph.AddNode("qs3_196", BotPosition.FromDisplayWorld(25579, 24159));
+            _graph.AddNode("qs3_197", BotPosition.FromDisplayWorld(25597, 24462));
+            _graph.AddNode("qs3_198", BotPosition.FromDisplayWorld(25470, 24467));
+            _graph.AddNode("qs3_199", BotPosition.FromDisplayWorld(25381, 24571));
+            _graph.AddNode("qs3_200", BotPosition.FromDisplayWorld(25536, 24667));
+            _graph.AddNode("qs3_201", BotPosition.FromDisplayWorld(25673, 24618));
+            _graph.AddNode("qs3_202", BotPosition.FromDisplayWorld(25953, 24574));
+            _graph.AddNode("qs3_203", BotPosition.FromDisplayWorld(26088, 24665));
+            _graph.AddNode("qs3_204", BotPosition.FromDisplayWorld(26148, 24539));
+            _graph.AddNode("qs3_205", BotPosition.FromDisplayWorld(26102, 24872));
+            _graph.AddNode("qs3_206", BotPosition.FromDisplayWorld(25997, 25019));
+            _graph.AddNode("qs3_207", BotPosition.FromDisplayWorld(25822, 25042));
+            _graph.AddNode("qs3_208", BotPosition.FromDisplayWorld(25787, 25175));
+            _graph.AddNode("qs3_209", BotPosition.FromDisplayWorld(25802, 25305));
+            _graph.AddNode("qs3_210", BotPosition.FromDisplayWorld(25967, 25341));
+            _graph.AddNode("qs3_211", BotPosition.FromDisplayWorld(25986, 25458));
+            _graph.AddNode("qs3_212", BotPosition.FromDisplayWorld(26188, 25405));
+            _graph.AddNode("qs3_213", BotPosition.FromDisplayWorld(26252, 24511));
+            _graph.AddNode("qs3_214", BotPosition.FromDisplayWorld(26421, 24540));
+            _graph.AddNode("qs3_215", BotPosition.FromDisplayWorld(26543, 24441));
+            _graph.AddNode("qs3_216", BotPosition.FromDisplayWorld(26547, 24212));
+            _graph.AddNode("qs3_217", BotPosition.FromDisplayWorld(26719, 24115));
+            _graph.AddNode("qs3_218", BotPosition.FromDisplayWorld(26734, 23873));
+            _graph.AddNode("qs3_219", BotPosition.FromDisplayWorld(26669, 23761));
+            _graph.AddNode("qs3_220", BotPosition.FromDisplayWorld(26461, 23744));
+            _graph.AddNode("qs3_221", BotPosition.FromDisplayWorld(26335, 23779));
+            _graph.AddNode("qs3_222", BotPosition.FromDisplayWorld(26248, 23665));
+            _graph.AddNode("qs3_223", BotPosition.FromDisplayWorld(26172, 23827));
+            _graph.AddNode("qs3_224", BotPosition.FromDisplayWorld(25992, 23825));
+            _graph.AddNode("qs3_225", BotPosition.FromDisplayWorld(25958, 23925));
+            _graph.AddNode("qs3_226", BotPosition.FromDisplayWorld(25995, 24075));
+            _graph.AddNode("qs3_227", BotPosition.FromDisplayWorld(25922, 24137));
+            _graph.AddNode("qs3_228", BotPosition.FromDisplayWorld(25841, 24076));
+            _graph.AddNode("qs3_229", BotPosition.FromDisplayWorld(26246, 23410));
+            _graph.AddNode("qs3_230", BotPosition.FromDisplayWorld(26104, 23313));
+            _graph.AddNode("qs3_231", BotPosition.FromDisplayWorld(25949, 23298));
+            _graph.AddNode("qs3_232", BotPosition.FromDisplayWorld(25938, 23062));
+            _graph.AddNode("qs3_233", BotPosition.FromDisplayWorld(25950, 22943));
+            _graph.AddNode("qs3_234", BotPosition.FromDisplayWorld(25898, 22833));
+            _graph.AddNode("qs3_235", BotPosition.FromDisplayWorld(26073, 22775));
+            _graph.AddNode("qs3_236", BotPosition.FromDisplayWorld(26214, 22911));
+            _graph.AddNode("qs3_237", BotPosition.FromDisplayWorld(26089, 23003));
+            _graph.AddNode("qs3_238", BotPosition.FromDisplayWorld(26141, 22667));
+            _graph.AddNode("qs3_239", BotPosition.FromDisplayWorld(25104, 25822));
+            _graph.AddNode("qs3_240", BotPosition.FromDisplayWorld(25027, 25931));
+            _graph.AddNode("qs3_241", BotPosition.FromDisplayWorld(25122, 25993));
+            _graph.AddNode("qs3_242", BotPosition.FromDisplayWorld(25226, 25950));
+            _graph.AddNode("qs3_243", BotPosition.FromDisplayWorld(25335, 25993));
+            _graph.AddNode("qs3_244", BotPosition.FromDisplayWorld(25335, 26067));
+            _graph.AddNode("qs3_245", BotPosition.FromDisplayWorld(26493, 26123));
+            _graph.AddEdge("qs3_0", "qs3_1");
+            _graph.AddEdge("qs3_1", "qs3_2");
+            _graph.AddEdge("qs3_2", "qs3_3");
+            _graph.AddEdge("qs3_3", "qs3_0");
+            _graph.AddEdge("qs3_3", "qs3_4");
+            _graph.AddEdge("qs3_4", "qs3_5");
+            _graph.AddEdge("qs3_5", "qs3_6");
+            _graph.AddEdge("qs3_6", "qs3_7");
+            _graph.AddEdge("qs3_7", "qs3_8");
+            _graph.AddEdge("qs3_8", "qs3_9");
+            _graph.AddEdge("qs3_9", "qs3_10");
+            _graph.AddEdge("qs3_10", "qs3_11");
+            _graph.AddEdge("qs3_11", "qs3_12");
+            _graph.AddEdge("qs3_12", "qs3_13");
+            _graph.AddEdge("qs3_13", "qs3_10");
+            _graph.AddEdge("qs3_12", "qs3_14");
+            _graph.AddEdge("qs3_14", "qs3_15");
+            _graph.AddEdge("qs3_15", "qs3_16");
+            _graph.AddEdge("qs3_16", "qs3_17");
+            _graph.AddEdge("qs3_17", "qs3_18");
+            _graph.AddEdge("qs3_18", "qs3_19");
+            _graph.AddEdge("qs3_19", "qs3_20");
+            _graph.AddEdge("qs3_20", "qs3_21");
+            _graph.AddEdge("qs3_21", "qs3_22");
+            _graph.AddEdge("qs3_22", "qs3_23");
+            _graph.AddEdge("qs3_23", "qs3_21");
+            _graph.AddEdge("qs3_23", "qs3_24");
+            _graph.AddEdge("qs3_24", "qs3_25");
+            _graph.AddEdge("qs3_25", "qs3_26");
+            _graph.AddEdge("qs3_26", "qs3_27");
+            _graph.AddEdge("qs3_27", "qs3_28");
+            _graph.AddEdge("qs3_28", "qs3_29");
+            _graph.AddEdge("qs3_29", "qs3_30");
+            _graph.AddEdge("qs3_30", "qs3_28");
+            _graph.AddEdge("qs3_30", "qs3_31");
+            _graph.AddEdge("qs3_31", "qs3_32");
+            _graph.AddEdge("qs3_32", "qs3_33");
+            _graph.AddEdge("qs3_33", "qs3_34");
+            _graph.AddEdge("qs3_34", "qs3_35");
+            _graph.AddEdge("qs3_35", "qs3_36");
+            _graph.AddEdge("qs3_36", "qs3_37");
+            _graph.AddEdge("qs3_37", "qs3_38");
+            _graph.AddEdge("qs3_38", "qs3_39");
+            _graph.AddEdge("qs3_39", "qs3_40");
+            _graph.AddEdge("qs3_40", "qs3_37");
+            _graph.AddEdge("qs3_39", "qs3_41");
+            _graph.AddEdge("qs3_41", "qs3_42");
+            _graph.AddEdge("qs3_42", "qs3_43");
+            _graph.AddEdge("qs3_43", "qs3_44");
+            _graph.AddEdge("qs3_44", "qs3_22");
+            _graph.AddEdge("qs3_38", "qs3_45");
+            _graph.AddEdge("qs3_45", "qs3_46");
+            _graph.AddEdge("qs3_46", "qs3_47");
+            _graph.AddEdge("qs3_47", "qs3_48");
+            _graph.AddEdge("qs3_48", "qs3_49");
+            _graph.AddEdge("qs3_49", "qs3_50");
+            _graph.AddEdge("qs3_50", "qs3_51");
+            _graph.AddEdge("qs3_51", "qs3_48");
+            _graph.AddEdge("qs3_50", "qs3_52");
+            _graph.AddEdge("qs3_52", "qs3_53");
+            _graph.AddEdge("qs3_53", "qs3_51");
+            _graph.AddEdge("qs3_53", "qs3_48");
+            _graph.AddEdge("qs3_2", "qs3_54");
+            _graph.AddEdge("qs3_54", "qs3_55");
+            _graph.AddEdge("qs3_55", "qs3_56");
+            _graph.AddEdge("qs3_56", "qs3_57");
+            _graph.AddEdge("qs3_57", "qs3_58");
+            _graph.AddEdge("qs3_58", "qs3_59");
+            _graph.AddEdge("qs3_59", "qs3_60");
+            _graph.AddEdge("qs3_60", "qs3_61");
+            _graph.AddEdge("qs3_61", "qs3_62");
+            _graph.AddEdge("qs3_62", "qs3_63");
+            _graph.AddEdge("qs3_63", "qs3_64");
+            _graph.AddEdge("qs3_64", "qs3_61");
+            _graph.AddEdge("qs3_63", "qs3_65");
+            _graph.AddEdge("qs3_65", "qs3_66");
+            _graph.AddEdge("qs3_66", "qs3_67");
+            _graph.AddEdge("qs3_67", "qs3_68");
+            _graph.AddEdge("qs3_68", "qs3_69");
+            _graph.AddEdge("qs3_69", "qs3_70");
+            _graph.AddEdge("qs3_70", "qs3_71");
+            _graph.AddEdge("qs3_71", "qs3_72");
+            _graph.AddEdge("qs3_72", "qs3_73");
+            _graph.AddEdge("qs3_73", "qs3_71");
+            _graph.AddEdge("qs3_73", "qs3_74");
+            _graph.AddEdge("qs3_74", "qs3_75");
+            _graph.AddEdge("qs3_75", "qs3_76");
+            _graph.AddEdge("qs3_76", "qs3_77");
+            _graph.AddEdge("qs3_77", "qs3_78");
+            _graph.AddEdge("qs3_78", "qs3_79");
+            _graph.AddEdge("qs3_79", "qs3_80");
+            _graph.AddEdge("qs3_80", "qs3_81");
+            _graph.AddEdge("qs3_81", "qs3_79");
+            _graph.AddEdge("qs3_80", "qs3_82");
+            _graph.AddEdge("qs3_82", "qs3_83");
+            _graph.AddEdge("qs3_83", "qs3_84");
+            _graph.AddEdge("qs3_84", "qs3_85");
+            _graph.AddEdge("qs3_85", "qs3_86");
+            _graph.AddEdge("qs3_86", "qs3_87");
+            _graph.AddEdge("qs3_87", "qs3_88");
+            _graph.AddEdge("qs3_88", "qs3_89");
+            _graph.AddEdge("qs3_89", "qs3_90");
+            _graph.AddEdge("qs3_90", "qs3_87");
+            _graph.AddEdge("qs3_81", "qs3_91");
+            _graph.AddEdge("qs3_91", "qs3_92");
+            _graph.AddEdge("qs3_92", "qs3_93");
+            _graph.AddEdge("qs3_93", "qs3_94");
+            _graph.AddEdge("qs3_94", "qs3_95");
+            _graph.AddEdge("qs3_95", "qs3_96");
+            _graph.AddEdge("qs3_96", "qs3_97");
+            _graph.AddEdge("qs3_97", "qs3_98");
+            _graph.AddEdge("qs3_98", "qs3_99");
+            _graph.AddEdge("qs3_99", "qs3_100");
+            _graph.AddEdge("qs3_100", "qs3_98");
+            _graph.AddEdge("qs3_99", "qs3_101");
+            _graph.AddEdge("qs3_101", "qs3_102");
+            _graph.AddEdge("qs3_102", "qs3_103");
+            _graph.AddEdge("qs3_103", "qs3_104");
+            _graph.AddEdge("qs3_104", "qs3_105");
+            _graph.AddEdge("qs3_105", "qs3_106");
+            _graph.AddEdge("qs3_106", "qs3_107");
+            _graph.AddEdge("qs3_107", "qs3_104");
+            _graph.AddEdge("qs3_104", "qs3_106");
+            _graph.AddEdge("qs3_0", "qs3_108");
+            _graph.AddEdge("qs3_108", "qs3_109");
+            _graph.AddEdge("qs3_109", "qs3_110");
+            _graph.AddEdge("qs3_110", "qs3_111");
+            _graph.AddEdge("qs3_111", "qs3_112");
+            _graph.AddEdge("qs3_112", "qs3_113");
+            _graph.AddEdge("qs3_113", "qs3_114");
+            _graph.AddEdge("qs3_114", "qs3_115");
+            _graph.AddEdge("qs3_115", "qs3_116");
+            _graph.AddEdge("qs3_116", "qs3_117");
+            _graph.AddEdge("qs3_117", "qs3_118");
+            _graph.AddEdge("qs3_118", "qs3_115");
+            _graph.AddEdge("qs3_117", "qs3_119");
+            _graph.AddEdge("qs3_119", "qs3_120");
+            _graph.AddEdge("qs3_120", "qs3_121");
+            _graph.AddEdge("qs3_121", "qs3_122");
+            _graph.AddEdge("qs3_122", "qs3_123");
+            _graph.AddEdge("qs3_123", "qs3_124");
+            _graph.AddEdge("qs3_124", "qs3_125");
+            _graph.AddEdge("qs3_125", "qs3_126");
+            _graph.AddEdge("qs3_126", "qs3_127");
+            _graph.AddEdge("qs3_127", "qs3_128");
+            _graph.AddEdge("qs3_128", "qs3_129");
+            _graph.AddEdge("qs3_129", "qs3_130");
+            _graph.AddEdge("qs3_130", "qs3_128");
+            _graph.AddEdge("qs3_130", "qs3_131");
+            _graph.AddEdge("qs3_131", "qs3_132");
+            _graph.AddEdge("qs3_132", "qs3_133");
+            _graph.AddEdge("qs3_133", "qs3_134");
+            _graph.AddEdge("qs3_134", "qs3_135");
+            _graph.AddEdge("qs3_135", "qs3_136");
+            _graph.AddEdge("qs3_136", "qs3_137");
+            _graph.AddEdge("qs3_137", "qs3_138");
+            _graph.AddEdge("qs3_138", "qs3_139");
+            _graph.AddEdge("qs3_139", "qs3_137");
+            _graph.AddEdge("qs3_139", "qs3_140");
+            _graph.AddEdge("qs3_140", "qs3_141");
+            _graph.AddEdge("qs3_141", "qs3_142");
+            _graph.AddEdge("qs3_142", "qs3_143");
+            _graph.AddEdge("qs3_143", "qs3_144");
+            _graph.AddEdge("qs3_144", "qs3_145");
+            _graph.AddEdge("qs3_145", "qs3_146");
+            _graph.AddEdge("qs3_146", "qs3_147");
+            _graph.AddEdge("qs3_147", "qs3_148");
+            _graph.AddEdge("qs3_148", "qs3_146");
+            _graph.AddEdge("qs3_148", "qs3_149");
+            _graph.AddEdge("qs3_149", "qs3_150");
+            _graph.AddEdge("qs3_150", "qs3_151");
+            _graph.AddEdge("qs3_151", "qs3_152");
+            _graph.AddEdge("qs3_152", "qs3_153");
+            _graph.AddEdge("qs3_153", "qs3_129");
+            _graph.AddEdge("qs3_147", "qs3_154");
+            _graph.AddEdge("qs3_154", "qs3_155");
+            _graph.AddEdge("qs3_155", "qs3_156");
+            _graph.AddEdge("qs3_156", "qs3_157");
+            _graph.AddEdge("qs3_157", "qs3_158");
+            _graph.AddEdge("qs3_158", "qs3_159");
+            _graph.AddEdge("qs3_159", "qs3_160");
+            _graph.AddEdge("qs3_160", "qs3_161");
+            _graph.AddEdge("qs3_161", "qs3_158");
+            _graph.AddEdge("qs3_138", "qs3_162");
+            _graph.AddEdge("qs3_162", "qs3_163");
+            _graph.AddEdge("qs3_163", "qs3_164");
+            _graph.AddEdge("qs3_164", "qs3_165");
+            _graph.AddEdge("qs3_165", "qs3_166");
+            _graph.AddEdge("qs3_166", "qs3_167");
+            _graph.AddEdge("qs3_167", "qs3_168");
+            _graph.AddEdge("qs3_168", "qs3_166");
+            _graph.AddEdge("qs3_29", "qs3_169");
+            _graph.AddEdge("qs3_169", "qs3_170");
+            _graph.AddEdge("qs3_170", "qs3_171");
+            _graph.AddEdge("qs3_171", "qs3_172");
+            _graph.AddEdge("qs3_172", "qs3_173");
+            _graph.AddEdge("qs3_173", "qs3_174");
+            _graph.AddEdge("qs3_174", "qs3_175");
+            _graph.AddEdge("qs3_175", "qs3_173");
+            _graph.AddEdge("qs3_1", "qs3_176");
+            _graph.AddEdge("qs3_176", "qs3_177");
+            _graph.AddEdge("qs3_177", "qs3_178");
+            _graph.AddEdge("qs3_178", "qs3_179");
+            _graph.AddEdge("qs3_179", "qs3_180");
+            _graph.AddEdge("qs3_180", "qs3_181");
+            _graph.AddEdge("qs3_181", "qs3_182");
+            _graph.AddEdge("qs3_182", "qs3_183");
+            _graph.AddEdge("qs3_183", "qs3_184");
+            _graph.AddEdge("qs3_184", "qs3_185");
+            _graph.AddEdge("qs3_184", "qs3_186");
+            _graph.AddEdge("qs3_186", "qs3_183");
+            _graph.AddEdge("qs3_183", "qs3_187");
+            _graph.AddEdge("qs3_187", "qs3_184");
+            _graph.AddEdge("qs3_185", "qs3_188");
+            _graph.AddEdge("qs3_188", "qs3_189");
+            _graph.AddEdge("qs3_189", "qs3_190");
+            _graph.AddEdge("qs3_190", "qs3_191");
+            _graph.AddEdge("qs3_191", "qs3_192");
+            _graph.AddEdge("qs3_192", "qs3_193");
+            _graph.AddEdge("qs3_193", "qs3_194");
+            _graph.AddEdge("qs3_194", "qs3_195");
+            _graph.AddEdge("qs3_195", "qs3_196");
+            _graph.AddEdge("qs3_196", "qs3_194");
+            _graph.AddEdge("qs3_196", "qs3_197");
+            _graph.AddEdge("qs3_197", "qs3_198");
+            _graph.AddEdge("qs3_198", "qs3_199");
+            _graph.AddEdge("qs3_199", "qs3_200");
+            _graph.AddEdge("qs3_200", "qs3_201");
+            _graph.AddEdge("qs3_201", "qs3_202");
+            _graph.AddEdge("qs3_202", "qs3_203");
+            _graph.AddEdge("qs3_203", "qs3_204");
+            _graph.AddEdge("qs3_204", "qs3_202");
+            _graph.AddEdge("qs3_203", "qs3_205");
+            _graph.AddEdge("qs3_205", "qs3_206");
+            _graph.AddEdge("qs3_206", "qs3_207");
+            _graph.AddEdge("qs3_207", "qs3_208");
+            _graph.AddEdge("qs3_208", "qs3_209");
+            _graph.AddEdge("qs3_209", "qs3_210");
+            _graph.AddEdge("qs3_210", "qs3_211");
+            _graph.AddEdge("qs3_211", "qs3_212");
+            _graph.AddEdge("qs3_212", "qs3_210");
+            _graph.AddEdge("qs3_204", "qs3_213");
+            _graph.AddEdge("qs3_213", "qs3_214");
+            _graph.AddEdge("qs3_214", "qs3_215");
+            _graph.AddEdge("qs3_215", "qs3_216");
+            _graph.AddEdge("qs3_216", "qs3_217");
+            _graph.AddEdge("qs3_217", "qs3_218");
+            _graph.AddEdge("qs3_218", "qs3_219");
+            _graph.AddEdge("qs3_219", "qs3_220");
+            _graph.AddEdge("qs3_220", "qs3_221");
+            _graph.AddEdge("qs3_221", "qs3_222");
+            _graph.AddEdge("qs3_222", "qs3_223");
+            _graph.AddEdge("qs3_223", "qs3_221");
+            _graph.AddEdge("qs3_223", "qs3_224");
+            _graph.AddEdge("qs3_224", "qs3_225");
+            _graph.AddEdge("qs3_225", "qs3_226");
+            _graph.AddEdge("qs3_226", "qs3_227");
+            _graph.AddEdge("qs3_227", "qs3_228");
+            _graph.AddEdge("qs3_228", "qs3_195");
+            _graph.AddEdge("qs3_222", "qs3_229");
+            _graph.AddEdge("qs3_229", "qs3_230");
+            _graph.AddEdge("qs3_230", "qs3_231");
+            _graph.AddEdge("qs3_231", "qs3_232");
+            _graph.AddEdge("qs3_232", "qs3_233");
+            _graph.AddEdge("qs3_233", "qs3_234");
+            _graph.AddEdge("qs3_234", "qs3_235");
+            _graph.AddEdge("qs3_235", "qs3_233");
+            _graph.AddEdge("qs3_235", "qs3_236");
+            _graph.AddEdge("qs3_236", "qs3_237");
+            _graph.AddEdge("qs3_237", "qs3_232");
+            _graph.AddEdge("qs3_237", "qs3_233");
+            _graph.AddEdge("qs3_235", "qs3_238");
+            _graph.AddEdge("qs3_72", "qs3_239");
+            _graph.AddEdge("qs3_239", "qs3_240");
+            _graph.AddEdge("qs3_240", "qs3_241");
+            _graph.AddEdge("qs3_241", "qs3_242");
+            _graph.AddEdge("qs3_242", "qs3_243");
+            _graph.AddEdge("qs3_243", "qs3_244");
+            _graph.AddEdge("qs3_244", "qs3_100");
+            _graph.AddEdge("qs3_106", "qs3_245");
+            BotPosition.CurrentDungeonRegionId = 0;
 
             #endregion
 
             #region - B4 -
 
+            BotPosition.CurrentDungeonRegionId = 0x8004;
+            _graph.AddNode("qs4_0", BotPosition.FromDisplayWorld(26411, 26009));
+            _graph.AddNode("qs4_1", BotPosition.FromDisplayWorld(26300, 26067));
+            _graph.AddNode("qs4_2", BotPosition.FromDisplayWorld(26224, 25977));
+            _graph.AddNode("qs4_3", BotPosition.FromDisplayWorld(26254, 25798));
+            _graph.AddNode("qs4_4", BotPosition.FromDisplayWorld(26178, 25718));
+            _graph.AddNode("qs4_5", BotPosition.FromDisplayWorld(26041, 25725));
+            _graph.AddNode("qs4_6", BotPosition.FromDisplayWorld(25970, 25726));
+            _graph.AddNode("qs4_7", BotPosition.FromDisplayWorld(25946, 25798));
+            _graph.AddNode("qs4_8", BotPosition.FromDisplayWorld(25994, 25907));
+            _graph.AddNode("qs4_9", BotPosition.FromDisplayWorld(25928, 25987));
+            _graph.AddNode("qs4_10", BotPosition.FromDisplayWorld(25847, 25978));
+            _graph.AddNode("qs4_11", BotPosition.FromDisplayWorld(25760, 25888));
+            _graph.AddNode("qs4_12", BotPosition.FromDisplayWorld(25595, 25904));
+            _graph.AddNode("qs4_13", BotPosition.FromDisplayWorld(25513, 25935));
+            _graph.AddNode("qs4_14", BotPosition.FromDisplayWorld(25428, 25840));
+            _graph.AddNode("qs4_15", BotPosition.FromDisplayWorld(25424, 25683));
+            _graph.AddNode("qs4_16", BotPosition.FromDisplayWorld(25429, 25605));
+            _graph.AddNode("qs4_17", BotPosition.FromDisplayWorld(25522, 25505));
+            _graph.AddNode("qs4_18", BotPosition.FromDisplayWorld(25489, 25403));
+            _graph.AddNode("qs4_19", BotPosition.FromDisplayWorld(25415, 25385));
+            _graph.AddNode("qs4_20", BotPosition.FromDisplayWorld(25318, 25431));
+            _graph.AddNode("qs4_21", BotPosition.FromDisplayWorld(25252, 25399));
+            _graph.AddNode("qs4_22", BotPosition.FromDisplayWorld(25206, 25265));
+            _graph.AddNode("qs4_23", BotPosition.FromDisplayWorld(25196, 25158));
+            _graph.AddNode("qs4_24", BotPosition.FromDisplayWorld(25353, 25176));
+            _graph.AddNode("qs4_25", BotPosition.FromDisplayWorld(25422, 25128));
+            _graph.AddNode("qs4_26", BotPosition.FromDisplayWorld(25422, 25062));
+            _graph.AddNode("qs4_27", BotPosition.FromDisplayWorld(25390, 24974));
+            _graph.AddNode("qs4_28", BotPosition.FromDisplayWorld(25451, 24888));
+            _graph.AddNode("qs4_29", BotPosition.FromDisplayWorld(25534, 24912));
+            _graph.AddNode("qs4_30", BotPosition.FromDisplayWorld(25613, 24996));
+            _graph.AddNode("qs4_31", BotPosition.FromDisplayWorld(25769, 24982));
+            _graph.AddNode("qs4_32", BotPosition.FromDisplayWorld(25886, 24960));
+            _graph.AddNode("qs4_33", BotPosition.FromDisplayWorld(25925, 25026));
+            _graph.AddNode("qs4_34", BotPosition.FromDisplayWorld(25942, 25145));
+            _graph.AddNode("qs4_35", BotPosition.FromDisplayWorld(25966, 25270));
+            _graph.AddNode("qs4_36", BotPosition.FromDisplayWorld(25860, 25374));
+            _graph.AddNode("qs4_37", BotPosition.FromDisplayWorld(25869, 25461));
+            _graph.AddNode("qs4_38", BotPosition.FromDisplayWorld(25930, 25498));
+            _graph.AddNode("qs4_39", BotPosition.FromDisplayWorld(26076, 25457));
+            _graph.AddNode("qs4_40", BotPosition.FromDisplayWorld(26135, 25508));
+            _graph.AddNode("qs4_41", BotPosition.FromDisplayWorld(25076, 25084));
+            _graph.AddNode("qs4_42", BotPosition.FromDisplayWorld(24869, 25083));
+            _graph.AddNode("qs4_43", BotPosition.FromDisplayWorld(24831, 25166));
+            _graph.AddNode("qs4_44", BotPosition.FromDisplayWorld(24882, 25288));
+            _graph.AddNode("qs4_45", BotPosition.FromDisplayWorld(24796, 25373));
+            _graph.AddNode("qs4_46", BotPosition.FromDisplayWorld(24687, 25302));
+            _graph.AddNode("qs4_47", BotPosition.FromDisplayWorld(24642, 25262));
+            _graph.AddNode("qs4_48", BotPosition.FromDisplayWorld(24567, 25246));
+            _graph.AddNode("qs4_49", BotPosition.FromDisplayWorld(24518, 25334));
+            _graph.AddNode("qs4_50", BotPosition.FromDisplayWorld(24498, 25439));
+            _graph.AddNode("qs4_51", BotPosition.FromDisplayWorld(24391, 25497));
+            _graph.AddNode("qs4_52", BotPosition.FromDisplayWorld(24396, 25591));
+            _graph.AddNode("qs4_53", BotPosition.FromDisplayWorld(24489, 25644));
+            _graph.AddNode("qs4_54", BotPosition.FromDisplayWorld(24595, 25587));
+            _graph.AddNode("qs4_55", BotPosition.FromDisplayWorld(24657, 25622));
+            _graph.AddNode("qs4_56", BotPosition.FromDisplayWorld(24704, 25778));
+            _graph.AddNode("qs4_57", BotPosition.FromDisplayWorld(24605, 25814));
+            _graph.AddNode("qs4_58", BotPosition.FromDisplayWorld(24590, 25988));
+            _graph.AddNode("qs4_59", BotPosition.FromDisplayWorld(24478, 26063));
+            _graph.AddNode("qs4_60", BotPosition.FromDisplayWorld(24545, 26214));
+            _graph.AddNode("qs4_61", BotPosition.FromDisplayWorld(24723, 26169));
+            _graph.AddNode("qs4_62", BotPosition.FromDisplayWorld(24723, 26045));
+            _graph.AddNode("qs4_63", BotPosition.FromDisplayWorld(24648, 25924));
+            _graph.AddNode("qs4_64", BotPosition.FromDisplayWorld(24398, 25308));
+            _graph.AddNode("qs4_65", BotPosition.FromDisplayWorld(24335, 25218));
+            _graph.AddNode("qs4_66", BotPosition.FromDisplayWorld(24266, 25231));
+            _graph.AddNode("qs4_67", BotPosition.FromDisplayWorld(24205, 25279));
+            _graph.AddNode("qs4_68", BotPosition.FromDisplayWorld(24128, 25293));
+            _graph.AddNode("qs4_69", BotPosition.FromDisplayWorld(23996, 25248));
+            _graph.AddNode("qs4_70", BotPosition.FromDisplayWorld(23918, 25345));
+            _graph.AddNode("qs4_71", BotPosition.FromDisplayWorld(23913, 25528));
+            _graph.AddNode("qs4_72", BotPosition.FromDisplayWorld(23967, 25584));
+            _graph.AddNode("qs4_73", BotPosition.FromDisplayWorld(24093, 25538));
+            _graph.AddNode("qs4_74", BotPosition.FromDisplayWorld(24186, 25589));
+            _graph.AddNode("qs4_75", BotPosition.FromDisplayWorld(24172, 25694));
+            _graph.AddNode("qs4_76", BotPosition.FromDisplayWorld(24083, 25772));
+            _graph.AddNode("qs4_77", BotPosition.FromDisplayWorld(24116, 26016));
+            _graph.AddNode("qs4_78", BotPosition.FromDisplayWorld(24017, 26098));
+            _graph.AddNode("qs4_79", BotPosition.FromDisplayWorld(23919, 26095));
+            _graph.AddNode("qs4_80", BotPosition.FromDisplayWorld(23813, 26113));
+            _graph.AddNode("qs4_81", BotPosition.FromDisplayWorld(23695, 26004));
+            _graph.AddNode("qs4_82", BotPosition.FromDisplayWorld(23604, 26032));
+            _graph.AddNode("qs4_83", BotPosition.FromDisplayWorld(23577, 26109));
+            _graph.AddNode("qs4_84", BotPosition.FromDisplayWorld(23625, 26235));
+            _graph.AddNode("qs4_85", BotPosition.FromDisplayWorld(23588, 26275));
+            _graph.AddNode("qs4_86", BotPosition.FromDisplayWorld(23362, 26329));
+            _graph.AddNode("qs4_87", BotPosition.FromDisplayWorld(23251, 26420));
+            _graph.AddNode("qs4_88", BotPosition.FromDisplayWorld(23109, 26382));
+            _graph.AddNode("qs4_89", BotPosition.FromDisplayWorld(23027, 26428));
+            _graph.AddNode("qs4_90", BotPosition.FromDisplayWorld(23041, 26517));
+            _graph.AddNode("qs4_91", BotPosition.FromDisplayWorld(23067, 26561));
+            _graph.AddNode("qs4_92", BotPosition.FromDisplayWorld(23371, 26157));
+            _graph.AddNode("qs4_93", BotPosition.FromDisplayWorld(23319, 26096));
+            _graph.AddNode("qs4_94", BotPosition.FromDisplayWorld(23147, 26142));
+            _graph.AddNode("qs4_95", BotPosition.FromDisplayWorld(23080, 26060));
+            _graph.AddNode("qs4_96", BotPosition.FromDisplayWorld(23132, 25969));
+            _graph.AddNode("qs4_97", BotPosition.FromDisplayWorld(23200, 25905));
+            _graph.AddNode("qs4_98", BotPosition.FromDisplayWorld(23165, 25673));
+            _graph.AddNode("qs4_99", BotPosition.FromDisplayWorld(23220, 25582));
+            _graph.AddNode("qs4_100", BotPosition.FromDisplayWorld(23345, 25584));
+            _graph.AddNode("qs4_101", BotPosition.FromDisplayWorld(23450, 25560));
+            _graph.AddNode("qs4_102", BotPosition.FromDisplayWorld(23507, 25593));
+            _graph.AddNode("qs4_103", BotPosition.FromDisplayWorld(23572, 25680));
+            _graph.AddNode("qs4_104", BotPosition.FromDisplayWorld(23643, 25671));
+            _graph.AddNode("qs4_105", BotPosition.FromDisplayWorld(23693, 25595));
+            _graph.AddNode("qs4_106", BotPosition.FromDisplayWorld(23656, 25477));
+            _graph.AddNode("qs4_107", BotPosition.FromDisplayWorld(23681, 25404));
+            _graph.AddNode("qs4_108", BotPosition.FromDisplayWorld(23816, 25355));
+            _graph.AddNode("qs4_109", BotPosition.FromDisplayWorld(23996, 25099));
+            _graph.AddNode("qs4_110", BotPosition.FromDisplayWorld(24031, 24978));
+            _graph.AddNode("qs4_111", BotPosition.FromDisplayWorld(24023, 24905));
+            _graph.AddNode("qs4_112", BotPosition.FromDisplayWorld(23892, 24851));
+            _graph.AddNode("qs4_113", BotPosition.FromDisplayWorld(23863, 24781));
+            _graph.AddNode("qs4_114", BotPosition.FromDisplayWorld(23921, 24635));
+            _graph.AddNode("qs4_115", BotPosition.FromDisplayWorld(23953, 24584));
+            _graph.AddNode("qs4_116", BotPosition.FromDisplayWorld(24025, 24570));
+            _graph.AddNode("qs4_117", BotPosition.FromDisplayWorld(24146, 24680));
+            _graph.AddNode("qs4_118", BotPosition.FromDisplayWorld(24205, 24662));
+            _graph.AddNode("qs4_119", BotPosition.FromDisplayWorld(24326, 24578));
+            _graph.AddNode("qs4_120", BotPosition.FromDisplayWorld(24471, 24547));
+            _graph.AddNode("qs4_121", BotPosition.FromDisplayWorld(24600, 24691));
+            _graph.AddNode("qs4_122", BotPosition.FromDisplayWorld(24691, 24536));
+            _graph.AddNode("qs4_123", BotPosition.FromDisplayWorld(24560, 24416));
+            _graph.AddNode("qs4_124", BotPosition.FromDisplayWorld(24566, 24868));
+            _graph.AddNode("qs4_125", BotPosition.FromDisplayWorld(24478, 24897));
+            _graph.AddNode("qs4_126", BotPosition.FromDisplayWorld(24520, 25040));
+            _graph.AddNode("qs4_127", BotPosition.FromDisplayWorld(24591, 25111));
+            _graph.AddNode("qs4_128", BotPosition.FromDisplayWorld(24556, 25202));
+            _graph.AddNode("qs4_129", BotPosition.FromDisplayWorld(25147, 24945));
+            _graph.AddNode("qs4_130", BotPosition.FromDisplayWorld(25124, 24854));
+            _graph.AddNode("qs4_131", BotPosition.FromDisplayWorld(25083, 24785));
+            _graph.AddNode("qs4_132", BotPosition.FromDisplayWorld(25119, 24716));
+            _graph.AddNode("qs4_133", BotPosition.FromDisplayWorld(25233, 24667));
+            _graph.AddNode("qs4_134", BotPosition.FromDisplayWorld(25312, 24552));
+            _graph.AddNode("qs4_135", BotPosition.FromDisplayWorld(25311, 24499));
+            _graph.AddNode("qs4_136", BotPosition.FromDisplayWorld(25354, 24435));
+            _graph.AddNode("qs4_137", BotPosition.FromDisplayWorld(25471, 24459));
+            _graph.AddNode("qs4_138", BotPosition.FromDisplayWorld(25538, 24546));
+            _graph.AddNode("qs4_139", BotPosition.FromDisplayWorld(25612, 24535));
+            _graph.AddNode("qs4_140", BotPosition.FromDisplayWorld(25670, 24483));
+            _graph.AddNode("qs4_141", BotPosition.FromDisplayWorld(25807, 24451));
+            _graph.AddNode("qs4_142", BotPosition.FromDisplayWorld(25848, 24532));
+            _graph.AddNode("qs4_143", BotPosition.FromDisplayWorld(25975, 24543));
+            _graph.AddNode("qs4_144", BotPosition.FromDisplayWorld(26054, 24546));
+            _graph.AddNode("qs4_145", BotPosition.FromDisplayWorld(26199, 24581));
+            _graph.AddNode("qs4_146", BotPosition.FromDisplayWorld(26199, 24393));
+            _graph.AddNode("qs4_147", BotPosition.FromDisplayWorld(25985, 24476));
+            _graph.AddNode("qs4_148", BotPosition.FromDisplayWorld(25886, 24529));
+            _graph.AddNode("qs4_149", BotPosition.FromDisplayWorld(25361, 24341));
+            _graph.AddNode("qs4_150", BotPosition.FromDisplayWorld(25478, 24260));
+            _graph.AddNode("qs4_151", BotPosition.FromDisplayWorld(25472, 24174));
+            _graph.AddNode("qs4_152", BotPosition.FromDisplayWorld(25414, 24137));
+            _graph.AddNode("qs4_153", BotPosition.FromDisplayWorld(25259, 24174));
+            _graph.AddNode("qs4_154", BotPosition.FromDisplayWorld(25205, 24120));
+            _graph.AddNode("qs4_155", BotPosition.FromDisplayWorld(25199, 23896));
+            _graph.AddNode("qs4_156", BotPosition.FromDisplayWorld(25288, 23797));
+            _graph.AddNode("qs4_157", BotPosition.FromDisplayWorld(25439, 23778));
+            _graph.AddNode("qs4_158", BotPosition.FromDisplayWorld(25533, 23726));
+            _graph.AddNode("qs4_159", BotPosition.FromDisplayWorld(25523, 23645));
+            _graph.AddNode("qs4_160", BotPosition.FromDisplayWorld(25493, 23565));
+            _graph.AddNode("qs4_161", BotPosition.FromDisplayWorld(25550, 23491));
+            _graph.AddNode("qs4_162", BotPosition.FromDisplayWorld(25640, 23495));
+            _graph.AddNode("qs4_163", BotPosition.FromDisplayWorld(25718, 23581));
+            _graph.AddNode("qs4_164", BotPosition.FromDisplayWorld(25874, 23561));
+            _graph.AddNode("qs4_165", BotPosition.FromDisplayWorld(25992, 23556));
+            _graph.AddNode("qs4_166", BotPosition.FromDisplayWorld(26043, 23465));
+            _graph.AddNode("qs4_167", BotPosition.FromDisplayWorld(25992, 23293));
+            _graph.AddNode("qs4_168", BotPosition.FromDisplayWorld(26040, 23201));
+            _graph.AddNode("qs4_169", BotPosition.FromDisplayWorld(26114, 23114));
+            _graph.AddNode("qs4_170", BotPosition.FromDisplayWorld(26041, 23015));
+            _graph.AddNode("qs4_171", BotPosition.FromDisplayWorld(25968, 23030));
+            _graph.AddNode("qs4_172", BotPosition.FromDisplayWorld(25869, 23058));
+            _graph.AddNode("qs4_173", BotPosition.FromDisplayWorld(25827, 22992));
+            _graph.AddNode("qs4_174", BotPosition.FromDisplayWorld(25838, 22814));
+            _graph.AddNode("qs4_175", BotPosition.FromDisplayWorld(25909, 22736));
+            _graph.AddNode("qs4_176", BotPosition.FromDisplayWorld(26098, 22772));
+            _graph.AddNode("qs4_177", BotPosition.FromDisplayWorld(26155, 22736));
+            _graph.AddNode("qs4_178", BotPosition.FromDisplayWorld(26161, 22658));
+            _graph.AddNode("qs4_179", BotPosition.FromDisplayWorld(26125, 22590));
+            _graph.AddNode("qs4_180", BotPosition.FromDisplayWorld(25691, 22841));
+            _graph.AddNode("qs4_181", BotPosition.FromDisplayWorld(25572, 22897));
+            _graph.AddNode("qs4_182", BotPosition.FromDisplayWorld(25611, 23055));
+            _graph.AddNode("qs4_183", BotPosition.FromDisplayWorld(25559, 23139));
+            _graph.AddNode("qs4_184", BotPosition.FromDisplayWorld(25465, 23127));
+            _graph.AddNode("qs4_185", BotPosition.FromDisplayWorld(25399, 23039));
+            _graph.AddNode("qs4_186", BotPosition.FromDisplayWorld(25199, 23061));
+            _graph.AddNode("qs4_187", BotPosition.FromDisplayWorld(25072, 23127));
+            _graph.AddNode("qs4_188", BotPosition.FromDisplayWorld(25100, 23273));
+            _graph.AddNode("qs4_189", BotPosition.FromDisplayWorld(25108, 23375));
+            _graph.AddNode("qs4_190", BotPosition.FromDisplayWorld(25003, 23495));
+            _graph.AddNode("qs4_191", BotPosition.FromDisplayWorld(25039, 23596));
+            _graph.AddNode("qs4_192", BotPosition.FromDisplayWorld(25125, 23605));
+            _graph.AddNode("qs4_193", BotPosition.FromDisplayWorld(25201, 23564));
+            _graph.AddNode("qs4_194", BotPosition.FromDisplayWorld(25275, 23603));
+            _graph.AddNode("qs4_195", BotPosition.FromDisplayWorld(25273, 23715));
+            _graph.AddNode("qs4_196", BotPosition.FromDisplayWorld(25041, 23853));
+            _graph.AddNode("qs4_197", BotPosition.FromDisplayWorld(24905, 23939));
+            _graph.AddNode("qs4_198", BotPosition.FromDisplayWorld(24839, 23915));
+            _graph.AddNode("qs4_199", BotPosition.FromDisplayWorld(24783, 23840));
+            _graph.AddNode("qs4_200", BotPosition.FromDisplayWorld(24681, 23818));
+            _graph.AddNode("qs4_201", BotPosition.FromDisplayWorld(24624, 23904));
+            _graph.AddNode("qs4_202", BotPosition.FromDisplayWorld(24604, 24051));
+            _graph.AddNode("qs4_203", BotPosition.FromDisplayWorld(24667, 24107));
+            _graph.AddNode("qs4_204", BotPosition.FromDisplayWorld(24682, 24191));
+            _graph.AddNode("qs4_205", BotPosition.FromDisplayWorld(24595, 24276));
+            _graph.AddNode("qs4_206", BotPosition.FromDisplayWorld(24813, 24556));
+            _graph.AddNode("qs4_207", BotPosition.FromDisplayWorld(24959, 24497));
+            _graph.AddNode("qs4_208", BotPosition.FromDisplayWorld(25000, 24402));
+            _graph.AddNode("qs4_209", BotPosition.FromDisplayWorld(25081, 24383));
+            _graph.AddNode("qs4_210", BotPosition.FromDisplayWorld(25217, 24499));
+            _graph.AddNode("qs4_211", BotPosition.FromDisplayWorld(24680, 23744));
+            _graph.AddNode("qs4_212", BotPosition.FromDisplayWorld(24797, 23652));
+            _graph.AddNode("qs4_213", BotPosition.FromDisplayWorld(24796, 23560));
+            _graph.AddNode("qs4_214", BotPosition.FromDisplayWorld(24723, 23513));
+            _graph.AddNode("qs4_215", BotPosition.FromDisplayWorld(24594, 23568));
+            _graph.AddNode("qs4_216", BotPosition.FromDisplayWorld(24516, 23457));
+            _graph.AddNode("qs4_217", BotPosition.FromDisplayWorld(24515, 23381));
+            _graph.AddNode("qs4_218", BotPosition.FromDisplayWorld(24595, 23321));
+            _graph.AddNode("qs4_219", BotPosition.FromDisplayWorld(24602, 23115));
+            _graph.AddNode("qs4_220", BotPosition.FromDisplayWorld(24615, 22971));
+            _graph.AddNode("qs4_221", BotPosition.FromDisplayWorld(24444, 23013));
+            _graph.AddNode("qs4_222", BotPosition.FromDisplayWorld(24475, 23155));
+            _graph.AddNode("qs4_223", BotPosition.FromDisplayWorld(23813, 24639));
+            _graph.AddNode("qs4_224", BotPosition.FromDisplayWorld(23720, 24536));
+            _graph.AddNode("qs4_225", BotPosition.FromDisplayWorld(23621, 24544));
+            _graph.AddNode("qs4_226", BotPosition.FromDisplayWorld(23584, 24632));
+            _graph.AddNode("qs4_227", BotPosition.FromDisplayWorld(23630, 24739));
+            _graph.AddNode("qs4_228", BotPosition.FromDisplayWorld(23585, 24808));
+            _graph.AddNode("qs4_229", BotPosition.FromDisplayWorld(23444, 24835));
+            _graph.AddNode("qs4_230", BotPosition.FromDisplayWorld(23409, 24743));
+            _graph.AddNode("qs4_231", BotPosition.FromDisplayWorld(23256, 24743));
+            _graph.AddNode("qs4_232", BotPosition.FromDisplayWorld(23014, 24693));
+            _graph.AddNode("qs4_233", BotPosition.FromDisplayWorld(23062, 24635));
+            _graph.AddNode("qs4_234", BotPosition.FromDisplayWorld(23016, 24772));
+            _graph.AddNode("qs4_235", BotPosition.FromDisplayWorld(23961, 24455));
+            _graph.AddNode("qs4_236", BotPosition.FromDisplayWorld(24030, 24426));
+            _graph.AddNode("qs4_237", BotPosition.FromDisplayWorld(24156, 24444));
+            _graph.AddNode("qs4_238", BotPosition.FromDisplayWorld(24190, 24363));
+            _graph.AddNode("qs4_239", BotPosition.FromDisplayWorld(24133, 24305));
+            _graph.AddNode("qs4_240", BotPosition.FromDisplayWorld(24062, 24262));
+            _graph.AddNode("qs4_241", BotPosition.FromDisplayWorld(24072, 24059));
+            _graph.AddNode("qs4_242", BotPosition.FromDisplayWorld(24308, 24053));
+            _graph.AddNode("qs4_243", BotPosition.FromDisplayWorld(24367, 23995));
+            _graph.AddNode("qs4_244", BotPosition.FromDisplayWorld(24311, 23859));
+            _graph.AddNode("qs4_245", BotPosition.FromDisplayWorld(24413, 23785));
+            _graph.AddNode("qs4_246", BotPosition.FromDisplayWorld(23998, 23985));
+            _graph.AddNode("qs4_247", BotPosition.FromDisplayWorld(23957, 23792));
+            _graph.AddNode("qs4_248", BotPosition.FromDisplayWorld(23885, 23721));
+            _graph.AddNode("qs4_249", BotPosition.FromDisplayWorld(23761, 23767));
+            _graph.AddNode("qs4_250", BotPosition.FromDisplayWorld(23686, 23716));
+            _graph.AddNode("qs4_251", BotPosition.FromDisplayWorld(23687, 23632));
+            _graph.AddNode("qs4_252", BotPosition.FromDisplayWorld(23777, 23531));
+            _graph.AddNode("qs4_253", BotPosition.FromDisplayWorld(23752, 23385));
+            _graph.AddNode("qs4_254", BotPosition.FromDisplayWorld(23701, 23235));
+            _graph.AddNode("qs4_255", BotPosition.FromDisplayWorld(23552, 23256));
+            _graph.AddNode("qs4_256", BotPosition.FromDisplayWorld(23441, 23271));
+            _graph.AddNode("qs4_257", BotPosition.FromDisplayWorld(23321, 23162));
+            _graph.AddNode("qs4_258", BotPosition.FromDisplayWorld(23223, 23190));
+            _graph.AddNode("qs4_259", BotPosition.FromDisplayWorld(23218, 23291));
+            _graph.AddNode("qs4_260", BotPosition.FromDisplayWorld(23250, 23399));
+            _graph.AddNode("qs4_261", BotPosition.FromDisplayWorld(23178, 23441));
+            _graph.AddNode("qs4_262", BotPosition.FromDisplayWorld(23016, 23432));
+            _graph.AddNode("qs4_263", BotPosition.FromDisplayWorld(22917, 23327));
+            _graph.AddNode("qs4_264", BotPosition.FromDisplayWorld(22965, 23211));
+            _graph.AddNode("qs4_265", BotPosition.FromDisplayWorld(22921, 23099));
+            _graph.AddNode("qs4_266", BotPosition.FromDisplayWorld(22829, 23114));
+            _graph.AddNode("qs4_267", BotPosition.FromDisplayWorld(22777, 23142));
+            _graph.AddNode("qs4_268", BotPosition.FromDisplayWorld(23052, 23617));
+            _graph.AddNode("qs4_269", BotPosition.FromDisplayWorld(23128, 23706));
+            _graph.AddNode("qs4_270", BotPosition.FromDisplayWorld(23248, 23651));
+            _graph.AddNode("qs4_271", BotPosition.FromDisplayWorld(23335, 23706));
+            _graph.AddNode("qs4_272", BotPosition.FromDisplayWorld(23332, 23791));
+            _graph.AddNode("qs4_273", BotPosition.FromDisplayWorld(23232, 23872));
+            _graph.AddNode("qs4_274", BotPosition.FromDisplayWorld(23255, 24026));
+            _graph.AddNode("qs4_275", BotPosition.FromDisplayWorld(23319, 24191));
+            _graph.AddNode("qs4_276", BotPosition.FromDisplayWorld(23545, 24162));
+            _graph.AddNode("qs4_277", BotPosition.FromDisplayWorld(23717, 24258));
+            _graph.AddNode("qs4_278", BotPosition.FromDisplayWorld(23811, 24185));
+            _graph.AddNode("qs4_279", BotPosition.FromDisplayWorld(23764, 24027));
+            _graph.AddNode("qs4_280", BotPosition.FromDisplayWorld(23827, 23987));
+            _graph.AddEdge("qs4_0", "qs4_1");
+            _graph.AddEdge("qs4_1", "qs4_2");
+            _graph.AddEdge("qs4_2", "qs4_3");
+            _graph.AddEdge("qs4_3", "qs4_4");
+            _graph.AddEdge("qs4_4", "qs4_5");
+            _graph.AddEdge("qs4_5", "qs4_6");
+            _graph.AddEdge("qs4_6", "qs4_7");
+            _graph.AddEdge("qs4_7", "qs4_8");
+            _graph.AddEdge("qs4_8", "qs4_9");
+            _graph.AddEdge("qs4_9", "qs4_10");
+            _graph.AddEdge("qs4_10", "qs4_11");
+            _graph.AddEdge("qs4_11", "qs4_12");
+            _graph.AddEdge("qs4_12", "qs4_13");
+            _graph.AddEdge("qs4_13", "qs4_14");
+            _graph.AddEdge("qs4_14", "qs4_15");
+            _graph.AddEdge("qs4_15", "qs4_16");
+            _graph.AddEdge("qs4_16", "qs4_17");
+            _graph.AddEdge("qs4_17", "qs4_18");
+            _graph.AddEdge("qs4_18", "qs4_19");
+            _graph.AddEdge("qs4_19", "qs4_20");
+            _graph.AddEdge("qs4_20", "qs4_21");
+            _graph.AddEdge("qs4_21", "qs4_22");
+            _graph.AddEdge("qs4_22", "qs4_23");
+            _graph.AddEdge("qs4_23", "qs4_24");
+            _graph.AddEdge("qs4_24", "qs4_25");
+            _graph.AddEdge("qs4_25", "qs4_26");
+            _graph.AddEdge("qs4_26", "qs4_27");
+            _graph.AddEdge("qs4_27", "qs4_28");
+            _graph.AddEdge("qs4_28", "qs4_29");
+            _graph.AddEdge("qs4_29", "qs4_30");
+            _graph.AddEdge("qs4_30", "qs4_31");
+            _graph.AddEdge("qs4_31", "qs4_32");
+            _graph.AddEdge("qs4_32", "qs4_33");
+            _graph.AddEdge("qs4_33", "qs4_34");
+            _graph.AddEdge("qs4_34", "qs4_35");
+            _graph.AddEdge("qs4_35", "qs4_36");
+            _graph.AddEdge("qs4_36", "qs4_37");
+            _graph.AddEdge("qs4_37", "qs4_38");
+            _graph.AddEdge("qs4_38", "qs4_39");
+            _graph.AddEdge("qs4_39", "qs4_40");
+            _graph.AddEdge("qs4_40", "qs4_4");
+            _graph.AddEdge("qs4_23", "qs4_41");
+            _graph.AddEdge("qs4_41", "qs4_42");
+            _graph.AddEdge("qs4_42", "qs4_43");
+            _graph.AddEdge("qs4_43", "qs4_44");
+            _graph.AddEdge("qs4_44", "qs4_45");
+            _graph.AddEdge("qs4_45", "qs4_46");
+            _graph.AddEdge("qs4_46", "qs4_47");
+            _graph.AddEdge("qs4_47", "qs4_48");
+            _graph.AddEdge("qs4_48", "qs4_49");
+            _graph.AddEdge("qs4_49", "qs4_50");
+            _graph.AddEdge("qs4_50", "qs4_51");
+            _graph.AddEdge("qs4_51", "qs4_52");
+            _graph.AddEdge("qs4_52", "qs4_53");
+            _graph.AddEdge("qs4_53", "qs4_54");
+            _graph.AddEdge("qs4_54", "qs4_55");
+            _graph.AddEdge("qs4_55", "qs4_56");
+            _graph.AddEdge("qs4_56", "qs4_57");
+            _graph.AddEdge("qs4_57", "qs4_58");
+            _graph.AddEdge("qs4_58", "qs4_59");
+            _graph.AddEdge("qs4_59", "qs4_60");
+            _graph.AddEdge("qs4_60", "qs4_61");
+            _graph.AddEdge("qs4_61", "qs4_62");
+            _graph.AddEdge("qs4_62", "qs4_63");
+            _graph.AddEdge("qs4_63", "qs4_58");
+            _graph.AddEdge("qs4_49", "qs4_64");
+            _graph.AddEdge("qs4_64", "qs4_65");
+            _graph.AddEdge("qs4_65", "qs4_66");
+            _graph.AddEdge("qs4_66", "qs4_67");
+            _graph.AddEdge("qs4_67", "qs4_68");
+            _graph.AddEdge("qs4_68", "qs4_69");
+            _graph.AddEdge("qs4_69", "qs4_70");
+            _graph.AddEdge("qs4_70", "qs4_71");
+            _graph.AddEdge("qs4_71", "qs4_72");
+            _graph.AddEdge("qs4_72", "qs4_73");
+            _graph.AddEdge("qs4_73", "qs4_74");
+            _graph.AddEdge("qs4_74", "qs4_75");
+            _graph.AddEdge("qs4_75", "qs4_76");
+            _graph.AddEdge("qs4_76", "qs4_77");
+            _graph.AddEdge("qs4_77", "qs4_78");
+            _graph.AddEdge("qs4_78", "qs4_79");
+            _graph.AddEdge("qs4_79", "qs4_80");
+            _graph.AddEdge("qs4_80", "qs4_81");
+            _graph.AddEdge("qs4_81", "qs4_82");
+            _graph.AddEdge("qs4_82", "qs4_83");
+            _graph.AddEdge("qs4_83", "qs4_84");
+            _graph.AddEdge("qs4_84", "qs4_85");
+            _graph.AddEdge("qs4_85", "qs4_86");
+            _graph.AddEdge("qs4_86", "qs4_87");
+            _graph.AddEdge("qs4_87", "qs4_88");
+            _graph.AddEdge("qs4_88", "qs4_89");
+            _graph.AddEdge("qs4_89", "qs4_90");
+            _graph.AddEdge("qs4_90", "qs4_91");
+            _graph.AddEdge("qs4_86", "qs4_92");
+            _graph.AddEdge("qs4_92", "qs4_93");
+            _graph.AddEdge("qs4_93", "qs4_94");
+            _graph.AddEdge("qs4_94", "qs4_95");
+            _graph.AddEdge("qs4_95", "qs4_96");
+            _graph.AddEdge("qs4_96", "qs4_97");
+            _graph.AddEdge("qs4_97", "qs4_98");
+            _graph.AddEdge("qs4_98", "qs4_99");
+            _graph.AddEdge("qs4_99", "qs4_100");
+            _graph.AddEdge("qs4_100", "qs4_101");
+            _graph.AddEdge("qs4_101", "qs4_102");
+            _graph.AddEdge("qs4_102", "qs4_103");
+            _graph.AddEdge("qs4_103", "qs4_104");
+            _graph.AddEdge("qs4_104", "qs4_105");
+            _graph.AddEdge("qs4_105", "qs4_106");
+            _graph.AddEdge("qs4_106", "qs4_107");
+            _graph.AddEdge("qs4_107", "qs4_108");
+            _graph.AddEdge("qs4_108", "qs4_70");
+            _graph.AddEdge("qs4_69", "qs4_109");
+            _graph.AddEdge("qs4_109", "qs4_110");
+            _graph.AddEdge("qs4_110", "qs4_111");
+            _graph.AddEdge("qs4_111", "qs4_112");
+            _graph.AddEdge("qs4_112", "qs4_113");
+            _graph.AddEdge("qs4_113", "qs4_114");
+            _graph.AddEdge("qs4_114", "qs4_115");
+            _graph.AddEdge("qs4_115", "qs4_116");
+            _graph.AddEdge("qs4_116", "qs4_117");
+            _graph.AddEdge("qs4_117", "qs4_118");
+            _graph.AddEdge("qs4_118", "qs4_119");
+            _graph.AddEdge("qs4_119", "qs4_120");
+            _graph.AddEdge("qs4_120", "qs4_121");
+            _graph.AddEdge("qs4_121", "qs4_122");
+            _graph.AddEdge("qs4_122", "qs4_123");
+            _graph.AddEdge("qs4_123", "qs4_120");
+            _graph.AddEdge("qs4_121", "qs4_124");
+            _graph.AddEdge("qs4_124", "qs4_125");
+            _graph.AddEdge("qs4_125", "qs4_126");
+            _graph.AddEdge("qs4_126", "qs4_127");
+            _graph.AddEdge("qs4_127", "qs4_128");
+            _graph.AddEdge("qs4_128", "qs4_48");
+            _graph.AddEdge("qs4_41", "qs4_129");
+            _graph.AddEdge("qs4_129", "qs4_130");
+            _graph.AddEdge("qs4_130", "qs4_131");
+            _graph.AddEdge("qs4_131", "qs4_132");
+            _graph.AddEdge("qs4_132", "qs4_133");
+            _graph.AddEdge("qs4_133", "qs4_134");
+            _graph.AddEdge("qs4_134", "qs4_135");
+            _graph.AddEdge("qs4_135", "qs4_136");
+            _graph.AddEdge("qs4_136", "qs4_137");
+            _graph.AddEdge("qs4_137", "qs4_138");
+            _graph.AddEdge("qs4_138", "qs4_139");
+            _graph.AddEdge("qs4_139", "qs4_140");
+            _graph.AddEdge("qs4_140", "qs4_141");
+            _graph.AddEdge("qs4_141", "qs4_142");
+            _graph.AddEdge("qs4_142", "qs4_143");
+            _graph.AddEdge("qs4_143", "qs4_144");
+            _graph.AddEdge("qs4_144", "qs4_145");
+            _graph.AddEdge("qs4_145", "qs4_146");
+            _graph.AddEdge("qs4_146", "qs4_147");
+            _graph.AddEdge("qs4_147", "qs4_144");
+            _graph.AddEdge("qs4_147", "qs4_148");
+            _graph.AddEdge("qs4_148", "qs4_143");
+            _graph.AddEdge("qs4_148", "qs4_142");
+            _graph.AddEdge("qs4_136", "qs4_149");
+            _graph.AddEdge("qs4_149", "qs4_150");
+            _graph.AddEdge("qs4_150", "qs4_151");
+            _graph.AddEdge("qs4_151", "qs4_152");
+            _graph.AddEdge("qs4_152", "qs4_153");
+            _graph.AddEdge("qs4_153", "qs4_154");
+            _graph.AddEdge("qs4_154", "qs4_155");
+            _graph.AddEdge("qs4_155", "qs4_156");
+            _graph.AddEdge("qs4_156", "qs4_157");
+            _graph.AddEdge("qs4_157", "qs4_158");
+            _graph.AddEdge("qs4_158", "qs4_159");
+            _graph.AddEdge("qs4_159", "qs4_160");
+            _graph.AddEdge("qs4_160", "qs4_161");
+            _graph.AddEdge("qs4_161", "qs4_162");
+            _graph.AddEdge("qs4_162", "qs4_163");
+            _graph.AddEdge("qs4_163", "qs4_164");
+            _graph.AddEdge("qs4_164", "qs4_165");
+            _graph.AddEdge("qs4_165", "qs4_166");
+            _graph.AddEdge("qs4_166", "qs4_167");
+            _graph.AddEdge("qs4_167", "qs4_168");
+            _graph.AddEdge("qs4_168", "qs4_169");
+            _graph.AddEdge("qs4_169", "qs4_170");
+            _graph.AddEdge("qs4_170", "qs4_171");
+            _graph.AddEdge("qs4_171", "qs4_172");
+            _graph.AddEdge("qs4_172", "qs4_173");
+            _graph.AddEdge("qs4_173", "qs4_174");
+            _graph.AddEdge("qs4_174", "qs4_175");
+            _graph.AddEdge("qs4_175", "qs4_176");
+            _graph.AddEdge("qs4_176", "qs4_177");
+            _graph.AddEdge("qs4_177", "qs4_178");
+            _graph.AddEdge("qs4_178", "qs4_179");
+            _graph.AddEdge("qs4_174", "qs4_180");
+            _graph.AddEdge("qs4_180", "qs4_181");
+            _graph.AddEdge("qs4_181", "qs4_182");
+            _graph.AddEdge("qs4_182", "qs4_183");
+            _graph.AddEdge("qs4_183", "qs4_184");
+            _graph.AddEdge("qs4_184", "qs4_185");
+            _graph.AddEdge("qs4_185", "qs4_186");
+            _graph.AddEdge("qs4_186", "qs4_187");
+            _graph.AddEdge("qs4_187", "qs4_188");
+            _graph.AddEdge("qs4_188", "qs4_189");
+            _graph.AddEdge("qs4_189", "qs4_190");
+            _graph.AddEdge("qs4_190", "qs4_191");
+            _graph.AddEdge("qs4_191", "qs4_192");
+            _graph.AddEdge("qs4_192", "qs4_193");
+            _graph.AddEdge("qs4_193", "qs4_194");
+            _graph.AddEdge("qs4_194", "qs4_195");
+            _graph.AddEdge("qs4_195", "qs4_156");
+            _graph.AddEdge("qs4_155", "qs4_196");
+            _graph.AddEdge("qs4_196", "qs4_197");
+            _graph.AddEdge("qs4_197", "qs4_198");
+            _graph.AddEdge("qs4_198", "qs4_199");
+            _graph.AddEdge("qs4_199", "qs4_200");
+            _graph.AddEdge("qs4_200", "qs4_201");
+            _graph.AddEdge("qs4_201", "qs4_202");
+            _graph.AddEdge("qs4_202", "qs4_203");
+            _graph.AddEdge("qs4_203", "qs4_204");
+            _graph.AddEdge("qs4_204", "qs4_205");
+            _graph.AddEdge("qs4_205", "qs4_123");
+            _graph.AddEdge("qs4_122", "qs4_206");
+            _graph.AddEdge("qs4_206", "qs4_207");
+            _graph.AddEdge("qs4_207", "qs4_208");
+            _graph.AddEdge("qs4_208", "qs4_209");
+            _graph.AddEdge("qs4_209", "qs4_210");
+            _graph.AddEdge("qs4_210", "qs4_135");
+            _graph.AddEdge("qs4_200", "qs4_211");
+            _graph.AddEdge("qs4_211", "qs4_212");
+            _graph.AddEdge("qs4_212", "qs4_213");
+            _graph.AddEdge("qs4_213", "qs4_214");
+            _graph.AddEdge("qs4_214", "qs4_215");
+            _graph.AddEdge("qs4_215", "qs4_216");
+            _graph.AddEdge("qs4_216", "qs4_217");
+            _graph.AddEdge("qs4_217", "qs4_218");
+            _graph.AddEdge("qs4_218", "qs4_219");
+            _graph.AddEdge("qs4_219", "qs4_220");
+            _graph.AddEdge("qs4_220", "qs4_221");
+            _graph.AddEdge("qs4_221", "qs4_222");
+            _graph.AddEdge("qs4_114", "qs4_223");
+            _graph.AddEdge("qs4_223", "qs4_224");
+            _graph.AddEdge("qs4_224", "qs4_225");
+            _graph.AddEdge("qs4_225", "qs4_226");
+            _graph.AddEdge("qs4_226", "qs4_227");
+            _graph.AddEdge("qs4_227", "qs4_228");
+            _graph.AddEdge("qs4_228", "qs4_229");
+            _graph.AddEdge("qs4_229", "qs4_230");
+            _graph.AddEdge("qs4_230", "qs4_231");
+            _graph.AddEdge("qs4_231", "qs4_232");
+            _graph.AddEdge("qs4_232", "qs4_233");
+            _graph.AddEdge("qs4_233", "qs4_231");
+            _graph.AddEdge("qs4_233", "qs4_234");
+            _graph.AddEdge("qs4_234", "qs4_232");
+            _graph.AddEdge("qs4_234", "qs4_231");
+            _graph.AddEdge("qs4_115", "qs4_235");
+            _graph.AddEdge("qs4_235", "qs4_236");
+            _graph.AddEdge("qs4_236", "qs4_237");
+            _graph.AddEdge("qs4_237", "qs4_238");
+            _graph.AddEdge("qs4_238", "qs4_239");
+            _graph.AddEdge("qs4_239", "qs4_240");
+            _graph.AddEdge("qs4_240", "qs4_241");
+            _graph.AddEdge("qs4_241", "qs4_242");
+            _graph.AddEdge("qs4_242", "qs4_243");
+            _graph.AddEdge("qs4_243", "qs4_244");
+            _graph.AddEdge("qs4_244", "qs4_245");
+            _graph.AddEdge("qs4_245", "qs4_201");
+            _graph.AddEdge("qs4_241", "qs4_246");
+            _graph.AddEdge("qs4_246", "qs4_247");
+            _graph.AddEdge("qs4_247", "qs4_248");
+            _graph.AddEdge("qs4_248", "qs4_249");
+            _graph.AddEdge("qs4_249", "qs4_250");
+            _graph.AddEdge("qs4_250", "qs4_251");
+            _graph.AddEdge("qs4_251", "qs4_252");
+            _graph.AddEdge("qs4_252", "qs4_253");
+            _graph.AddEdge("qs4_253", "qs4_254");
+            _graph.AddEdge("qs4_254", "qs4_255");
+            _graph.AddEdge("qs4_255", "qs4_256");
+            _graph.AddEdge("qs4_256", "qs4_257");
+            _graph.AddEdge("qs4_257", "qs4_258");
+            _graph.AddEdge("qs4_258", "qs4_259");
+            _graph.AddEdge("qs4_259", "qs4_260");
+            _graph.AddEdge("qs4_260", "qs4_261");
+            _graph.AddEdge("qs4_261", "qs4_262");
+            _graph.AddEdge("qs4_262", "qs4_263");
+            _graph.AddEdge("qs4_263", "qs4_264");
+            _graph.AddEdge("qs4_264", "qs4_265");
+            _graph.AddEdge("qs4_265", "qs4_266");
+            _graph.AddEdge("qs4_266", "qs4_267");
+            _graph.AddEdge("qs4_262", "qs4_268");
+            _graph.AddEdge("qs4_268", "qs4_269");
+            _graph.AddEdge("qs4_269", "qs4_270");
+            _graph.AddEdge("qs4_270", "qs4_271");
+            _graph.AddEdge("qs4_271", "qs4_272");
+            _graph.AddEdge("qs4_272", "qs4_273");
+            _graph.AddEdge("qs4_273", "qs4_274");
+            _graph.AddEdge("qs4_274", "qs4_275");
+            _graph.AddEdge("qs4_275", "qs4_276");
+            _graph.AddEdge("qs4_276", "qs4_277");
+            _graph.AddEdge("qs4_277", "qs4_278");
+            _graph.AddEdge("qs4_278", "qs4_279");
+            _graph.AddEdge("qs4_279", "qs4_280");
+            _graph.AddEdge("qs4_280", "qs4_246");
+            BotPosition.CurrentDungeonRegionId = 0;
+
             #endregion
 
-            BotPosition.CurrentDungeonRegionId = 0;
+
 
             #endregion
 
@@ -10924,7 +12146,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
             #endregion
 
-            Logger.Trace("AutoWalker", "Waypoint graph built");
+            Log("AutoWalker", "Waypoint graph built");
             return _graph;
         }
         

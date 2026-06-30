@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("DdConverter")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b56b017d13d3e519ebd83776747535bd7c385beb")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5dc83b844c9dc92d2851f8005f6a39ec14b64c55")]
 [assembly: System.Reflection.AssemblyProductAttribute("DdConverter")]
 [assembly: System.Reflection.AssemblyTitleAttribute("DdConverter")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
