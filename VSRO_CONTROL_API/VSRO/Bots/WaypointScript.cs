@@ -72,13 +72,8 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             return Math.Sqrt(dx * dx + dy * dy);
         }
 
-        // VSRO sector-relative to world coords
-        // Each region/sector is 1920 units wide
         private static int RegionToWorld(short regionID, short raw)
         {
-            // High byte = sector index, raw is offset within sector
-            // RegionID encodes sectorX in high byte, sectorY in low byte
-            // This gives you the flat world coordinate
             int sector = (regionID >> 8) & 0xFF; // for X; use low byte for Y
             return sector * 1920 + raw;
         }

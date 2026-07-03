@@ -24,12 +24,10 @@ public:
     bool Exists(const std::string& archivePath);
 
     // List immediate children (files+folders) of a folder path ("" = root).
-    // Returns names only. Useful for debugging / enumerating icon folders.
     std::vector<std::string> List(const std::string& folderPath);
 
-    // The standard Silkroad PK2 key derivation. Exposed so callers can see /
-    // override it. The ASCII base key is "169841" run through a small mix
-    // against the well-known JoyMax constant.
+    // The standard Silkroad PK2 key derivation. Exposed so callers can see and
+    // override it. The ASCII base key is "169841"
     static void MakeSilkroadKey(uint8_t outKey[8]);
 
 private:

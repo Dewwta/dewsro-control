@@ -27,6 +27,9 @@ namespace VSRO_CONTROL_API.VSRO.DTO
         /// <summary>Gets or sets the persistent database character identifier.</summary>
         uint CharacterID { get; set; }
 
+        /// <summary>Gets or sets the character refObjID. For determining player stats.</summary>
+        uint CharacterRefObjID { get; set; }
+
         /// <summary>Gets or sets the currently active pet UID.</summary>
         uint ActivePetUID { get; set; }
 
@@ -35,6 +38,9 @@ namespace VSRO_CONTROL_API.VSRO.DTO
 
         /// <summary>Gets or sets the character's race (Chinese or European).</summary>
         Race CharacterRace { get; set; }
+
+        /// <summary>Gets or sets the character's gender (Male or Female).</summary>
+        Gender CharacterGender { get; set; }
 
         /// <summary>Gets or sets the player's party information.</summary>
         Party? PlayerParty { get; set; }

@@ -16,9 +16,11 @@
 #include "../client/RewardWindow.h"
 #include "../client/AchievementWindow.h"
 #include <Windows.h>
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 #include <iostream>
 #include "../mem/Process.h"
 #include "../client/pk2/Pk2Reader.h"
@@ -26,10 +28,19 @@
 #include "../client/SROSkinWindow.h"
 
 static Pk2Reader  g_pk2;       // media.pk2
-static Pk2Reader  g_dataPk2;   // data.pk2  (sounds, prim resources, etc.)
+static Pk2Reader  g_dataPk2;   // data.pk2
 static IconCache* g_iconCache = nullptr;
 
 #pragma region - Region Loading/Saving -
+
+// DUPLICATED, REMOVE, I HATE THIS SHIT
+static int DetectStoneCaveFloor(float worldZ)
+{
+    if (worldZ < 116.f)  return 1;
+    if (worldZ < 254.f)  return 2;
+    if (worldZ < 393.f)  return 3;
+    return 4;
+}
 
 void SaveRegionData(State& ss)
 {
@@ -225,6 +236,18 @@ static void CleanupMinimapTiles(int playerSectorX, int playerSectorY)
     for (auto it = g_minimapTiles.begin(); it != g_minimapTiles.end();)
     {
         auto& tile = it->second;
+
+        // g_currentFrame is incremented at the TOP of RenderRadar, before this runs.
+        // RenderBotWindow always renders before RenderRadar, so its tiles are stamped
+        // with (g_currentFrame - 1). Protect any tile used this rendering frame or the
+        // immediately preceding stamp. their texture pointers are live in ImDrawList
+        // commands that haven't been submitted to the GPU yet.
+        if (tile.lastUsedFrame + 1 >= g_currentFrame)
+        {
+            ++it;
+            continue;
+        }
+
         int dist = TileDistance(tile.sectorX, tile.sectorY,
             playerSectorX, playerSectorY);
         if (dist > UNLOAD_RADIUS)
@@ -352,6 +375,7 @@ static int walkZ = 0;
 SoxOverlay g_soxOverlay;
 static bool initialized = false;
 static ImFont* g_fontWatermark = nullptr;
+static std::string g_clientVersion;
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 struct DungeonRoomBounds
 {
@@ -374,11 +398,11 @@ static bool showAdminToolsWindow    = false;
 static bool showSettingsWindow      = false;
 static bool showAchWindow           = false;
 static bool showBotWindow           = false;
-static bool showLatticeInspector    = false;
 static bool showSkinTest            = false;
+static bool showLogsWindow          = false;
 
 static bool AnyWindowOpen() {
-    return showSessionStatsWindow || showAdminToolsWindow || showSettingsWindow || g_rewardWindow.isOpen || g_achWindow.isOpen || showBotWindow;
+    return showSessionStatsWindow || showAdminToolsWindow || showSettingsWindow || g_rewardWindow.isOpen || g_achWindow.isOpen || showBotWindow || showLogsWindow;
 }
 
 static HWND g_gameHwnd = nullptr;
@@ -443,23 +467,56 @@ static void SetupImGuiStyle()
     c[ImGuiCol_TextDisabled] = ImVec4(0.35f, 0.42f, 0.52f, 1.00f);
 }
 
+// SV.T structure: [uint32_t LE length (plain-text)] [Blowfish ECB encrypted payload].
+// Encryption uses the JoyMax LE Blowfish variant (same as PK2), key = first 8 bytes
+// of "SILKROADVERSION" = "SILKROAD".
+static void ReadClientVersion()
+{
+    if (!g_pk2.IsOpen()) return;
+
+    std::vector<uint8_t> buf;
+    if (!g_pk2.ReadFile("SV.T", buf) || buf.size() < 8) return;
+
+    // Bytes 0-3: plain-text LE uint32 — length of the version string.
+    uint32_t strLen = uint32_t(buf[0])
+                    | (uint32_t(buf[1]) << 8)
+                    | (uint32_t(buf[2]) << 16)
+                    | (uint32_t(buf[3]) << 24);
+
+    if (strLen == 0 || strLen > 64) return;  // sanity: version strings are short
+
+    // Bytes 4+: Blowfish ECB encrypted payload.
+    Blowfish bf;
+    static const char kSvKey[] = "SILKROAD";
+    bf.SetKey(reinterpret_cast<const uint8_t*>(kSvKey), 8);
+
+    uint8_t* payload    = buf.data() + 4;
+    size_t   payloadLen = (buf.size() - 4) & ~size_t(7);  // round to 8-byte boundary
+    bf.DecryptEcb(payload, payloadLen);
+
+    if (strLen <= payloadLen) {
+        const char* vstart = reinterpret_cast<const char*>(payload);
+        // strLen may include null-padding inside the Blowfish block; trim to the real string.
+        size_t vlen = strnlen(vstart, strLen);
+        g_clientVersion = std::string(vstart, vlen);
+    }
+}
+
 static void RenderWatermark(const char* text)
 {
     ImGuiIO& io = ImGui::GetIO();
-    ImGuiStyle& style = ImGui::GetStyle();
     if (g_fontWatermark) ImGui::PushFont(g_fontWatermark);
-    float paddingX = 2.0f;
-    float paddingY = 2.0f;
     ImVec2 textSize = ImGui::CalcTextSize(text);
-    float windowWidth = textSize.x + style.WindowPadding.x * 2;
-    float windowHeight = textSize.y + style.WindowPadding.y * 2;
-    ImVec2 pos = ImVec2(
-        io.DisplaySize.x - windowWidth - paddingX,
-        io.DisplaySize.y - windowHeight - paddingY
-    );
-    if (g_fontWatermark) ImGui::PopFont(); // pop before Begin
+    if (g_fontWatermark) ImGui::PopFont();
+
+    const float padX = 6.0f, padY = 4.0f;
+
+    ImVec2 winSize = ImVec2(textSize.x + padX * 2.f, textSize.y + padY * 2.f);
+    ImVec2 pos = ImVec2(io.DisplaySize.x - winSize.x - 2.f,
+                        io.DisplaySize.y - winSize.y - 2.f);
+
     ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(windowWidth, windowHeight), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(winSize, ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.0f);
     ImGuiWindowFlags flags =
         ImGuiWindowFlags_NoDecoration |
@@ -469,13 +526,14 @@ static void RenderWatermark(const char* text)
         ImGuiWindowFlags_NoFocusOnAppearing |
         ImGuiWindowFlags_NoNav |
         ImGuiWindowFlags_NoBackground;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(padX, padY));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::Begin("##watermark", nullptr, flags);
     if (g_fontWatermark) ImGui::PushFont(g_fontWatermark);
     ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 0.8f), text);
     if (g_fontWatermark) ImGui::PopFont();
     ImGui::End();
-    ImGui::PopStyleVar();
+    ImGui::PopStyleVar(2);
 }
 
 static void RenderFPS()
@@ -514,20 +572,14 @@ static void RenderFPS()
 }
 
 static void RenderSessionStats() {
+    
+    PlayerState ps = g_bridge.m_state;
+    State& ss = g_bridge.m_sessionState;
+    if (ps.charName.empty()) return;
+
     if (!BeginSROWindow("##session_stats", "Session Stats", &showSessionStatsWindow,
                         { 320.f, 500.f }, { 20.f, 20.f }, { 280.f, 200.f }, { 520.f, 720.f }))
         return;
-
-    PlayerState ps = g_bridge.m_state;
-    State& ss      = g_bridge.m_sessionState;
-
-    if (ps.charName.empty())
-    {
-        ImGui::Spacing();
-        ImGui::TextDisabled("Waiting for session...");
-        EndSROWindow();
-        return;
-    }
 
     const float      labelCol = 80.0f;
     const ImVec4 clrValue(0.75f, 0.88f, 1.00f, 1.0f);
@@ -634,43 +686,35 @@ static void RenderSessionStats() {
     if (!g_bridge.unclaimedRewards.empty())
     {
         ImGui::Spacing();
-        ImGui::TextDisabled("PENDING REWARDS");
+        ImGui::TextColored(ImVec4(1.0f, 0.86f, 0.59f, 0.8f), "PENDING REWARDS");
         ImGui::Separator();
         ImGui::Spacing();
 
-        const float pillH    = 22.0f;
-        const float pillPadX = 10.0f;
-        float lineW          = ImGui::GetContentRegionAvail().x;
+        const float btnH     = 22.0f;
+        const float padX     = 10.0f;
+        const float lineW    = ImGui::GetContentRegionAvail().x;
         float cursorX        = ImGui::GetCursorPosX();
-        float startX         = cursorX;
+        const float startX   = cursorX;
         bool  firstOnLine    = true;
 
         for (int lvl : g_bridge.unclaimedRewards)
         {
-            char label[16];
-            snprintf(label, sizeof(label), "Lv %d", lvl);
-            float pillW = ImGui::CalcTextSize(label).x + pillPadX * 2.0f;
+            char label[16];  snprintf(label, sizeof(label), "Lv %d", lvl);
+            char btnId[32];  snprintf(btnId, sizeof(btnId), "##rw%d", lvl);
+            const float btnW = ImGui::CalcTextSize(label).x + padX * 2.0f;
 
-            if (!firstOnLine && (cursorX + pillW > startX + lineW))
+            if (!firstOnLine && (cursorX + btnW > startX + lineW))
             {
                 ImGui::NewLine();
                 cursorX = startX;
                 firstOnLine = true;
             }
-            if (!firstOnLine) { ImGui::SameLine(0.0f, 4.0f); cursorX += pillW + 4.0f; }
-            else              { cursorX += pillW; }
+            if (!firstOnLine) { ImGui::SameLine(0.0f, 4.0f); cursorX += btnW + 4.0f; }
+            else              { cursorX += btnW; }
             firstOnLine = false;
 
-            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.45f, 0.30f, 0.05f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.65f, 0.45f, 0.08f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.30f, 0.20f, 0.03f, 1.0f));
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-            char btnId[32];
-            snprintf(btnId, sizeof(btnId), "Lv %d##rw%d", lvl, lvl);
-            if (ImGui::Button(btnId, ImVec2(pillW, pillH)))
+            if (SROButton(btnId, label, btnW, btnH))
                 g_bridge.Send("{\"type\":\"reward_reopen\",\"level\":" + std::to_string(lvl) + "}");
-            ImGui::PopStyleVar();
-            ImGui::PopStyleColor(3);
         }
         ImGui::NewLine();
     }
@@ -678,13 +722,91 @@ static void RenderSessionStats() {
     EndSROWindow();
 }
 
+// GM-only log viewer, opened from Admin Tools.
+static void RenderLogsWindow() {
+    if (!g_bridge.m_sessionState.isGM) return;
+
+    ImGui::SetNextWindowSize(ImVec2(640, 380), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(380, 200), ImVec2(1400, 900));
+    if (!ImGui::Begin("Logs", &showLogsWindow)) { ImGui::End(); return; }
+
+    static char s_filter[128] = {};
+    static bool s_autoScroll  = true;
+    static bool s_showInfo = true, s_showWarn = true, s_showErr = true, s_showDbg = true;
+
+    // Controls row
+    if (ImGui::Button("Clear")) GetLogger().Clear();
+    ImGui::SameLine();
+    ImGui::Checkbox("Auto-scroll", &s_autoScroll);
+    ImGui::SameLine(); ImGui::Checkbox("Info", &s_showInfo);
+    ImGui::SameLine(); ImGui::Checkbox("Warn", &s_showWarn);
+    ImGui::SameLine(); ImGui::Checkbox("Err",  &s_showErr);
+    ImGui::SameLine(); ImGui::Checkbox("Dbg",  &s_showDbg);
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##logfilter", "Filter (location or message)...",
+                             s_filter, sizeof(s_filter));
+
+    ImGui::Separator();
+
+    ImGui::BeginChild("##logscroll", ImVec2(0, 0), false,
+                      ImGuiWindowFlags_HorizontalScrollbar);
+    {
+        auto& logger = GetLogger();
+        std::lock_guard<std::mutex> lock(logger.Mutex());
+
+        const bool levelOn[4] = { s_showInfo, s_showWarn, s_showErr, s_showDbg };
+        std::string fl = s_filter;
+        std::transform(fl.begin(), fl.end(), fl.begin(), ::tolower);
+
+        // Collect visible entries so the clipper works over a stable index range
+        static std::vector<const LogEntry*> s_visible;
+        s_visible.clear();
+        for (const auto& en : logger.Entries()) {
+            if (en.level < 0 || en.level > 3 || !levelOn[en.level]) continue;
+            if (!fl.empty()) {
+                std::string hay = en.loc + " " + en.msg;
+                std::transform(hay.begin(), hay.end(), hay.begin(), ::tolower);
+                if (hay.find(fl) == std::string::npos) continue;
+            }
+            s_visible.push_back(&en);
+        }
+
+        static const ImVec4 kLevelCol[4] = {
+            { 0.35f, 0.80f, 1.00f, 1.f },   // INFO — cyan
+            { 1.00f, 0.85f, 0.30f, 1.f },   // WARN — yellow
+            { 1.00f, 0.35f, 0.35f, 1.f },   // ERR  — red
+            { 0.60f, 0.60f, 0.60f, 1.f },   // DBG  — grey
+        };
+        static const char* kLevelTag[4] = { "INFO", "WARN", "ERR ", "DBG " };
+
+        ImGuiListClipper clipper;
+        clipper.Begin((int)s_visible.size());
+        while (clipper.Step()) {
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; i++) {
+                const LogEntry& en = *s_visible[i];
+                ImGui::TextColored(kLevelCol[en.level], "[%s] [%s] %s",
+                                   kLevelTag[en.level], en.loc.c_str(), en.msg.c_str());
+            }
+        }
+        clipper.End();
+
+        if (s_autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.f)
+            ImGui::SetScrollHereY(1.0f);
+    }
+    ImGui::EndChild();
+
+    ImGui::End();
+}
+
 static void RenderAdminTools() {
+    PlayerState ps = g_bridge.m_state;
+    State& ss = g_bridge.m_sessionState;
+    if (ps.charName.empty()) return;
+
     ImGui::SetNextWindowSize(ImVec2(340, 0), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(660, 20), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(300, 100), ImVec2(560, 760));
     ImGui::Begin("Admin Tools", &showAdminToolsWindow);
-
-    State& ss = g_bridge.m_sessionState;
 
     if (!ss.isGM)
     {
@@ -692,6 +814,10 @@ static void RenderAdminTools() {
         ImGui::End();
         return;
     }
+
+    if (ImGui::Button(showLogsWindow ? "Hide Logs" : "Show Logs", ImVec2(-1, 24)))
+        showLogsWindow = !showLogsWindow;
+    ImGui::Spacing();
 
     {
         ImGui::TextDisabled("DUNGEON ROOM RECORDER");
@@ -1176,7 +1302,7 @@ static IDirect3DTexture9* GetSkillIcon(const std::string& iconFile)
     return g_iconCache->Get("icon/" + base + ".ddj");
 }
 
-static void RenderBotWindow() {
+static void RenderBotWindow_Legacy() {
 
     PlayerState ps = g_bridge.m_state;
     State& ss = g_bridge.m_sessionState;
@@ -1790,250 +1916,1301 @@ static void RenderBotWindow() {
     
 }
 
-static void RenderSettings() {
-    ImGui::SetNextWindowSize(ImVec2(280, 0), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(ImVec2(60, 60), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(220, 80), ImVec2(400, 400));
-    ImGui::Begin("Settings", &showSettingsWindow);
-    ImGui::TextDisabled("GENERAL");
-    ImGui::Separator();
-    ImGui::Spacing();
-    bool kf = Settings::keepFocused;
-    if (ImGui::Checkbox("Keep Focus", &kf)) {
-        Settings::keepFocused = kf;
-        Settings::Save();
-    }
-    bool showFPS = Settings::showFPSCounter;
-    if (ImGui::Checkbox("Show FPS counter", &showFPS)) {
-        Settings::showFPSCounter = showFPS;
-        Settings::Save();
-    }
-    bool showWaterMark = Settings::showWatermark;
-    if (ImGui::Checkbox("Show Watermark", &showWaterMark)) {
-        Settings::showWatermark = showWaterMark;
-        Settings::Save();
-    }
-    ImGui::Spacing();
-    ImGui::TextDisabled("NavMesh");
-    ImGui::Separator();
-
-    ImGui::Spacing();
-    ImGui::TextDisabled("DEV TOOLS");
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    if (ImGui::Button(showLatticeInspector ? "Close Lattice Inspector" : "Open Lattice Inspector", ImVec2(-1, 22)))
-        showLatticeInspector = !showLatticeInspector;
-
-    ImGui::Spacing();
-    ImGui::TextDisabled("PK2 TEST");
-    ImGui::Separator();
-    if (ImGui::Button("Read DIVISIONINFO.TXT")) {
-        auto& log = GetLogger();
-        if (!g_pk2.IsOpen()) {
-            char exePath[MAX_PATH];
-            GetModuleFileNameA(NULL, exePath, MAX_PATH);
-            std::string dir(exePath);
-            dir = dir.substr(0, dir.find_last_of("\\/"));
-            std::wstring pk2Path(dir.begin(), dir.end());
-            pk2Path += L"\\media.pk2";
-            if (!g_pk2.Open(pk2Path))
-                log.Err("PK2Test", "Failed to open media.pk2 at: " + dir);
-        }
-        if (g_pk2.IsOpen()) {
-            std::vector<uint8_t> data;
-            if (g_pk2.ReadFile("DIVISIONINFO.TXT", data)) {
-                std::string content(data.begin(), data.end());
-                log.Info("PK2Test", "DIVISIONINFO.TXT (" + std::to_string(data.size()) + " bytes): " + content);
-            } else {
-                log.Err("PK2Test", "DIVISIONINFO.TXT not found in media.pk2");
-            }
-        }
-    }
-
-    ImGui::End();
-}
-
-static void RenderSkinTest()
+static void RenderBotWindow(IDirect3DDevice9* device)
 {
-    if (!BeginSROWindow("##skintest", "Skin Test", &showSkinTest,
-                        { 380.f, 300.f }, { 200.f, 180.f }, { 200.f, 200.f }, { 900.f, 900.f }))
+    PlayerState ps = g_bridge.m_state;
+    State& ss = g_bridge.m_sessionState;
+    if (ps.charName.empty()) return;
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(
+        ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+        ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    if (!BeginSROWindow("##botwndtest", "Bot Control", &showBotWindow,
+            ImVec2(820.f, 560.f), ImVec2(-1.f, -1.f),
+            ImVec2(500.f, 380.f), ImVec2(1400.f, 900.f), false))
         return;
 
-    ImGui::TextDisabled("SRO skin test window — BeginSROWindow / EndSROWindow");
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-    ImGui::TextWrapped("Resize to test 9-slice scaling. Scroll to test custom scrollbar.");
-    ImGui::Spacing();
-    for (int i = 1; i <= 20; i++)
-        ImGui::TextDisabled("Row %d — sample content", i);
+    static int  walkX = 0, walkY = 0, walkZ = 0, walkR = 25, regionID = 0;
+
+    if (ss.hasSavedBotConfig) {
+        walkX    = ss.savedBotX;    walkY  = ss.savedBotY;
+        walkZ    = ss.savedBotZ;    walkR  = ss.savedBotR;
+        regionID = ss.savedBotRegionId;
+        ss.hasSavedBotConfig = false;
+    }
+
+    struct DefaultPreset { const char* name; int regionId, x, y, z, r; };
+    static const DefaultPreset kDefPresets[] = {
+        { "Black Robber Den (SE)",        23700,  2671,   142,  207, 75 },
+        { "Huns Garrison",                26737, -4124,  2430,  195, 75 },
+        { "Stone Cave F3",               0x8001, 24533, 24403,  284, 75 },
+        { "Desert Of Mysterious Death",   25731,  -727,  1645,  -42, 75 },
+        { "Roc Mtn. Forest",             24431, -4520,   699, 2026, 40 },
+        { "Beak Peak, Roc Mtn.",         22388, -3536,  -781, 3379, 45 },
+        { "Qin-Shi B4",                 0x8004, 24407, 24561,  -33, 50 },
+    };
+    struct UserPreset { char name[64]; int x, y, z, r, regionID; };
+    static std::vector<UserPreset> kUsrPresets;
+    static int   selectedPreset  = -1;
+    static char  presetFilter[64] = {};
+    static bool  savingPreset    = false;
+    static char  newPresetName[64] = {};
+
+    // State colour
+    const char* stateStr = ss.botStateLabel.empty() ? "Idle" : ss.botStateLabel.c_str();
+    ImVec4 stateColor = { 0.6f, 0.6f, 0.6f, 1.f };
+    if      (ss.botStateLabel == "WalkingToTrainplace") stateColor = { 0.3f, 0.7f, 1.0f, 1.f };
+    else if (ss.botStateLabel == "Training")            stateColor = { 0.3f, 1.0f, 0.4f, 1.f };
+    else if (ss.botStateLabel == "Teleporting")         stateColor = { 0.8f, 0.4f, 1.0f, 1.f };
+    else if (ss.botStateLabel == "Returning")           stateColor = { 1.0f, 0.8f, 0.2f, 1.f };
+    else if (ss.botStateLabel == "Dead")                stateColor = { 1.0f, 0.3f, 0.3f, 1.f };
+    const ImU32 stateU32 = ImGui::ColorConvertFloat4ToU32(stateColor);
+
+    // Tab bar
+    static const char* kTabs[] = { "Bot", "Skills", "Settings" };
+    static int s_tab = 0;
+    const float availW = ImGui::GetContentRegionAvail().x;
+    const float availH = ImGui::GetContentRegionAvail().y;
+    const float bodyH  = availH - K_TAB_H - ImGui::GetStyle().ItemSpacing.y;
+    SROTabBar("##bwt_tabs", kTabs, 3, &s_tab, 90.f);
+
+    if (s_tab == 0)
+    {
+        const float sp     = ImGui::GetStyle().ItemSpacing.x;
+        const float sp2    = ImGui::GetStyle().ItemSpacing.y;
+        const float leftW  = availW * 0.40f - sp * 0.5f;
+        const float rightW = availW - leftW - sp;
+
+        
+        ImGui::BeginChild("##bwt_left", { leftW, bodyH }, false,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        {
+            const float rowW = ImGui::GetContentRegionAvail().x;
+            ImGui::TextColored({ 0.7f, 0.65f, 0.45f, 1.f }, "STATUS");
+            ImGui::Spacing();
+
+            char killsBuf[32], distBuf[32], targetBuf[32];
+            snprintf(killsBuf,  sizeof(killsBuf),  "%d",   ss.sessionKills);
+            snprintf(distBuf,   sizeof(distBuf),   "%.1f m", ss.distanceToTarget);
+            if (ss.lastTargetUid)
+                snprintf(targetBuf, sizeof(targetBuf), "%d", ss.lastTargetUid);
+            else
+                snprintf(targetBuf, sizeof(targetBuf), "None");
+
+            SROStatusRow("State",    stateStr,  rowW, stateU32);
+            ImGui::Dummy({ 0.f, 2.f });
+            SROStatusRow("Region",   ss.curRegionName.empty() ? "-" : ss.regionName, rowW);
+            ImGui::Dummy({ 0.f, 2.f });
+            SROStatusRow("Kills",    killsBuf,  rowW);
+            ImGui::Dummy({ 0.f, 2.f });
+            SROStatusRow("Distance", distBuf,   rowW);
+            ImGui::Dummy({ 0.f, 2.f });
+            SROStatusRow("Target",   targetBuf, rowW);
+
+            ImGui::Spacing();
+            ImGui::Spacing();
+
+            const bool botRunning = !ss.botStateLabel.empty() && ss.botStateLabel != "Idle";
+            const float halfW = (ImGui::GetContentRegionAvail().x - sp) * 0.5f;
+            if (SROButton("##bwt_start", "Start", halfW, 28.f, botRunning))
+                NetActions::SendStartBotRequest(walkX, walkY, walkZ, walkR, regionID);
+            ImGui::SameLine();
+            if (SROButton("##bwt_stop", "Stop", halfW, 28.f, !botRunning))
+                NetActions::SendStopBotRequest();
+
+            // Trainplace minimap
+            {
+                static float s_tpZoom       = 0.35f;
+                static float s_tpZoomTarget = 0.35f;
+                static int   s_charLastX = 0, s_charLastY = 0;
+                static float s_charAngle = 0.0f;
+
+                // Textures loaded once when device is first available
+                static IDirect3DTexture9* s_locPin       = nullptr;
+                static IDirect3DTexture9* s_mmZoomIn     = nullptr;
+                static IDirect3DTexture9* s_mmZoomInFoc  = nullptr;
+                static IDirect3DTexture9* s_mmZoomInPrs  = nullptr;
+                static IDirect3DTexture9* s_mmZoomOut    = nullptr;
+                static IDirect3DTexture9* s_mmZoomOutFoc = nullptr;
+                static IDirect3DTexture9* s_mmZoomOutPrs = nullptr;
+                static IDirect3DTexture9* s_mmMonster    = nullptr;
+                static IDirect3DTexture9* s_mmCharacter  = nullptr;
+                static float s_mmBtnSz  = 30.f;
+                static float s_mmMobSz  = 16.f;
+                static float s_mmCharSz = 16.f;
+                static bool  s_locInit = false;
+                if (!s_locInit && device) {
+                    s_locPin       = LoadDDJFromPk2(device, "interface\\worldmap\\wmap_sign_location.ddj");
+                    s_mmZoomIn     = LoadDDJFromPk2(device, "interface\\minimap\\mm_zoomin.ddj");
+                    s_mmZoomInFoc  = LoadDDJFromPk2(device, "interface\\minimap\\mm_zoomin_focus.ddj");
+                    s_mmZoomInPrs  = LoadDDJFromPk2(device, "interface\\minimap\\mm_zoomin_press.ddj");
+                    s_mmZoomOut    = LoadDDJFromPk2(device, "interface\\minimap\\mm_zoomout.ddj");
+                    s_mmZoomOutFoc = LoadDDJFromPk2(device, "interface\\minimap\\mm_zoomout_focus.ddj");
+                    s_mmZoomOutPrs = LoadDDJFromPk2(device, "interface\\minimap\\mm_zoomout_press.ddj");
+                    s_mmMonster    = LoadDDJFromPk2(device, "interface\\minimap\\mm_sign_monster.ddj");
+                    s_mmCharacter  = LoadDDJFromPk2(device, "interface\\minimap\\mm_sign_character.ddj");
+                    if (s_mmZoomIn) {
+                        D3DSURFACE_DESC bd{};
+                        if (SUCCEEDED(s_mmZoomIn->GetLevelDesc(0, &bd)) && bd.Width > 0)
+                            s_mmBtnSz = (float)bd.Width;
+                    }
+                    if (s_mmMonster) {
+                        D3DSURFACE_DESC md{};
+                        if (SUCCEEDED(s_mmMonster->GetLevelDesc(0, &md)) && md.Width > 0)
+                            s_mmMobSz = (float)md.Width;
+                    }
+                    if (s_mmCharacter) {
+                        D3DSURFACE_DESC cd{};
+                        if (SUCCEEDED(s_mmCharacter->GetLevelDesc(0, &cd)) && cd.Width > 0)
+                            s_mmCharSz = (float)cd.Width;
+                    }
+                    s_locInit = true;
+                }
+
+                ImGui::Spacing();
+                const float mapW      = ImGui::GetContentRegionAvail().x;
+                const float mapFrameH = ImGui::GetContentRegionAvail().y;
+                const float K_ZBTN_W  = s_mmBtnSz;
+
+                if (mapFrameH > 40.f) {
+                    // Subframe fills all but the zoom button column
+                    const float  subW     = mapW - K_ZBTN_W - sp;
+                    const ImVec2 sfOrigin = ImGui::GetCursorScreenPos();
+                    const bool   mapVis   = SROBeginSubFrame("##tp_map", subW, mapFrameH);
+                    if (mapVis) {
+                        // Canvas bounds derived from outer frame coords so the map is flush
+                        // against the inner edge of all four border strips (K_SF_C each side).
+                        const float  canvasW = subW      - 2.f * K_SF_C;
+                        const float  canvasH = mapFrameH - 2.f * K_SF_C;
+
+                        // Minimum zoom: 5 tile-widths (960 wu) must cover each canvas half
+                        // so the tile grid never reveals black edges.
+                        const float  zMin    = (std::max)(canvasW, canvasH) / (2.f * 5.f * 192.f);
+                        s_tpZoomTarget = (std::max)(s_tpZoomTarget, zMin);
+
+                        // Mouse-wheel zoom while hovering the map canvas
+                        {
+                            const float wheel = ImGui::GetIO().MouseWheel;
+                            if (wheel != 0.f && ImGui::IsWindowHovered() &&
+                                ImGui::IsMouseHoveringRect(
+                                    { sfOrigin.x + K_SF_C,        sfOrigin.y + K_SF_C },
+                                    { sfOrigin.x + subW - K_SF_C, sfOrigin.y + mapFrameH - K_SF_C }))
+                            {
+                                s_tpZoomTarget = (std::min)((std::max)(
+                                    s_tpZoomTarget * powf(1.35f, wheel), zMin), 2.0f);
+                            }
+                        }
+                        // Exponential smooth approach toward target (~90% in 0.13 s at 60 fps)
+                        const float dt = ImGui::GetIO().DeltaTime;
+                        s_tpZoom = s_tpZoomTarget + (s_tpZoom - s_tpZoomTarget) * expf(-18.f * dt);
+                        s_tpZoom = (std::max)(s_tpZoom, zMin);
+
+                        const ImVec2 cTL = { sfOrigin.x + K_SF_C,        sfOrigin.y + K_SF_C };
+                        const ImVec2 cBR = { sfOrigin.x + subW - K_SF_C, sfOrigin.y + mapFrameH - K_SF_C };
+                        const ImVec2 ctr = { cTL.x + canvasW * 0.5f,     cTL.y + canvasH * 0.5f };
+
+                        ImDrawList* dl = ImGui::GetWindowDrawList();
+                        dl->PushClipRect(cTL, cBR, true);
+                        dl->AddRectFilled(cTL, cBR, IM_COL32(10, 11, 16, 255));
+
+                        const bool isDungeon = (regionID & 0x8000) != 0;
+                        const int  tpSX = isDungeon
+                            ? (int)floorf((float)walkX / 192.f)
+                            : (int)floorf((float)walkX / 192.f) + 135;
+                        const int  tpSY = isDungeon
+                            ? (int)floorf((float)walkY / 192.f)
+                            : (int)floorf((float)walkY / 192.f) + 92;
+
+                        auto W2M = [&](int wx, int wy) -> ImVec2 {
+                            return { ctr.x + (wx - walkX) * s_tpZoom,
+                                     ctr.y - (wy - walkY) * s_tpZoom };
+                        };
+
+                        if (!isDungeon) {
+                            // Dynamic radius: enough tiles to fill the canvas, capped at 5
+                            // (5 sectors guarantee ≥960 wu coverage in every direction).
+                            const int rX = (std::min)(
+                                (int)ceilf(canvasW * 0.5f / (192.f * s_tpZoom)) + 1, 5);
+                            const int rY = (std::min)(
+                                (int)ceilf(canvasH * 0.5f / (192.f * s_tpZoom)) + 1, 5);
+                            for (int dsy = -rY; dsy <= rY; dsy++) {
+                                for (int dsx = -rX; dsx <= rX; dsx++) {
+                                    const int sx    = tpSX + dsx, sy = tpSY + dsy;
+                                    const int wMinX = (sx - 135) * 192;
+                                    const int wMinY = (sy -  92) * 192;
+                                    const ImVec2 p1 = W2M(wMinX,       wMinY);
+                                    const ImVec2 p2 = W2M(wMinX + 192, wMinY + 192);
+                                    const float  sL = (std::min)(p1.x, p2.x);
+                                    const float  sR = (std::max)(p1.x, p2.x);
+                                    const float  sT = (std::min)(p1.y, p2.y);
+                                    const float  sB = (std::max)(p1.y, p2.y);
+                                    if (sR < cTL.x || sL > cBR.x || sB < cTL.y || sT > cBR.y) continue;
+                                    MinimapTile* tile = GetOrLoadTile(device, sx, sy);
+                                    if (tile && tile->texture)
+                                        dl->AddImage(ImTextureRef((ImTextureID)(uintptr_t)tile->texture),
+                                                     p1, p2, { 0.f, 1.f }, { 1.f, 0.f });
+                                }
+                            }
+                        } else {
+                            // Identify dungeon type and floor from regionID
+                            const int rID = regionID & 0xFFFF;
+                            std::string dgFolder, dgPrefix;
+                            int dgFloor = 0;
+                            if (rID == 0x8001) {
+                                // Stone Cave — floor derived from saved Z position
+                                dgFolder = "donwhang";
+                                dgPrefix = "dh_a01";
+                                dgFloor  = DetectStoneCaveFloor((float)walkZ);
+                            } else if (rID >= 0x8004 && rID <= 0x8007) {
+                                // Qin-Shi Tomb — B1=0x8007 … B4=0x8004, floor = 8-(rID&0xF)
+                                dgFolder = "jinsi";
+                                dgPrefix = "qt_a01";
+                                dgFloor  = 8 - (rID & 0x0F);
+                            }
+
+                            if (!dgFolder.empty()) {
+                                const int rX = (std::min)(
+                                    (int)ceilf(canvasW * 0.5f / (192.f * s_tpZoom)) + 1, 5);
+                                const int rY = (std::min)(
+                                    (int)ceilf(canvasH * 0.5f / (192.f * s_tpZoom)) + 1, 5);
+                                for (int dsy = -rY; dsy <= rY; dsy++) {
+                                    for (int dsx = -rX; dsx <= rX; dsx++) {
+                                        const int sx    = tpSX + dsx, sy = tpSY + dsy;
+                                        // Dungeon tiles use raw sector coords (no overworld offset)
+                                        const int wMinX = sx * 192;
+                                        const int wMinY = sy * 192;
+                                        const ImVec2 p1 = W2M(wMinX,       wMinY);
+                                        const ImVec2 p2 = W2M(wMinX + 192, wMinY + 192);
+                                        const float  sL = (std::min)(p1.x, p2.x);
+                                        const float  sR = (std::max)(p1.x, p2.x);
+                                        const float  sT = (std::min)(p1.y, p2.y);
+                                        const float  sB = (std::max)(p1.y, p2.y);
+                                        if (sR < cTL.x || sL > cBR.x || sB < cTL.y || sT > cBR.y) continue;
+                                        MinimapTile* tile = GetOrLoadTile(device, sx, sy,
+                                                                          dgFolder, dgPrefix, dgFloor);
+                                        if (tile && tile->texture)
+                                            dl->AddImage(ImTextureRef((ImTextureID)(uintptr_t)tile->texture),
+                                                         p1, p2, { 0.f, 1.f }, { 1.f, 0.f });
+                                    }
+                                }
+                            } else {
+                                // Unknown dungeon — keep text fallback
+                                const char*  msg = "Dungeon N/A";
+                                const ImVec2 ts  = ImGui::CalcTextSize(msg);
+                                dl->AddText({ ctr.x - ts.x * 0.5f, ctr.y - ts.y * 0.5f },
+                                            IM_COL32(110, 110, 110, 200), msg);
+                            }
+                        }
+
+                        // Monster sprites
+                        {
+                            const int n = ss.nearbyMobCount;
+                            const float hs = s_mmMobSz * 0.5f;
+                            for (int mi = 0; mi < n; mi++) {
+                                const ImVec2 mp = W2M(ss.nearbyMobs[mi].x, ss.nearbyMobs[mi].y);
+                                if (mp.x + hs < cTL.x || mp.x - hs > cBR.x ||
+                                    mp.y + hs < cTL.y || mp.y - hs > cBR.y) continue;
+                                if (s_mmMonster)
+                                    dl->AddImage(ImTextureRef((ImTextureID)(uintptr_t)s_mmMonster),
+                                                 { mp.x - hs, mp.y - hs }, { mp.x + hs, mp.y + hs });
+                                else
+                                    dl->AddCircleFilled(mp, 4.f, IM_COL32(220, 40, 40, 200));
+                            }
+                        }
+
+                        // Location pin
+                        if (s_locPin) {
+                            D3DSURFACE_DESC desc{};
+                            if (SUCCEEDED(s_locPin->GetLevelDesc(0, &desc)) && desc.Height > 0) {
+                                const int   nFr = (desc.Width > desc.Height)
+                                                  ? (int)(desc.Width / desc.Height) : 1;
+                                const float t   = fmodf((float)ImGui::GetTime(), 0.5f) / 0.5f;
+                                const int   frm = (int)(t * nFr) % nFr;
+                                const float u0  = frm       / (float)nFr;
+                                const float u1  = (frm + 1) / (float)nFr;
+                                const float pH  = (float)desc.Height;
+
+                                // DROP ME
+                                const float pDrop = 6.f;
+                                const ImVec2 pTL = { ctr.x - pH * 0.5f, ctr.y - pH + pDrop };
+                                const ImVec2 pBR = { ctr.x + pH * 0.5f, ctr.y      + pDrop };
+                                dl->AddImage(ImTextureRef((ImTextureID)(uintptr_t)s_locPin),
+                                             pTL, pBR, { u0, 0.f }, { u1, 1.f });
+                            }
+                        } else {
+                            const float a = (sinf((float)ImGui::GetTime() * 4.f) + 1.f) * 0.5f;
+                            dl->AddCircleFilled(ctr, 5.f, IM_COL32(255, 60, 60, (int)(a * 220.f)));
+                        }
+
+                        // Player character sprite
+                        if (s_mmCharacter) {
+                            const int   cx = ss.WorldX, cy = ss.WorldY;
+                            const float dx = (float)(cx - s_charLastX);
+                            const float dy = (float)(cy - s_charLastY);
+                            if (dx * dx + dy * dy > 1.0f) {
+                                s_charAngle = atan2f(-dy, dx); // Y negated: world-north = screen-up
+                                s_charLastX = cx;
+                                s_charLastY = cy;
+                            }
+                            const ImVec2 sp = W2M(cx, cy);
+                            const float  hs = s_mmCharSz * 0.5f;
+                            const float  c  = cosf(s_charAngle), si = sinf(s_charAngle);
+                            auto rp = [&](float ox, float oy) -> ImVec2 {
+                                return { sp.x + c * ox - si * oy, sp.y + si * ox + c * oy };
+                            };
+                            dl->AddImageQuad(
+                                ImTextureRef((ImTextureID)(uintptr_t)s_mmCharacter),
+                                rp(-hs, -hs), rp(hs, -hs), rp(hs, hs), rp(-hs, hs));
+                        }
+
+                        dl->PopClipRect();
+                        ImGui::Dummy({ canvasW, canvasH });
+                    }
+                    SROEndSubFrame();
+
+                    // 3-state DDJ zoom buttons (normal / hover / pressed)
+                    auto DDJBtn = [&](const char* id,
+                                      IDirect3DTexture9* norm,
+                                      IDirect3DTexture9* foc,
+                                      IDirect3DTexture9* prs,
+                                      float sz) -> bool
+                    {
+                        const ImVec2 pos = ImGui::GetCursorScreenPos();
+                        ImGui::InvisibleButton(id, { sz, sz });
+                        const bool clicked = ImGui::IsItemClicked();
+                        const bool hov     = ImGui::IsItemHovered();
+                        const bool act     = ImGui::IsItemActive() && hov;
+                        IDirect3DTexture9* tex = act ? prs : (hov ? foc : norm);
+                        if (!tex) tex = norm;
+                        if (tex)
+                            ImGui::GetWindowDrawList()->AddImage(
+                                ImTextureRef((ImTextureID)(uintptr_t)tex),
+                                pos, { pos.x + sz, pos.y + sz });
+                        return clicked;
+                    };
+
+                    // Zoom in
+                    ImGui::SetCursorScreenPos({ sfOrigin.x + subW + sp, sfOrigin.y });
+                    if (DDJBtn("##tp_zi", s_mmZoomIn, s_mmZoomInFoc, s_mmZoomInPrs, K_ZBTN_W))
+                        s_tpZoomTarget = (std::min)(s_tpZoomTarget * 1.35f, 2.0f);
+
+                    // Zoom out
+                    const float zMin2 = (std::max)(
+                        (mapW - K_ZBTN_W - sp - 2.f * K_SF_C),
+                        (mapFrameH              - 2.f * K_SF_C)) / (2.f * 5.f * 192.f);
+                    ImGui::SetCursorScreenPos({ sfOrigin.x + subW + sp, sfOrigin.y + K_ZBTN_W + sp2 });
+                    if (DDJBtn("##tp_zo", s_mmZoomOut, s_mmZoomOutFoc, s_mmZoomOutPrs, K_ZBTN_W))
+                        s_tpZoomTarget = (std::max)(s_tpZoomTarget / 1.35f, zMin2);
+
+                    // Advance layout past the whole minimap row
+                    ImGui::SetCursorScreenPos({ sfOrigin.x, sfOrigin.y + mapFrameH });
+                    ImGui::Dummy({ mapW, 0.f });
+                }
+            }
+        }
+        ImGui::EndChild();
+
+        ImGui::SameLine();
+
+        ImGui::BeginChild("##bwt_right", { rightW, bodyH }, false,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        {
+            const float cW  = ImGui::GetContentRegionAvail().x;
+            const float sp3 = ImGui::GetStyle().ItemSpacing.x;
+
+            // TRAIN PLACE
+            ImGui::TextColored({ 0.7f, 0.65f, 0.45f, 1.f }, "TRAIN PLACE");
+            ImGui::Spacing();
+
+            // 5 fields: X, Y, Z, R (editable) + Region (read-only LE hex)
+            const float fieldW   = (cW - sp3 * 4.f) / 5.f;
+            const ImVec2 fieldStart = ImGui::GetCursorScreenPos();
+
+            const char* fids[4] = { "##bwt_x","##bwt_y","##bwt_z","##bwt_r" };
+            int*        fvals[4] = { &walkX, &walkY, &walkZ, &walkR };
+            for (int fi = 0; fi < 4; fi++) {
+                ImGui::SetCursorScreenPos({ fieldStart.x + fi * (fieldW + sp3), fieldStart.y });
+                SROInputBarInt(fids[fi], fvals[fi], fieldW, 0, true);
+            }
+
+            {
+                char rgBuf[16];
+                snprintf(rgBuf, sizeof(rgBuf), "0x%04X",
+                         (unsigned)(regionID) & 0xFFFFu);
+                ImGui::SetCursorScreenPos({ fieldStart.x + 4 * (fieldW + sp3), fieldStart.y });
+                SROInputBar("##bwt_reg", rgBuf, sizeof(rgBuf), fieldW,
+                            ImGuiInputTextFlags_ReadOnly, true);
+            }
+            // Advance layout past the 5 bars
+            ImGui::SetCursorScreenPos(fieldStart);
+            ImGui::Dummy({ cW, 22.f });
+
+            // Field labels centred under each bar
+            {
+                const char* lbls[5] = { "X","Y","Z","R","Region" };
+                const float labelY  = fieldStart.y + 22.f + 2.f;
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                const ImU32 dimCol = IM_COL32(140, 130, 110, 255);
+                for (int fi = 0; fi < 5; fi++) {
+                    const ImVec2 ts = ImGui::CalcTextSize(lbls[fi]);
+                    const float  lx = fieldStart.x + fi * (fieldW + sp3) + (fieldW - ts.x) * 0.5f;
+                    dl->AddText({ lx, labelY }, dimCol, lbls[fi]);
+                }
+                ImGui::SetCursorScreenPos({ fieldStart.x, labelY });
+                ImGui::Dummy({ cW, ImGui::GetTextLineHeight() + 4.f });
+            }
+
+            ImGui::Spacing();
+
+            {
+                static constexpr float gcpW  = 180.f;
+                const float            barsW = 5.f * fieldW + 4.f * sp3;
+                const float            gcpX  = fieldStart.x + (barsW - gcpW) * 0.5f;
+                ImGui::SetCursorScreenPos({ gcpX, ImGui::GetCursorScreenPos().y });
+                if (SROButton("##bwt_gcp", "Get Current Pos", gcpW, 26.f)) {
+                    walkX    = ss.WorldX;
+                    walkY    = ss.WorldY;
+                    walkZ    = ss.WorldZ;
+                    regionID = ss.currentRegionID;
+                }
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            // PRESETS
+            ImGui::TextColored({ 0.7f, 0.65f, 0.45f, 1.f }, "PRESETS");
+            ImGui::Spacing();
+
+            // Filter bar
+            ImGui::TextDisabled("Search Presets");
+            SROInputBar("##bwt_filter", presetFilter, sizeof(presetFilter), cW);
+
+            ImGui::Spacing();
+
+            // Preset list — height fills remaining space minus bottom buttons
+            const float btnRowH = 26.f + sp2;
+            const float nameRowH = savingPreset ? 22.f + sp2 : 0.f;
+            const float listH = ImGui::GetContentRegionAvail().y - btnRowH - nameRowH - sp2 * 2.f;
+
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(12, 14, 20, 200));
+            if (ImGui::BeginChild("##bwt_list", { -1.f, listH > 30.f ? listH : 30.f }, false)) {
+                const float iW = ImGui::GetContentRegionAvail().x;
+                // Rows sit flush — no vertical gap between list items
+                ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                                    { ImGui::GetStyle().ItemSpacing.x, 0.f });
+
+                for (int i = 0; i < IM_ARRAYSIZE(kDefPresets); i++) {
+                    const DefaultPreset& p = kDefPresets[i];
+                    if (presetFilter[0]) {
+                        std::string nl = p.name, fl = presetFilter;
+                        std::transform(nl.begin(), nl.end(), nl.begin(), ::tolower);
+                        std::transform(fl.begin(), fl.end(), fl.begin(), ::tolower);
+                        if (nl.find(fl) == std::string::npos) continue;
+                    }
+                    char lbl[160], lid[16];
+                    snprintf(lbl, sizeof(lbl), "[default] %s  (%d, %d, %d)", p.name, p.x, p.y, p.z);
+                    snprintf(lid, sizeof(lid), "##dp%d", i);
+                    if (SROListItem(lid, lbl, selectedPreset == i, iW))
+                        selectedPreset = i;
+                    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
+                        walkX = p.x; walkY = p.y; walkZ = p.z; walkR = p.r; regionID = p.regionId;
+                    }
+                }
+
+                for (int i = 0; i < (int)kUsrPresets.size(); i++) {
+                    UserPreset& p = kUsrPresets[i];
+                    if (presetFilter[0]) {
+                        std::string nl = p.name, fl = presetFilter;
+                        std::transform(nl.begin(), nl.end(), nl.begin(), ::tolower);
+                        std::transform(fl.begin(), fl.end(), fl.begin(), ::tolower);
+                        if (nl.find(fl) == std::string::npos) continue;
+                    }
+                    const int encIdx = -2 - i;
+                    char lbl[160], lid[16];
+                    snprintf(lbl, sizeof(lbl), "%s  (%d, %d, %d)", p.name, p.x, p.y, p.z);
+                    snprintf(lid, sizeof(lid), "##up%d", i);
+                    if (SROListItem(lid, lbl, selectedPreset == encIdx, iW))
+                        selectedPreset = encIdx;
+                    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
+                        walkX = p.x; walkY = p.y; walkZ = p.z; walkR = p.r; regionID = p.regionID;
+                    }
+                }
+                ImGui::PopStyleVar();
+            }
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+
+            ImGui::Spacing();
+
+            // Save-as name entry
+            if (savingPreset) {
+                const float okW = 46.f;
+                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - okW - sp3);
+                const bool entered = ImGui::InputText("##bwt_newname", newPresetName,
+                    sizeof(newPresetName),
+                    ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+                ImGui::SameLine(0.f, sp3);
+                const bool ok = SROButton("##bwt_ok", "OK", okW, 22.f) || entered;
+                if (ok && newPresetName[0]) {
+                    UserPreset np = {};
+                    strncpy(np.name, newPresetName, sizeof(np.name) - 1);
+                    np.x = walkX; np.y = walkY; np.z = walkZ; np.r = walkR; np.regionID = regionID;
+                    kUsrPresets.push_back(np);
+                    savingPreset = false; newPresetName[0] = '\0';
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                    savingPreset = false; newPresetName[0] = '\0';
+                }
+                ImGui::Spacing();
+            }
+
+            // Bottom buttons
+            const bool hasSel     = (selectedPreset != -1);
+            const bool hasUsrSel  = (selectedPreset < -1);
+            const float thirdW    = (ImGui::GetContentRegionAvail().x - sp3 * 2.f) / 3.f;
+
+            if (SROButton("##bwt_use",  "Use Selected",   thirdW, 26.f, !hasSel) && hasSel) {
+                if (selectedPreset >= 0) {
+                    const DefaultPreset& p = kDefPresets[selectedPreset];
+                    walkX = p.x; walkY = p.y; walkZ = p.z; walkR = p.r; regionID = p.regionId;
+                } else {
+                    UserPreset& p = kUsrPresets[-2 - selectedPreset];
+                    walkX = p.x; walkY = p.y; walkZ = p.z; walkR = p.r; regionID = p.regionID;
+                }
+            }
+            ImGui::SameLine();
+            if (SROButton("##bwt_del", "Delete", thirdW, 26.f, !hasUsrSel) && hasUsrSel) {
+                const int idx = -2 - selectedPreset;
+                kUsrPresets.erase(kUsrPresets.begin() + idx);
+                selectedPreset = -1;
+            }
+            ImGui::SameLine();
+            if (SROButton("##bwt_save", "Save as Preset", thirdW, 26.f)) {
+                savingPreset = true; newPresetName[0] = '\0';
+            }
+        }
+        ImGui::EndChild();
+    }
+    else if (s_tab == 1)
+    {
+        // Lazy-loaded skill-tab textures
+        static IDirect3DTexture9* s_stlSlot   = nullptr;  // stl_slot_04.ddj  (exact, no stretch)
+        static IDirect3DTexture9* s_skillGlow = nullptr;  // pt_edge_effect.ddj (288x32, 9 frames)
+        static IDirect3DTexture9* s_ubNum[10] = {};       // ub_number_0..9.ddj
+        static bool s_skTex = false;
+        if (!s_skTex && g_iconCache) {
+            s_stlSlot   = g_iconCache->Get("interface/stall/stl_slot_04.ddj");
+            s_skillGlow = g_iconCache->Get("interface/pet/pt_edge_effect.ddj");
+            for (int d = 0; d < 10; d++) {
+                char p[64]; snprintf(p, sizeof(p), "interface/underbar/ub_number_%d.ddj", d);
+                s_ubNum[d] = g_iconCache->Get(p);
+            }
+            s_skTex = true;
+        }
+
+        static constexpr float K_SLOT  = 38.f;   // stl_slot_04 natural size (assumed square)
+        static constexpr float K_ICON  = 30.f;   // icon size centered inside slot
+        static constexpr float K_ROW_H = K_SLOT; // list row height = slot height
+        static constexpr float K_NUM_W =  7.f;   // ub_number digit render width
+        static constexpr float K_NUM_H =  9.f;   // ub_number digit render height
+        static constexpr float K_MID_W = 98.f;   // middle controls column width
+        static constexpr int   SK_GLOW_FR = 9;
+        static constexpr float SK_GLOW_CY = 0.5f;
+
+        static int  s_selPool = -1;
+        static int  s_selAtk  = -1;
+        static int  s_selBuf  = -1;
+        static char s_skFlt[64] = {};
+
+        const float sp  = ImGui::GetStyle().ItemSpacing.x;
+        const float sp2 = ImGui::GetStyle().ItemSpacing.y;
+
+        // Glow animation
+        const float glowT   = fmodf((float)ImGui::GetTime(), SK_GLOW_CY) / SK_GLOW_CY;
+        const int   glowFrm = (int)(glowT * SK_GLOW_FR) % SK_GLOW_FR;
+        const float glowU0  = (float)glowFrm / SK_GLOW_FR;
+        const float glowU1  = (float)(glowFrm + 1) / SK_GLOW_FR;
+
+        auto ToTI = [](IDirect3DTexture9* t) -> ImTextureRef {
+            return ImTextureRef((ImTextureID)(uintptr_t)t);
+        };
+
+        // Draw digit number overlay using ub_number DDJs (multi-digit supported)
+        auto DrawNum = [&](ImDrawList* dl, ImVec2 pos, int n) {
+            char buf[8]; snprintf(buf, sizeof(buf), "%d", n);
+            float x = pos.x;
+            for (const char* c = buf; *c; ++c) {
+                const int d = *c - '0';
+                if (d >= 0 && d <= 9 && s_ubNum[d])
+                    dl->AddImage(ToTI(s_ubNum[d]), { x, pos.y }, { x + K_NUM_W, pos.y + K_NUM_H });
+                x += K_NUM_W + 1.f;
+            }
+        };
+
+        const float leftW  = availW * 0.44f;
+        const float rightW = availW - leftW - K_MID_W - sp * 2.f;
+        const float textH  = ImGui::GetTextLineHeight() + sp2;
+        // Right column splits bodyH between two labelled frames + a small gap
+        const float halfFrH = floorf((bodyH - textH * 2.f - sp2 * 4.f) * 0.5f);
+
+        ImGui::BeginChild("##skl_col", { leftW, bodyH }, false,
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+        ImGui::TextColored({ 0.7f, 0.65f, 0.45f, 1.f }, "ALL SKILLS");
+        SROInputBar("##skflt", s_skFlt, sizeof(s_skFlt), leftW);
+        ImGui::Dummy({ 0.f, 2.f });
+        const float poolFrameH = ImGui::GetContentRegionAvail().y;
+
+        if (SROBeginActionFrame("##sk_pool", leftW, poolFrameH)) {
+            ImGui::Dummy({ 0.f, (float)K_AF_C });
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const float rowW = ImGui::GetContentRegionAvail().x;
+
+            for (int i = 0; i < (int)ss.availableSkills.size(); i++) {
+                const SkillEntry& sk = ss.availableSkills[i];
+
+                if (s_skFlt[0]) {
+                    std::string nl = sk.readableName, fl = s_skFlt;
+                    std::transform(nl.begin(), nl.end(), nl.begin(), ::tolower);
+                    std::transform(fl.begin(), fl.end(), fl.begin(), ::tolower);
+                    if (nl.find(fl) == std::string::npos) continue;
+                }
+
+                const bool   sel = (s_selPool == i);
+                const ImVec2 rTL = ImGui::GetCursorScreenPos();
+
+                // Slot background — exact natural size, never stretched
+                if (s_stlSlot)
+                    dl->AddImage(ToTI(s_stlSlot), rTL, { rTL.x + K_SLOT, rTL.y + K_SLOT });
+                else
+                    dl->AddRectFilled(rTL, { rTL.x + K_SLOT, rTL.y + K_SLOT },
+                                      IM_COL32(18, 20, 28, 220), 2.f);
+
+                // Icon centered inside slot
+                const float  pad  = (K_SLOT - K_ICON) * 0.5f;
+                const ImVec2 iTL  = { rTL.x + pad,          rTL.y + pad          };
+                const ImVec2 iBR  = { iTL.x + K_ICON,       iTL.y + K_ICON       };
+                IDirect3DTexture9* ico = GetSkillIcon(sk.iconFile);
+                if (ico) dl->AddImage(ToTI(ico), iTL, iBR);
+
+                // Glow overlay on selection
+                if (sel && s_skillGlow)
+                    dl->AddImage(ToTI(s_skillGlow), iTL, iBR, { glowU0, 0.f }, { glowU1, 1.f });
+
+                // Skill name
+                const ImU32 nameCol = sk.isPassive
+                    ? IM_COL32(105, 100, 85, 255) : IM_COL32(210, 200, 160, 255);
+                dl->AddText({ rTL.x + K_SLOT + 6.f,
+                              rTL.y + (K_ROW_H - ImGui::GetTextLineHeight()) * 0.5f },
+                             nameCol, sk.readableName.c_str());
+
+                ImGui::SetCursorScreenPos(rTL);
+                char bid[12]; snprintf(bid, sizeof(bid), "##pk%d", i);
+                ImGui::InvisibleButton(bid, { rowW, K_ROW_H });
+                if (ImGui::IsItemClicked()) {
+                    s_selPool = (s_selPool == i) ? -1 : i;
+                    s_selAtk  = -1;
+                    s_selBuf  = -1;
+                    SROSkin_PlayClick();
+                }
+                ImGui::Dummy({ 0.f, 2.f });
+            }
+
+            if (ss.availableSkills.empty()) {
+                ImGui::Dummy({ 0.f, 8.f });
+                ImGui::TextDisabled("  No skills loaded.");
+            }
+            ImGui::Dummy({ 0.f, (float)K_AF_C }); // bottom border clearance
+        }
+        SROEndActionFrame();
+        ImGui::EndChild(); // skl_col
+        ImGui::SameLine();
+
+        ImGui::BeginChild("##skm_col", { K_MID_W, bodyH }, false,
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+        ImGui::Dummy({ 0.f, bodyH * 0.28f });
+
+        const bool hasPool  = (s_selPool >= 0 && s_selPool < (int)ss.availableSkills.size());
+        const bool notPassv = hasPool && !ss.availableSkills[s_selPool].isPassive;
+        const bool hasAtk   = (s_selAtk >= 0 && s_selAtk < (int)ss.attackSkills.size());
+        const bool hasBuf   = (s_selBuf >= 0 && s_selBuf < (int)ss.buffSkills.size());
+        const bool hasRight = hasAtk || hasBuf;
+
+        if (SROButton("##skAddA", "Add Attack", K_MID_W, 26.f, !notPassv) && notPassv)
+            NetActions::SendSkillAdd(ss.availableSkills[s_selPool].id, false);
+        ImGui::Dummy({ 0.f, 3.f });
+        if (SROButton("##skAddB", "Add Buff", K_MID_W, 26.f, !notPassv) && notPassv)
+            NetActions::SendSkillAdd(ss.availableSkills[s_selPool].id, true);
+
+        ImGui::Dummy({ 0.f, 14.f });
+
+        if (SROButton("##skMvU", "Move Up", K_MID_W, 26.f, !hasRight) && hasRight) {
+            if (hasAtk) {
+                NetActions::SendSkillMove(ss.attackSkills[s_selAtk].id, -1);
+                if (s_selAtk > 0) s_selAtk--;
+            } else {
+                NetActions::SendSkillMove(ss.buffSkills[s_selBuf].id, -1);
+                if (s_selBuf > 0) s_selBuf--;
+            }
+        }
+        ImGui::Dummy({ 0.f, 3.f });
+        if (SROButton("##skMvD", "Move Down", K_MID_W, 26.f, !hasRight) && hasRight) {
+            if (hasAtk) {
+                NetActions::SendSkillMove(ss.attackSkills[s_selAtk].id, 1);
+                if (s_selAtk < (int)ss.attackSkills.size() - 1) s_selAtk++;
+            } else {
+                NetActions::SendSkillMove(ss.buffSkills[s_selBuf].id, 1);
+                if (s_selBuf < (int)ss.buffSkills.size() - 1) s_selBuf++;
+            }
+        }
+        ImGui::Dummy({ 0.f, 14.f });
+
+        if (SROButton("##skRem", "Remove", K_MID_W, 26.f, !hasRight) && hasRight) {
+            if (hasAtk) { NetActions::SendSkillRemove(ss.attackSkills[s_selAtk].id, false); s_selAtk = -1; }
+            else         { NetActions::SendSkillRemove(ss.buffSkills[s_selBuf].id,   true);  s_selBuf = -1; }
+        }
+
+        ImGui::EndChild(); // skm_col
+        ImGui::SameLine();
+
+        ImGui::BeginChild("##skr_col", { rightW, bodyH }, false,
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+        auto DrawIndexedRow = [&](ImDrawList* dl, const SkillEntry& sk,
+                                   char prefix, int i, int* pSel) {
+            const bool   sel = (*pSel == i);
+            const ImVec2 rTL = ImGui::GetCursorScreenPos();
+            const float  rowW = ImGui::GetContentRegionAvail().x;
+
+            if (s_stlSlot)
+                dl->AddImage(ToTI(s_stlSlot), rTL, { rTL.x + K_SLOT, rTL.y + K_SLOT });
+            else
+                dl->AddRectFilled(rTL, { rTL.x + K_SLOT, rTL.y + K_SLOT },
+                                  IM_COL32(18, 20, 28, 220), 2.f);
+
+            const float  pad = (K_SLOT - K_ICON) * 0.5f;
+            const ImVec2 iTL = { rTL.x + pad,    rTL.y + pad    };
+            const ImVec2 iBR = { iTL.x + K_ICON, iTL.y + K_ICON };
+            IDirect3DTexture9* ico = GetSkillIcon(sk.iconFile);
+            if (ico) dl->AddImage(ToTI(ico), iTL, iBR);
+
+            if (sel && s_skillGlow)
+                dl->AddImage(ToTI(s_skillGlow), iTL, iBR, { glowU0, 0.f }, { glowU1, 1.f });
+
+            // Index number overlaid top-left of slot
+            DrawNum(dl, { rTL.x + 2.f, rTL.y + 2.f }, i + 1);
+
+            dl->AddText({ rTL.x + K_SLOT + 6.f,
+                          rTL.y + (K_ROW_H - ImGui::GetTextLineHeight()) * 0.5f },
+                        IM_COL32(210, 200, 160, 255), sk.readableName.c_str());
+
+            ImGui::SetCursorScreenPos(rTL);
+            char bid[12]; snprintf(bid, sizeof(bid), "##%ck%d", prefix, i);
+            ImGui::InvisibleButton(bid, { rowW, K_ROW_H });
+            if (ImGui::IsItemClicked()) {
+                *pSel     = (sel) ? -1 : i;
+                s_selPool = -1;
+                if (prefix == 'a') s_selBuf = -1;
+                else               s_selAtk = -1;
+                SROSkin_PlayClick();
+            }
+            ImGui::Dummy({ 0.f, 2.f });
+        };
+
+        // Attack skills
+        ImGui::TextColored({ 0.7f, 0.65f, 0.45f, 1.f }, "ATTACK SKILLS");
+        if (SROBeginActionFrame("##sk_atk", rightW, halfFrH)) {
+            ImGui::Dummy({ 0.f, (float)K_AF_C });
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            for (int i = 0; i < (int)ss.attackSkills.size(); i++)
+                DrawIndexedRow(dl, ss.attackSkills[i], 'a', i, &s_selAtk);
+            if (ss.attackSkills.empty()) {
+                ImGui::Dummy({ 0.f, 8.f });
+                ImGui::TextDisabled("  (empty — add from skill list)");
+            }
+            ImGui::Dummy({ 0.f, (float)K_AF_C }); // bottom border clearance
+        }
+        SROEndActionFrame();
+
+        ImGui::Dummy({ 0.f, sp2 });
+
+        // Buff skills
+        ImGui::TextColored({ 0.7f, 0.65f, 0.45f, 1.f }, "BUFF SKILLS");
+        const float bufFrameH = ImGui::GetContentRegionAvail().y;
+        if (SROBeginActionFrame("##sk_buf", rightW, bufFrameH)) {
+            ImGui::Dummy({ 0.f, (float)K_AF_C });
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            for (int i = 0; i < (int)ss.buffSkills.size(); i++)
+                DrawIndexedRow(dl, ss.buffSkills[i], 'b', i, &s_selBuf);
+            if (ss.buffSkills.empty()) {
+                ImGui::Dummy({ 0.f, 8.f });
+                ImGui::TextDisabled("  (empty — add from skill list)");
+            }
+            ImGui::Dummy({ 0.f, (float)K_AF_C }); // bottom border clearance
+        }
+        SROEndActionFrame();
+
+        ImGui::EndChild(); // skr_col
+    }
+    else if (s_tab == 2)
+    {
+        static int settingsCat = 0;
+        static const char* kCats[] = {
+            "Auto Potion", "Town Supplies", "Maintenance", "Combat", "Looting & Buffs"
+        };
+
+        const float sp2      = ImGui::GetStyle().ItemSpacing.y;
+        const float sp       = ImGui::GetStyle().ItemSpacing.x;
+        const float saveBtnH = 28.f;
+        const float contentH = bodyH - saveBtnH - sp2 * 2.f;
+        const float listW    = 150.f;
+        const float detailW  = availW - listW - sp;
+        const ImVec2 topLeft = ImGui::GetCursorScreenPos();
+
+        // Category list
+        ImGui::BeginChild("##bws_cats", { listW, contentH }, false,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        for (int i = 0; i < IM_ARRAYSIZE(kCats); i++) {
+            char cid[16]; snprintf(cid, sizeof(cid), "##bwcat%d", i);
+            if (SROListItem(cid, kCats[i], settingsCat == i, listW, 28.f))
+                settingsCat = i;
+            if (i < IM_ARRAYSIZE(kCats) - 1) ImGui::Dummy({ 0.f, 1.f });
+        }
+        ImGui::EndChild();
+
+        ImGui::SameLine();
+
+        // Detail panel
+        if (SROBeginActionFrame("##bws_detail", detailW, contentH)) {
+            ImGui::Spacing();
+            const float lCol = 130.f; // label column width
+
+            ImGui::Dummy({ 0.f, (float)K_AF_C }); // clear top border strip
+
+            // label (drawlist) + SROInputBarInt on same visual row
+            auto SettingRow = [&](const char* lbl, const char* rowId, int* val, float iw = 80.f) {
+                const ImVec2 p = ImGui::GetCursorScreenPos();
+                ImGui::GetWindowDrawList()->AddText(
+                    { p.x + 16.f, p.y + (22.f - ImGui::GetTextLineHeight()) * 0.5f },
+                    IM_COL32(175, 160, 120, 255), lbl);
+                ImGui::SetCursorScreenPos({ p.x + 16.f + lCol, p.y });
+                SROInputBarInt(rowId, val, iw);
+                ImGui::SetCursorScreenPos(p);
+                ImGui::Dummy({ 16.f + lCol + iw, 22.f });
+            };
+
+            // label (drawlist) + SROCombo on same visual row
+            auto ComboRow = [&](const char* lbl, const char* rowId, int* val,
+                                const char* const* items, int cnt, float cw = 120.f) {
+                const ImVec2 p = ImGui::GetCursorScreenPos();
+                ImGui::GetWindowDrawList()->AddText(
+                    { p.x + 16.f, p.y + (22.f - ImGui::GetTextLineHeight()) * 0.5f },
+                    IM_COL32(175, 160, 120, 255), lbl);
+                ImGui::SetCursorScreenPos({ p.x + 16.f + lCol, p.y });
+                SROCombo(rowId, val, items, cnt, cw, 22.f);
+                ImGui::SetCursorScreenPos(p);
+                ImGui::Dummy({ 16.f + lCol + cw, 22.f });
+            };
+
+            // checkbox + sub-rows for town supply items
+            auto BuyRow = [&](const char* name, const char* bid,
+                               bool* buy, int* refill, int* thresh,
+                               const char* const* typeItems, int typeCount, int* typeVal) {
+                bool b = *buy;
+                if (SROCheckbox(bid, name, &b)) *buy = b;
+                if (*buy) {
+                    char rfid[48], thid[48], tyid[48];
+                    snprintf(rfid, sizeof(rfid), "%s_rf", bid);
+                    snprintf(thid, sizeof(thid), "%s_th", bid);
+                    snprintf(tyid, sizeof(tyid), "%s_ty", bid);
+                    SettingRow("Refill to:", rfid, refill, 60.f);
+                    SettingRow("Min stock:", thid, thresh, 60.f);
+                    if (typeItems) ComboRow("Type:", tyid, typeVal, typeItems, typeCount);
+                    ImGui::Spacing();
+                }
+            };
+
+            if (settingsCat == 0)
+            {
+                ImGui::TextColored({ 0.7f, 0.65f, 0.45f, 1.f }, "AUTO POTION");
+                ImGui::Separator(); ImGui::Spacing();
+
+                bool hp = ss.botSettings.AutoPotion.AutoUseHP;
+                if (SROCheckbox("##bs_hp", "Use HP Potion", &hp)) ss.botSettings.AutoPotion.AutoUseHP = hp;
+                if (hp) {
+                    SettingRow("HP Threshold %:", "##bs_hpt", &ss.botSettings.AutoPotion.HPPotHealthThreshold);
+                    SettingRow("HP Delay (ms):",  "##bs_hpd", &ss.botSettings.AutoPotion.HPDelay);
+                }
+                ImGui::Spacing();
+
+                bool mp = ss.botSettings.AutoPotion.AutoUseMP;
+                if (SROCheckbox("##bs_mp", "Use MP Potion", &mp)) ss.botSettings.AutoPotion.AutoUseMP = mp;
+                if (mp) {
+                    SettingRow("MP Threshold %:", "##bs_mpt", &ss.botSettings.AutoPotion.MPPotManaThreshold);
+                    SettingRow("MP Delay (ms):",  "##bs_mpd", &ss.botSettings.AutoPotion.MPDelay);
+                }
+                ImGui::Spacing();
+
+                bool vig = ss.botSettings.AutoPotion.UseVigorPotions;
+                if (SROCheckbox("##bs_vig", "Use Vigor Potions", &vig)) ss.botSettings.AutoPotion.UseVigorPotions = vig;
+                if (vig) {
+                    SettingRow("Vigor Threshold %:", "##bs_vigt", &ss.botSettings.AutoPotion.VigorHPMPThreshold);
+                    bool pref = ss.botSettings.AutoPotion.PreferVigorFirst;
+                    if (SROCheckbox("##bs_vpref", "  Prioritize Vigor", &pref))
+                        ss.botSettings.AutoPotion.PreferVigorFirst = pref;
+                }
+                ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+
+                bool pills = ss.botSettings.AutoPotion.AutoUseContPills;
+                if (SROCheckbox("##bs_pills", "Auto Universal Pills", &pills))
+                    ss.botSettings.AutoPotion.AutoUseContPills = pills;
+                bool purif = ss.botSettings.AutoPotion.AutoUsePurifPills;
+                if (SROCheckbox("##bs_purif", "Auto Purification Pills", &purif))
+                    ss.botSettings.AutoPotion.AutoUsePurifPills = purif;
+                ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+
+                bool petHeal = ss.botSettings.AutoPotion.HealPets;
+                if (SROCheckbox("##bs_peth", "Heal Pets", &petHeal))
+                    ss.botSettings.AutoPotion.HealPets = petHeal;
+                if (petHeal)
+                    SettingRow("Pet HP Threshold %:", "##bs_petht", &ss.botSettings.AutoPotion.HealPetHPThreshold);
+            }
+            else if (settingsCat == 1)
+            {
+                ImGui::TextColored({ 0.7f, 0.65f, 0.45f, 1.f }, "TOWN SUPPLIES");
+                ImGui::Separator(); ImGui::Spacing();
+
+                BuyRow("HP Potions",         "##br_hp",
+                       &ss.botSettings.Consumables.BuyHpPotions,
+                       &ss.botSettings.Consumables.HpPotionRefillAmount,
+                       &ss.botSettings.Consumables.HpPotionReturnThreshold,
+                       PotionTypes, 6, (int*)&ss.botSettings.Consumables.HPType);
+                BuyRow("MP Potions",         "##br_mp",
+                       &ss.botSettings.Consumables.BuyMpPotions,
+                       &ss.botSettings.Consumables.MpPotionRefillAmount,
+                       &ss.botSettings.Consumables.MpPotionReturnThreshold,
+                       PotionTypes, 6, (int*)&ss.botSettings.Consumables.MPType);
+                BuyRow("Vigor Potions",       "##br_vig",
+                       &ss.botSettings.Consumables.BuyVigorPotions,
+                       &ss.botSettings.Consumables.VigorPotionRefillAmount,
+                       &ss.botSettings.Consumables.VigorPotionReturnThreshold,
+                       nullptr, 0, nullptr);
+                BuyRow("Universal Pills",     "##br_upill",
+                       &ss.botSettings.Consumables.BuyUniversalPills,
+                       &ss.botSettings.Consumables.UniversalPillsRefillAmount,
+                       &ss.botSettings.Consumables.UniversalPillsReturnThreshold,
+                       UniPillTypes, 4, (int*)&ss.botSettings.Consumables.UniPillType);
+                BuyRow("Purification Pills",  "##br_ppill",
+                       &ss.botSettings.Consumables.BuyPurifPills,
+                       &ss.botSettings.Consumables.PurifPillsRefillAmount,
+                       &ss.botSettings.Consumables.PurifPillsReturnThreshold,
+                       PurifPillTypes, 4, (int*)&ss.botSettings.Consumables.PurificationPillType);
+                BuyRow("Speed Drugs",         "##br_spd",
+                       &ss.botSettings.Consumables.BuySpeedDrugs,
+                       &ss.botSettings.Consumables.SpeedDrugsRefillAmount,
+                       &ss.botSettings.Consumables.SpeedDrugsReturnThreshold,
+                       SpeedDrugTypes, 2, (int*)&ss.botSettings.Consumables.DrugType);
+                BuyRow("Ammo / Arrows",       "##br_ammo",
+                       &ss.botSettings.Consumables.BuyAmmo,
+                       &ss.botSettings.Consumables.AmmoRefillAmount,
+                       &ss.botSettings.Consumables.AmmoReturnThreshold,
+                       AmmoTypes, 2, (int*)&ss.botSettings.Consumables.AmmoType);
+
+                ImGui::Separator(); ImGui::Spacing();
+
+                bool buyScrolls = ss.botSettings.Consumables.BuyReturnScrolls;
+                if (SROCheckbox("##br_ret", "Buy Return Scrolls", &buyScrolls))
+                    ss.botSettings.Consumables.BuyReturnScrolls = buyScrolls;
+                if (buyScrolls)
+                    SettingRow("Count:", "##br_retc", &ss.botSettings.Consumables.ReturnScrollRefillAmount, 60.f);
+            }
+            else if (settingsCat == 2)
+            {
+                ImGui::TextColored({ 0.7f, 0.65f, 0.45f, 1.f }, "MAINTENANCE");
+                ImGui::Separator(); ImGui::Spacing();
+
+                ImGui::TextDisabled("CITY REPAIR");
+                ImGui::Spacing();
+
+                bool repair = ss.botSettings.Maintenance.RepairWeapon;
+                if (SROCheckbox("##bs_rep", "Repair at Blacksmith", &repair))
+                    ss.botSettings.Maintenance.RepairWeapon = repair;
+                if (repair)
+                    SettingRow("Durability % Trip:", "##bs_repd", &ss.botSettings.Maintenance.RepairDurabilityThreshold);
+
+                ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+                ImGui::TextDisabled("EMERGENCY RECALLS");
+                ImGui::Spacing();
+
+                bool retDead = ss.botSettings.BackTownMonitor.ReturnIfDead;
+                if (SROCheckbox("##bs_retd", "Return to Town if Dead", &retDead))
+                    ss.botSettings.BackTownMonitor.ReturnIfDead = retDead;
+
+                bool retInv = ss.botSettings.BackTownMonitor.ReturnIfInventoryFull;
+                if (SROCheckbox("##bs_reti", "Return if Inventory Full", &retInv))
+                    ss.botSettings.BackTownMonitor.ReturnIfInventoryFull = retInv;
+            }
+            else if (settingsCat == 3)
+            {
+                ImGui::TextColored({ 0.7f, 0.65f, 0.45f, 1.f }, "COMBAT");
+                ImGui::Separator(); ImGui::Spacing();
+
+                bool ignDP = ss.botSettings.Attack.IgnoreDimensionPillars;
+                if (SROCheckbox("##bs_idp", "Ignore Dimension Pillars", &ignDP))
+                    ss.botSettings.Attack.IgnoreDimensionPillars = ignDP;
+
+                ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+                ImGui::TextDisabled("BERSERK MODES");
+                ImGui::Spacing();
+
+                bool zerkNow = ss.botSettings.Attack.UseZerkRightAwayWhenFull;
+                if (SROCheckbox("##bs_zin", "Zerk Instantly when Full", &zerkNow))
+                    ss.botSettings.Attack.UseZerkRightAwayWhenFull = zerkNow;
+
+                if (!zerkNow) {
+                    bool zng = ss.botSettings.Attack.UseZerkOnNormalGiants;
+                    if (SROCheckbox("##bs_zng", "Zerk on Normal Giants", &zng))
+                        ss.botSettings.Attack.UseZerkOnNormalGiants = zng;
+                    bool zpm = ss.botSettings.Attack.UseZerkOnPartyMobs;
+                    if (SROCheckbox("##bs_zpm", "Zerk on Party Mobs", &zpm))
+                        ss.botSettings.Attack.UseZerkOnPartyMobs = zpm;
+                    bool zpg = ss.botSettings.Attack.UseZerkOnPartyGiants;
+                    if (SROCheckbox("##bs_zpg", "Zerk on Party Giants", &zpg))
+                        ss.botSettings.Attack.UseZerkOnPartyGiants = zpg;
+                    bool zu = ss.botSettings.Attack.UseZerkOnUniques;
+                    if (SROCheckbox("##bs_zu", "Zerk on Uniques", &zu))
+                        ss.botSettings.Attack.UseZerkOnUniques = zu;
+                    bool zsw = ss.botSettings.Attack.UseZerkIfNMobsAttackingSimulataneously;
+                    if (SROCheckbox("##bs_zsw", "Zerk if Swarmed", &zsw))
+                        ss.botSettings.Attack.UseZerkIfNMobsAttackingSimulataneously = zsw;
+                    if (zsw)
+                        SettingRow("Mob Count:", "##bs_zswc", &ss.botSettings.Attack.ZerkMobCount, 60.f);
+                }
+            }
+            else if (settingsCat == 4)
+            {
+                ImGui::TextColored({ 0.7f, 0.65f, 0.45f, 1.f }, "LOOTING & BUFFS");
+                ImGui::Separator(); ImGui::Spacing();
+
+                bool pg = ss.botSettings.Pickup.PickGold;
+                if (SROCheckbox("##bs_pg", "Pick Gold", &pg)) ss.botSettings.Pickup.PickGold = pg;
+                bool pa = ss.botSettings.Pickup.PickAll;
+                if (SROCheckbox("##bs_pa", "Loot Everything", &pa)) ss.botSettings.Pickup.PickAll = pa;
+                bool pam = ss.botSettings.Pickup.PickAmmoIfAmountLowerThan;
+                if (SROCheckbox("##bs_pam", "Pick Ammo if Low", &pam))
+                    ss.botSettings.Pickup.PickAmmoIfAmountLowerThan = pam;
+
+                ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+                ImGui::TextDisabled("WALK BUFFING");
+                ImGui::Spacing();
+
+                bool spd = ss.botSettings.Autowalker.CastSpeedBuffWhileWalking;
+                if (SROCheckbox("##bs_spd", "Speed Buffs While Walking", &spd))
+                    ss.botSettings.Autowalker.CastSpeedBuffWhileWalking = spd;
+                bool nzz = ss.botSettings.Autowalker.CastNoiseBuffWhileWalking;
+                if (SROCheckbox("##bs_nzz", "Noise Buffs While Walking", &nzz))
+                    ss.botSettings.Autowalker.CastNoiseBuffWhileWalking = nzz;
+            }
+
+            ImGui::Spacing();
+            ImGui::Spacing(); // Intentional.
+        }
+        SROEndActionFrame();
+
+        // Save button — fixed width, bottom right
+        static constexpr float saveW = 200.f;
+        const float saveY = topLeft.y + contentH + sp2;
+        ImGui::SetCursorScreenPos({ topLeft.x + availW - saveW, saveY });
+        if (SROButton("##bws_save", "Save & Apply", saveW, saveBtnH))
+            NetActions::SendSaveBotSettings(ss.botSettings);
+    }
 
     EndSROWindow();
 }
 
-static void RenderLatticeInspector()
-{
-    ImGui::SetNextWindowSize(ImVec2(640, 660), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(ImVec2(80, 60),    ImGuiCond_FirstUseEver);
-    ImGui::Begin("Lattice Inspector", &showLatticeInspector);
+static void RenderSettings() {
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(
+        ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+        ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
 
-    struct Probe { const char* section; const char* label; const char* path; };
-    static const Probe probes[] = {
-        // Corners - direct in ifcommon/
-        { "Corners  (ifcommon/)",       "left_up",    "interface\\ifcommon\\com_lattice_left_up.ddj"    },
-        { nullptr,                      "right_up",   "interface\\ifcommon\\com_lattice_right_up.ddj"   },
-        { nullptr,                      "left_down",  "interface\\ifcommon\\com_lattice_left_down.ddj"  },
-        { nullptr,                      "right_down", "interface\\ifcommon\\com_lattice_right_down.ddj" },
-        // Outlines/edges - direct in ifcommon/
-        { "Outlines (ifcommon/)",       "outline_left_side",  "interface\\ifcommon\\com_lattice_outline_left_side.ddj"  },
-        { nullptr,                      "outline_right_side", "interface\\ifcommon\\com_lattice_outline_right_side.ddj" },
-        { nullptr,                      "outline_left_up",    "interface\\ifcommon\\com_lattice_outline_left_up.ddj"    },
-        { nullptr,                      "outline_left_down",  "interface\\ifcommon\\com_lattice_outline_left_down.ddj"  },
-        { nullptr,                      "outline_right_up",   "interface\\ifcommon\\com_lattice_outline_right_up.ddj"   },
-        { nullptr,                      "outline_right_down", "interface\\ifcommon\\com_lattice_outline_right_down.ddj" },
-        // BG tile - direct in ifcommon/
-        { "BG Tile  (ifcommon/)",       "com_bg_tile",    "interface\\ifcommon\\com_bg_tile.ddj"    },
-        { nullptr,                      "com_bg_tile_01", "interface\\ifcommon\\com_bg_tile_01.ddj" },
-        { nullptr,                      "com_bg_tile_02", "interface\\ifcommon\\com_bg_tile_02.ddj" },
-        // Corners - lattice_window/ subfolder
-        { "Corners  (lattice_window/)", "left_up",    "interface\\ifcommon\\lattice_window\\com_lattice_left_up.ddj"    },
-        { nullptr,                      "right_up",   "interface\\ifcommon\\lattice_window\\com_lattice_right_up.ddj"   },
-        { nullptr,                      "left_down",  "interface\\ifcommon\\lattice_window\\com_lattice_left_down.ddj"  },
-        { nullptr,                      "right_down", "interface\\ifcommon\\lattice_window\\com_lattice_right_down.ddj" },
-        // Outlines/edges - lattice_window/ subfolder
-        { "Outlines (lattice_window/)", "outline_left_side",   "interface\\ifcommon\\lattice_window\\com_lattice_outline_left_side.ddj"   },
-        { nullptr,                      "outline_right_side",  "interface\\ifcommon\\lattice_window\\com_lattice_outline_right_side.ddj"  },
-        { nullptr,                      "outline_up_side",     "interface\\ifcommon\\lattice_window\\com_lattice_outline_up_side.ddj"     },
-        { nullptr,                      "outline_down_side",   "interface\\ifcommon\\lattice_window\\com_lattice_outline_down_side.ddj"   },
-        { nullptr,                      "outline_top_side",    "interface\\ifcommon\\lattice_window\\com_lattice_outline_top_side.ddj"    },
-        { nullptr,                      "outline_bottom_side", "interface\\ifcommon\\lattice_window\\com_lattice_outline_bottom_side.ddj" },
-        { nullptr,                      "outline_left_up",     "interface\\ifcommon\\lattice_window\\com_lattice_outline_left_up.ddj"     },
-        { nullptr,                      "outline_left_down",   "interface\\ifcommon\\lattice_window\\com_lattice_outline_left_down.ddj"   },
-        { nullptr,                      "outline_right_up",    "interface\\ifcommon\\lattice_window\\com_lattice_outline_right_up.ddj"    },
-        { nullptr,                      "outline_right_down",  "interface\\ifcommon\\lattice_window\\com_lattice_outline_right_down.ddj"  },
-        { nullptr,                      "outline_up_left",     "interface\\ifcommon\\lattice_window\\com_lattice_outline_up_left.ddj"     },
-        { nullptr,                      "outline_up_right",    "interface\\ifcommon\\lattice_window\\com_lattice_outline_up_right.ddj"    },
-        { nullptr,                      "outline_down_left",   "interface\\ifcommon\\lattice_window\\com_lattice_outline_down_left.ddj"   },
-        { nullptr,                      "outline_down_right",  "interface\\ifcommon\\lattice_window\\com_lattice_outline_down_right.ddj"  },
-        // BG tile - bg_tile/ subfolder
-        { "BG Tile  (bg_tile/)",        "com_bg_tile",    "interface\\ifcommon\\bg_tile\\com_bg_tile.ddj"    },
-        { nullptr,                      "com_bg_tile_01", "interface\\ifcommon\\bg_tile\\com_bg_tile_01.ddj" },
-        { nullptr,                      "com_bg_tile_02", "interface\\ifcommon\\bg_tile\\com_bg_tile_02.ddj" },
+    if (!BeginSROWindow("##settingswnd", "Settings", &showSettingsWindow,
+            ImVec2(360.f, 440.f), ImVec2(-1.f, -1.f),
+            ImVec2(280.f, 300.f), ImVec2(500.f, 700.f)))
+        return;
+
+    struct Bind { const char* id; const char* label; int* key; };
+    static const Bind kBinds[] = {
+        { "##kb0", "Session Stats", &Settings::showSessionStatsKey },
+        { "##kb1", "Admin Tools",   &Settings::showAdminToolsKey   },
+        { "##kb2", "Settings",      &Settings::showSettingsKey     },
+        { "##kb3", "Achievements",  &Settings::showAchKey          },
+        { "##kb4", "Bot Window",    &Settings::showBotWindow       },
     };
 
-    const ImVec4 clrHit (0.40f, 0.90f, 0.40f, 1.0f);
-    const ImVec4 clrMiss(0.90f, 0.35f, 0.35f, 1.0f);
-
-    // Folder browse
-    ImGui::TextDisabled("PK2 FOLDER BROWSER");
-    ImGui::Separator();
+    // KEYBINDS
+    ImGui::TextColored(ImVec4(0.7f, 0.65f, 0.45f, 1.f), "KEYBINDS");
     ImGui::Spacing();
-
-    static char s_folderInput[256] = "interface\\ifcommon\\lattice_window";
-    static std::vector<std::string> s_folderListing;
-    static bool s_listingReady = false;
-
-    ImGui::SetNextItemWidth(-90.0f);
-    ImGui::InputText("##folder", s_folderInput, sizeof(s_folderInput));
-    ImGui::SameLine();
-    if (ImGui::Button("List##pk2ls", ImVec2(-1, 0)))
-    {
-        s_folderListing = g_pk2.List(s_folderInput);
-        s_listingReady  = true;
-    }
-
-    if (s_listingReady)
-    {
+    for (const auto& b : kBinds) {
+        if (SROKeybind(b.id, b.label, b.key))
+            Settings::Save();
         ImGui::Spacing();
-        if (s_folderListing.empty())
-        {
-            ImGui::TextColored(clrMiss, "Folder not found or empty.");
-        }
-        else
-        {
-            ImGui::TextDisabled("%d entries:", (int)s_folderListing.size());
-            if (ImGui::BeginChild("##pk2ls_results", ImVec2(0, 120), true))
-            {
-                for (const auto& name : s_folderListing)
-                {
-                    ImGui::TextDisabled("%s", name.c_str());
-                    if (ImGui::IsItemClicked())
-                    {
-                        std::string next = std::string(s_folderInput) + "\\" + name;
-                        strncpy(s_folderInput, next.c_str(), sizeof(s_folderInput) - 1);
-                        s_folderInput[sizeof(s_folderInput) - 1] = '\0';
-                        s_listingReady = false;
-                    }
-                }
-            }
-            ImGui::EndChild();
-            ImGui::TextDisabled("Click an entry to navigate into it.");
-        }
     }
 
-    ImGui::Spacing();
-
-    //Skin test launcher
-    ImGui::TextDisabled("SKIN TEST");
     ImGui::Separator();
     ImGui::Spacing();
 
-    if (ImGui::Button(showSkinTest ? "Close Skin Test" : "Open Skin Test", ImVec2(-1, 22)))
+    //TOGGLES
+    ImGui::TextColored(ImVec4(0.7f, 0.65f, 0.45f, 1.f), "TOGGLES");
+    ImGui::Spacing();
+
+    bool kf = Settings::keepFocused;
+    if (SROCheckbox("##cfg_kf", "Keep Focus", &kf)) {
+        Settings::keepFocused = kf;
+        Settings::Save();
+    }
+    ImGui::Spacing();
+
+    bool fps = Settings::showFPSCounter;
+    if (SROCheckbox("##cfg_fps", "Show FPS Counter", &fps)) {
+        Settings::showFPSCounter = fps;
+        Settings::Save();
+    }
+    ImGui::Spacing();
+
+    bool wm = Settings::showWatermark;
+    if (SROCheckbox("##cfg_wm", "Show Watermark", &wm)) {
+        Settings::showWatermark = wm;
+        Settings::Save();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // DEV TOOLS
+    ImGui::TextColored(ImVec4(0.7f, 0.65f, 0.45f, 1.f), "DEV TOOLS");
+    ImGui::Spacing();
+    if (SROButton("##cfg_skintest",
+            showSkinTest ? "Close Skin Test" : "Open Skin Test",
+            ImGui::GetContentRegionAvail().x, 24.f))
         showSkinTest = !showSkinTest;
 
-    ImGui::Spacing();
+    EndSROWindow();
+}
 
-    // Path probes
-    ImGui::TextDisabled("Probes: %d paths across two candidate folder layouts.", (int)IM_ARRAYSIZE(probes));
-    ImGui::TextDisabled("Hover a row label to see the full archive path.");
-    ImGui::Separator();
-    ImGui::Spacing();
+static void RenderSkinTest()
+{
+    if (!BeginSROWindow("##skintest", "Element Test", &showSkinTest,
+                        { 440.f, 430.f }, { 320.f, 290.f },
+                        { 280.f, 260.f }, { 800.f, 700.f }))
+        return;
 
-    ImGui::BeginChild("##li_scroll", ImVec2(0, 0), false);
+    auto& log = GetLogger();
 
-    const char* lastSection = nullptr;
-    for (const auto& p : probes)
-    {
-        if (p.section && (!lastSection || strcmp(p.section, lastSection) != 0))
-        {
-            if (lastSection) { ImGui::Spacing(); ImGui::Spacing(); }
-            ImGui::TextDisabled("%s", p.section);
-            ImGui::Separator();
+    static int s_tab = 0;
+    static int s_c1  = 0, s_c2 = 0, s_c3 = 0;
+
+    static const char* kTabs[]  = { "Elements", "Scroll", "Info" };
+    static const char* kItems1[] = { "Player",  "Pet"                      };
+    static const char* kItems2[] = { "By Type", "By Name", "Logical"       };
+    static const char* kItems3[] = { "Normal",  "Party",   "Guild", "All"  };
+
+    const float availW = ImGui::GetContentRegionAvail().x;
+    const float availH = ImGui::GetContentRegionAvail().y;
+    const float tabW   = availW / 3.f;
+    const float subH   = availH - K_TAB_H - ImGui::GetStyle().ItemSpacing.y;
+
+    SROTabBar("##et_tabs", kTabs, 3, &s_tab, tabW);
+
+    // Elements
+    if (s_tab == 0) {
+        if (SROBeginSubFrame("##sf_elem", availW, subH)) {
+            const float iW  = ImGui::GetContentRegionAvail().x;
+            const float sp  = ImGui::GetStyle().ItemSpacing.x;
+            const float cW  = (iW - sp) * 0.5f;
+            const float bW  = (iW - sp * 2.f) / 3.f;
+
+            ImGui::Dummy({ 0.f, 2.f });
+            ImGui::TextDisabled("Combos");
             ImGui::Spacing();
-            lastSection = p.section;
+            SROCombo("##ec1", &s_c1, kItems1, 2, cW, 22.f);
+            ImGui::SameLine();
+            SROCombo("##ec2", &s_c2, kItems2, 3, cW, 22.f);
+
+            ImGui::Dummy({ 0.f, 6.f });
+            ImGui::Separator();
+            ImGui::Dummy({ 0.f, 6.f });
+            ImGui::TextDisabled("Buttons");
+            ImGui::Spacing();
+
+            if (SROButton("##eb1", "Action A", bW, 24.f))
+                log.Info("SkinTest", "Action A clicked");
+            ImGui::SameLine();
+            if (SROButton("##eb2", "Action B", bW, 24.f))
+                log.Info("SkinTest", "Action B clicked");
+            ImGui::SameLine();
+            if (SROButton("##eb3", "Action C", bW, 24.f))
+                log.Info("SkinTest", "Action C clicked");
+
+            ImGui::Dummy({ 0.f, 6.f });
+            ImGui::Separator();
+            ImGui::Dummy({ 0.f, 6.f });
+            ImGui::TextDisabled("Wide combo");
+            ImGui::Spacing();
+            SROCombo("##ec3", &s_c3, kItems3, 4, iW, 22.f);
+
+            ImGui::Dummy({ 0.f, 8.f });
+            ImGui::TextColored(ImVec4(0.8f, 0.7f, 0.3f, 1.f),
+                "Selected: %s / %s / %s",
+                kItems1[s_c1], kItems2[s_c2], kItems3[s_c3]);
         }
-
-        IDirect3DTexture9* tex = g_iconCache ? g_iconCache->Get(p.path) : nullptr;
-
-        if (tex)
-        {
-            ImGui::Image(ImTextureRef((ImTextureID)(uintptr_t)tex), ImVec2(64.0f, 64.0f));
-        }
-        else
-        {
-            ImVec2 pos = ImGui::GetCursorScreenPos();
-            auto*  dl  = ImGui::GetWindowDrawList();
-            dl->AddRectFilled(pos, ImVec2(pos.x + 64, pos.y + 64), IM_COL32(50, 15, 15, 255));
-            dl->AddRect      (pos, ImVec2(pos.x + 64, pos.y + 64), IM_COL32(140, 40, 40, 255));
-            dl->AddLine(ImVec2(pos.x + 10, pos.y + 10), ImVec2(pos.x + 54, pos.y + 54), IM_COL32(140, 40, 40, 200), 2.0f);
-            dl->AddLine(ImVec2(pos.x + 54, pos.y + 10), ImVec2(pos.x + 10, pos.y + 54), IM_COL32(140, 40, 40, 200), 2.0f);
-            ImGui::Dummy(ImVec2(64.0f, 64.0f));
-        }
-
-        ImGui::SameLine(0.0f, 10.0f);
-        ImGui::BeginGroup();
-        ImGui::TextColored(tex ? clrHit : clrMiss, tex ? " HIT " : "MISS");
-        ImGui::TextDisabled("%s", p.label);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", p.path);
-        ImGui::EndGroup();
-
+        SROEndSubFrame();
+    }
+    // Scroll
+    else if (s_tab == 1) {
+        ImGui::TextDisabled("Uses the SROWindow built-in scrollbar — resize to test.");
         ImGui::Spacing();
+        for (int i = 1; i <= 25; ++i)
+            ImGui::TextDisabled("Row %02d — scroll test content row", i);
+    }
+    // Info
+    else {
+        if (SROBeginSubFrame("##sf_info", availW, subH)) {
+            ImGui::Dummy({ 0.f, 2.f });
+            ImGui::TextDisabled("SROSkinWindow element library:");
+            ImGui::Spacing();
+            ImGui::BulletText("BeginSROWindow / EndSROWindow");
+            ImGui::BulletText("SROTabBar  (long + short variants)");
+            ImGui::BulletText("SROBeginSubFrame / SROEndSubFrame");
+            ImGui::BulletText("SROCombo");
+            ImGui::BulletText("SROButton  (+ disabled variant)");
+            ImGui::BulletText("SROKeybind  (click box to remap)");
+            ImGui::BulletText("SROCheckbox  (+ disabled variant)");
+            ImGui::BulletText("Scrollbar  (built into EndSROWindow)");
+            ImGui::Dummy({ 0.f, 6.f });
+            ImGui::Separator();
+            ImGui::Dummy({ 0.f, 6.f });
+            ImGui::TextDisabled("DDJ source paths:");
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.75f, 1.f, 1.f));
+            ImGui::TextWrapped("interface\\option\\opt_long_tab_*.ddj");
+            ImGui::TextWrapped("interface\\option\\opt_short_tab_*.ddj");
+            ImGui::TextWrapped("interface\\option\\opt_key*.ddj");
+            ImGui::TextWrapped("interface\\frame\\frame_sub_*.ddj");
+            ImGui::TextWrapped("interface\\ifcommon\\com_button*.ddj");
+            ImGui::TextWrapped("interface\\ifcommon\\com_checkbutton_*.ddj");
+            ImGui::PopStyleColor();
+        }
+        SROEndSubFrame();
     }
 
-    ImGui::EndChild();
-    ImGui::End();
+    EndSROWindow();
 }
 
 static void RenderRadar(IDirect3DDevice9* device, int playerX, int playerY, const std::string& activeNodeId) {
@@ -2280,6 +3457,7 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
             dir = dir.substr(0, dir.find_last_of("\\/"));
             std::wstring clientDir(dir.begin(), dir.end());
             g_pk2.Open(clientDir + L"\\media.pk2");
+            ReadClientVersion();
             g_dataPk2.Open(clientDir + L"\\data.pk2");
         }
         g_iconCache = new IconCache(device, g_pk2);
@@ -2290,7 +3468,7 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
         initialized = true;
     }
     
-    if (!ImGui::GetIO().WantTextInput)
+    if (!ImGui::GetIO().WantTextInput && !SROSkin_IsCapturingKey())
     {
         if (GetAsyncKeyState(Settings::showSessionStatsKey) & 1) showSessionStatsWindow = !showSessionStatsWindow;
         if (GetAsyncKeyState(Settings::showAdminToolsKey) & 1) showAdminToolsWindow = !showAdminToolsWindow;
@@ -2311,15 +3489,19 @@ HRESULT __stdcall hkPresent(IDirect3DDevice9* device, CONST RECT* pSrcRect, CONS
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
     SROSkin_NewFrame();
-    if (Settings::showWatermark) RenderWatermark("V1.201 BETA - @Dewwta");
+    if (Settings::showWatermark) {
+        const std::string wm = (g_clientVersion.empty() ? "V?.???" : "V1." + g_clientVersion)
+                             + " BETA - @Dewwta";
+        RenderWatermark(wm.c_str());
+    }
     if (Settings::showFPSCounter) RenderFPS();
 
     if (showSessionStatsWindow) RenderSessionStats();
     if (showAdminToolsWindow)   RenderAdminTools();
     if (showSettingsWindow)     RenderSettings();
-    if (showBotWindow)          RenderBotWindow();
-    if (showLatticeInspector)   RenderLatticeInspector();
+    if (showBotWindow)          RenderBotWindow(device);
     if (showSkinTest)           RenderSkinTest();
+    if (showLogsWindow)         RenderLogsWindow();
 
     if (showAdminToolsWindow && !g_bridge.m_state.charName.empty()) {
         RenderRadar(
@@ -2411,25 +3593,11 @@ LRESULT CALLBACK hkWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     if (AnyWindowOpen()) {
         ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
         ImGuiIO& io = ImGui::GetIO();
-        if (io.WantCaptureMouse) {
-            switch (msg) {
-            case WM_LBUTTONDOWN:
-            case WM_LBUTTONUP:
-            case WM_RBUTTONDOWN:
-            case WM_RBUTTONUP:
-            case WM_MOUSEMOVE:
-            case WM_MOUSEWHEEL:
-                return 0;
-            }
-        }
-        if (io.WantCaptureKeyboard) {
-            switch (msg) {
-            case WM_KEYDOWN:
-            case WM_KEYUP:
-            case WM_CHAR:
-                return 0;
-            }
-        }
+        if (io.WantCaptureMouse && msg >= WM_MOUSEFIRST && msg <= 0x020E)
+            return 0;
+        // 0x0100-0x0109 = WM_KEYDOWN..WM_UNICHAR (incl. WM_SYSKEY*/WM_SYSCHAR)
+        if (io.WantCaptureKeyboard && msg >= WM_KEYFIRST && msg <= 0x0109)
+            return 0;
     }
     switch (msg)
     {

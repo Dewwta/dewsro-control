@@ -62,14 +62,23 @@ public:
         SENDMSG()
     }
 
-    static void SendRewardClaim(int level, const std::string& itemCode, int qty = 1, int plus = 0) {
+    // Claims two rewards in one request: level, count, then per item {qty, plus, len, code}.
+    static void SendRewardClaim(int level,
+                                const std::string& codeA, int qtyA, int plusA,
+                                const std::string& codeB, int qtyB, int plusB) {
         NEWMSG(DEW_CLAIM_REWARD)
             pReq << (BYTE)level;
-        pReq << (WORD)qty;
-        pReq << (BYTE)plus;
-        pReq << (BYTE)itemCode.size();
-        for (char c : itemCode)
-            pReq << (BYTE)c;
+        pReq << (BYTE)2;
+        const std::string* codes[2] = { &codeA, &codeB };
+        const int qtys[2]  = { qtyA,  qtyB  };
+        const int pluss[2] = { plusA, plusB };
+        for (int k = 0; k < 2; k++) {
+            pReq << (WORD)qtys[k];
+            pReq << (BYTE)pluss[k];
+            pReq << (BYTE)codes[k]->size();
+            for (char c : *codes[k])
+                pReq << (BYTE)c;
+        }
         SENDMSG()
     }
 

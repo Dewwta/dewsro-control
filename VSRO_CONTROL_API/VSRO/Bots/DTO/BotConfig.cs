@@ -15,9 +15,5 @@ namespace VSRO_CONTROL_API.VSRO.Bot.DTO
         public string Password { get; set; } = "";
         public string CharacterName { get; set; } = "";
 
-        // Bot behaviour
-        public BotTrainplace? TrainingCenter { get; set; }
-        public int TrainingRadius { get; set; } = 50;
-        //public List<SkillEntry> SkillRotation { get; set; } = new();
     }
 }

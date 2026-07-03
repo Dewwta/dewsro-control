@@ -92,7 +92,6 @@ namespace VSRO_CONTROL_API.VSRO.Backup
                         continue;
                     }
 
-                    // Secondary upload — failures are warnings only, never affect the primary result
                     if (filePath != null)
                     {
                         var secOk = await UploadToSecondaryAsync(filePath, db, maxCount).ConfigureAwait(false);
@@ -158,7 +157,7 @@ namespace VSRO_CONTROL_API.VSRO.Backup
         {
             var s    = SettingsLoader.Settings?.Backup;
             var host = s?.SecondaryHost;
-            if (string.IsNullOrWhiteSpace(host)) return true;  // not configured — skip silently
+            if (string.IsNullOrWhiteSpace(host)) return true;  // not configured
 
             var user      = !string.IsNullOrWhiteSpace(s?.SecondaryUser) ? s!.SecondaryUser! : "vsrobackup";
             var basePath  = (s?.SecondaryPath ?? "/srv/vsro-backups").TrimEnd('/');
@@ -168,7 +167,7 @@ namespace VSRO_CONTROL_API.VSRO.Backup
             Logger.Info(typeof(DatabaseBackupService),
                 $"[Secondary] Starting upload of [{db}] -> {user}@{host}:{remoteDir}");
 
-            // 1. Ensure the remote directory exists
+            //Ensure the remote directory exists
             var mkdirOk = await RunCommandAsync(
                 "ssh",
                 $"{sshOpts} {user}@{host} \"mkdir -p {remoteDir}\"",
@@ -178,7 +177,7 @@ namespace VSRO_CONTROL_API.VSRO.Backup
 
             if (!mkdirOk) return false;
 
-            // 2. Upload the .bak file (allow 30 min — files can be several GB)
+            // Upload the .bak file
             var uploadOk = await RunCommandAsync(
                 "scp",
                 $"{sshOpts} \"{localFilePath}\" {user}@{host}:\"{remoteDir}/\"",

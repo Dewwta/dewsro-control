@@ -14,7 +14,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
     {
         private readonly VSRO_CONTROL_API.VSRO.DTO.ISession _session;
         private readonly Func<BotSettings> _getSettings;
-        private const int POLL_INTERVAL_MS = 3000;
+        private const int POLL_INTERVAL_MS = 5000;
 
         public bool NeedsReturn { get; private set; } = false;
 
@@ -42,8 +42,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         /// </summary>
         public async Task RunAsync(CancellationToken ct)
         {
-            Logger.Info("ResourceMonitor", "Started");
-
+           
             while (!ct.IsCancellationRequested)
             {
                 try
@@ -124,8 +123,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 return;
             }
             // --- Weapon Durability ---
-            // TODO: Hook durability packet into ISession and check here
-            // if (settings.Maintenance.RepairWeapon && _session.WeaponDurability < settings.Maintenance.RepairDurabilityThreshold)
+            //if (settings.Maintenance.RepairWeapon && _session.WeaponDurability < settings.Maintenance.RepairDurabilityThreshold)
             //     SetReturn($"Weapon durability low");
         }
 

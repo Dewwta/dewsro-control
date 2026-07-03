@@ -53,25 +53,12 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             "Constantinople", "Alexandria City (S)", "Alexandria City (N)"
         };
 
-        // =====================================================================
-        // Opens the NPC shop using the correct client sequence:
-        //   7045 (target) → B045
-        //   704B (close/reset) → B04B   ← required; tells server to re-send shop vector
-        //   7046 (open)  → B046
-        // The 704B before 7046 is what the real client always sends. Omitting it
-        // causes the server to skip sending the shop item data, leaving the client
-        // with an empty shop vector that crashes on the first buy packet.
-        // =====================================================================
         private async Task OpenShopAsync(uint npcUID, CancellationToken ct)
         {
-            // Flag all B034 ShopToInventory responses as bot-owned so the suppression
-            // handler in PlayerTools blocks them from reaching the game client.
-            // The game client crashes on ShopToInventory B034 when it has no shop UI open
-            // (we suppressed B046, so its shop object was never initialized).
             _session.BotShopOpen = true;
             Logger.Info("TownLoop", $"OpenShopAsync: BotShopOpen=true for NPC UID={npcUID}");
 
-            // 1. Target NPC
+            // Target NPC
             _session.TargetGate = new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -85,7 +72,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
             finally { _session.TargetGate = null; }
 
-            // 2. Close/reset — even on a cold session this is safe (server treats it as a no-op
+            // Close/reset — even on a cold session this is safe (server treats it as a no-op
             //    if no shop is open) and is required to get the server to send shop item data
             _session.ShopCloseGate = new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -100,7 +87,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
             finally { _session.ShopCloseGate = null; }
 
-            // 3. Open shop
+            // Open shop
             _session.ShopOpenGate = new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -124,17 +111,9 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
             await Task.Delay(200, ct);
         }
-        // =====================================================================
-        // Closes the NPC shop cleanly after buying is complete.
-        // Sends 0x704B (CLIENT_CLOSE_SHOP) so the client tears down the shop
-        // vector before the next OpenShopAsync call.
-        // =====================================================================
+
         private async Task CloseShopAsync(uint npcUID, CancellationToken ct)
         {
-            // Clear the flag BEFORE sending 704B so the subsequent 30D7/30D6 stock-update
-            // and B04B close-confirmation packets reach the game client normally.
-            // By the time CloseShopAsync is called, every buy's B034 (arriving ~150ms after
-            // the buy packet) has already been suppressed during the preceding 1000ms delay.
             _session.BotShopOpen = false;
             Logger.Info("TownLoop", $"CloseShopAsync: BotShopOpen=false for NPC UID={npcUID}");
 
@@ -145,19 +124,8 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             await Task.Delay(300, ct);
         }
 
-        // =====================================================================
-        // Town definitions — one entry per town.
-        // Assigned in the constructor so Execute lambdas can reference
-        // OpenShopAsync/CloseShopAsync through `this` (field initializers
-        // run before `this` is available, causing CS0236).
-        // =====================================================================
         private readonly Dictionary<string, TownDefinition> Towns;
 
-        // =====================================================================
-        // Region -> Town name mapping.
-        // Key = RegionResolver.Resolve() output (full region name).
-        // Value = town name key into Towns dictionary above.
-        // =====================================================================
         private static readonly Dictionary<string, string> RegionToTown = new()
         {
             ["China"] = "Jangan",
@@ -1645,7 +1613,6 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         /// </summary>
         public async Task<bool> RunAsync(CancellationToken ct)
         {
-            // Safety: clear any stale BotShopOpen from a prior run that ended abnormally
             _session.BotShopOpen = false;
 
             // Wait for walk to finish
@@ -1720,7 +1687,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             }
             finally
             {
-                // Final safety net — ensures B034 suppression is never left on after RunAsync
+                // Final net
                 if (_session.BotShopOpen)
                 {
                     Logger.Warn("TownLoop", "RunAsync finally: BotShopOpen was still true — force clearing");

@@ -118,8 +118,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy.Achivements
         /// </summary>
         public static async Task OnGoldChanged(string charName, long currentGold, Proxy proxy)
         {
-            // Track all gold achievements as a high score (max gold ever held).
-            // Progress updates every time gold changes, not only when the threshold is crossed.
             var candidates = AchievementLoader.GetByType("gold");
 
             foreach (var ach in candidates)

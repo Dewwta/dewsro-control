@@ -5,6 +5,26 @@
 	let serverOnline: boolean | null = null;
 	let playerCount: string | null = null;
 
+	const heroBackgrounds = [
+		'loading_alex.png',
+		'loading_asiaminor.png',
+		'loading_centralasia.png',
+		'loading_hotan.png',
+		'loading_loksan.png',
+		'loading_pharaoh.png',
+		'loading_pharos.png',
+		'loading_port.png',
+		'loading_port2.png',
+		'loading_river.png',
+		'loading_royalmausoleum.png',
+		'loading_samarkand.png',
+		'loading_thief.png',
+		'loading_thief2.png',
+		'loading_thiefzone.png',
+		'loading_valley.png',
+	];
+	let heroBg = '';
+
 	type NewsItem = { date: string; tag: string; title: string; excerpt: string };
 	let news: NewsItem[] = [];
 	let newsLoading = true;
@@ -19,6 +39,8 @@
 	}
 
 	onMount(async () => {
+		heroBg = `/home-backgrounds/${heroBackgrounds[Math.floor(Math.random() * heroBackgrounds.length)]}`;
+
 		const [statusResult, countResult] = await Promise.allSettled([
 			serverApi.getPublicStatus(),
 			playersApi.getOnlineCount()
@@ -49,36 +71,40 @@
 </script>
 
 <!-- ── Hero ──────────────────────────────────────────────────────── -->
-<section class="hero">
+<section class="hero" style={heroBg ? `background-image: url('${heroBg}')` : ''}>
 	<div class="hero__overlay" />
 	<div class="hero__content">
-		<h1 class="hero__title">DewSRO</h1>
-		<p class="hero__sub">Private Server — Est. 2015</p>
-		<div class="hero__stats">
-			{#each serverStats as stat}
-				<div class="stat-pill">
-					<span class="stat-label">{stat.label}</span>
-					<span class="stat-value">{stat.value}</span>
+		<div class="hero__left">
+			<h1 class="hero__title">DewSRO</h1>
+			<p class="hero__sub">Private Server — Est. 2015</p>
+			<div class="hero__stats">
+				{#each serverStats as stat}
+					<div class="stat-pill">
+						<span class="stat-label">{stat.label}</span>
+						<span class="stat-value">{stat.value}</span>
+					</div>
+				{/each}
+				<div
+					class="stat-pill"
+					class:stat-pill--green={serverOnline === true}
+					class:stat-pill--red={serverOnline === false}
+				>
+					<span class="stat-label">Status</span>
+					<span class="stat-value">
+						{#if serverOnline === null}Checking…{:else if serverOnline}Online{:else}Offline{/if}
+					</span>
 				</div>
-			{/each}
-			<div
-				class="stat-pill"
-				class:stat-pill--green={serverOnline === true}
-				class:stat-pill--red={serverOnline === false}
-			>
-				<span class="stat-label">Status</span>
-				<span class="stat-value">
-					{#if serverOnline === null}Checking…{:else if serverOnline}Online{:else}Offline{/if}
-				</span>
+				<div class="stat-pill">
+					<span class="stat-label">Players</span>
+					<span class="stat-value">{playerCount ?? '…'}</span>
+				</div>
 			</div>
-			<div class="stat-pill">
-				<span class="stat-label">Players</span>
-				<span class="stat-value">{playerCount ?? '…'}</span>
+			<div class="hero__actions">
+				<a href="/about" class="cta cta--ghost">Learn More</a>
 			</div>
 		</div>
-		<div class="hero__actions">
-			<a href="/about" class="cta cta--ghost">Learn More</a>
-		</div>
+		<div class="hero__divider" />
+		<img class="hero__logo" src="/logo-big.png" alt="Silkroad Online" />
 	</div>
 </section>
 
@@ -150,35 +176,33 @@
 	}
 
 	/* ── Hero ────────────────────────────────────────────────── */
-	.hero {
-		position: relative;
-		min-height: 420px;
-		display: flex;
-		align-items: center;
-		background:
-			linear-gradient(160deg, #0a0703 0%, #1a1005 50%, #0d0a03 100%);
-		overflow: hidden;
-	}
+	/* ── Hero ────────────────────────────────────────────────── */
+    .hero {
+        position: relative;
+        min-height: 520px; /* You can increase this number if you want the whole section even taller */
+        display: flex;
+        align-items: center;
+        background-color: #000;
+        
+        /* Change this line to 'cover' */
+        background-size: cover; 
+        
+        background-position: center;
+        background-repeat: no-repeat;
+        overflow: hidden;
+    }
 
-	/* Decorative radial glow */
-	.hero::before {
-		content: '';
-		position: absolute;
-		inset: 0;
-		background:
-			radial-gradient(ellipse 70% 60% at 30% 50%, rgba(160,130,200,0.07) 0%, transparent 70%),
-			radial-gradient(ellipse 40% 40% at 80% 30%, rgba(140,32,32,0.08) 0%, transparent 60%);
-		pointer-events: none;
-	}
-
-	/* Subtle grid texture */
+	/* Dark scrim so hero text stays readable over the artwork —
+	   heavier on the left where the text sits */
 	.hero__overlay {
 		position: absolute;
 		inset: 0;
-		background-image:
-			linear-gradient(rgba(160,130,200,0.03) 1px, transparent 1px),
-			linear-gradient(90deg, rgba(160,130,200,0.03) 1px, transparent 1px);
-		background-size: 40px 40px;
+		background: linear-gradient(
+			90deg,
+			rgba(0, 0, 0, 0.72) 0%,
+			rgba(0, 0, 0, 0.45) 45%,
+			rgba(0, 0, 0, 0.25) 100%
+		);
 		pointer-events: none;
 	}
 
@@ -188,6 +212,39 @@
 		max-width: 1200px;
 		margin: 0 auto;
 		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 3rem;
+	}
+
+	.hero__left {
+		flex: 0 0 auto;
+		/* nudge back slightly so the text block and logo sit visually centered */
+		transform: translateX(-4px);
+	}
+
+	.hero__divider {
+		flex: 0 0 1px;
+		align-self: stretch;
+		margin: 0.5rem 0;
+		background: linear-gradient(
+			to bottom,
+			transparent,
+			var(--border-gold) 25%,
+			var(--border-gold) 75%,
+			transparent
+		);
+	}
+
+	.hero__logo {
+		flex: 1 1 auto;
+		min-width: 0;
+		max-width: 560px;
+		width: 100%;
+		height: auto;
+		margin: 0 auto;
+		filter: drop-shadow(0 0 24px rgba(160, 130, 200, 0.25))
+			drop-shadow(0 4px 12px rgba(0, 0, 0, 0.6));
 	}
 
 	.hero__title {
@@ -453,6 +510,27 @@
 	}
 
 	/* ── Responsive ──────────────────────────────────────────── */
+	@media (max-width: 960px) {
+		.hero__content {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 2rem;
+		}
+
+		.hero__left {
+			transform: none;
+		}
+
+		.hero__divider {
+			display: none;
+		}
+
+		.hero__logo {
+			max-width: 380px;
+			margin: 0;
+		}
+	}
+
 	@media (max-width: 768px) {
 		.main-grid {
 			grid-template-columns: 1fr;

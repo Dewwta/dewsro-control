@@ -130,18 +130,18 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         public async Task Run(CancellationToken ct, int radius)
         {
             TRAINING_RADIUS = radius;
-            Logger.Info("AttackLoop", "Starting");
+            Log("AttackLoop", "Starting");
 
             // Discard drops from previous bot sessions so pickup doesn't chase stale clusters.
             int staleCleared = _session.DroppedItems.Count;
             _session.DroppedItems.Clear();
             if (staleCleared > 0)
-                Logger.Info("AttackLoop", $"Cleared {staleCleared} stale DroppedItems from previous session");
+                Log("AttackLoop", $"Cleared {staleCleared} stale DroppedItems from previous session");
 
             if (_trainingCenter == null)
             {
                 _trainingCenter = _getPosition();
-                Logger.Info("AttackLoop", $"Training center initialized at ({_trainingCenter.Value.X:F1},{_trainingCenter.Value.Y:F1})");
+                Log("AttackLoop", $"Training center initialized at ({_trainingCenter.Value.X:F1},{_trainingCenter.Value.Y:F1})");
             }
 
             while (!ct.IsCancellationRequested)
@@ -157,7 +157,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
                 if (StopAfterCurrentKill)
                 {
-                    Logger.Info("AttackLoop", "StopAfterCurrentKill requested — exiting");
+                    Log("AttackLoop", "StopAfterCurrentKill requested — exiting");
                     return;
                 }
 
@@ -679,10 +679,6 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         }
         public void OnDurabilityChanged(byte slot, uint durability)
         {
-            // Only care about equipment slots, not inventory
-            // Threshold: flag repair needed when any piece drops below 20%
-            // MaxDurability isn't in the packet — use a fixed low threshold
-            // 0x0F = 15 which is clearly low on a 100-max item
             if (durability <= _session._botSettings.Maintenance.RepairDurabilityThreshold)
             {
                 Log("AttackLoop", $"Slot {slot} durability critical ({durability}) — flagging repair needed");
@@ -724,7 +720,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
         public void SetTrainingCenter(BotPosition centerPoint)
         {
             _trainingCenter = centerPoint;
-            Logger.Info("AttackLoop", $"Training center explicitly locked at ({_trainingCenter.Value.X:F1},{_trainingCenter.Value.Y:F1})");
+            Log("AttackLoop", $"Training center explicitly locked at ({_trainingCenter.Value.X:F1},{_trainingCenter.Value.Y:F1})");
         }
         public void AddSkillToUse(SR_Skill skill, bool isBuff)
         {

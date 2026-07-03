@@ -604,11 +604,26 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 dist = Distance(pos, _session.TrainingDestination.Value);
             }
 
+            var mobs = _session.MobUIDs
+                .Where(kvp => kvp.Value > 0)
+                .Select(kvp =>
+                {
+                    if (!_session.SpawnedPositions.TryGetValue(kvp.Key, out var mpos))
+                        return (valid: false, x: 0, y: 0, refObjId: 0u);
+                    _session.SpawnedObjects.TryGetValue(kvp.Key, out var obj);
+                    return (valid: true, x: mpos.WorldX, y: mpos.WorldY, refObjId: obj.RefObjID);
+                })
+                .Where(m => m.valid)
+                .Take(128)
+                .Select(m => new { m.x, m.y, m.refObjId })
+                .ToArray();
+
             DllBridge.Instance.SendToDll(_session.AccountName, "bot_state_update", new
             {
                 botState = _mode.ToString(),
                 distanceToTarget = dist,
-                returnReason = _resourceMonitor.ReturnReason
+                returnReason = _resourceMonitor.ReturnReason,
+                mobs
             });
         }
 

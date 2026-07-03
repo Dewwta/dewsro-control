@@ -79,6 +79,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         e.Proxy.Session!.Inventory.Equipment.Clear();
                         e.Proxy.Session!.Inventory.Avatars.Clear();
                         e.Proxy.Session!.CharacterName = data.CharacterName;
+                        e.Proxy.Session!.CharacterRefObjID = data.RefObjId;
+
 
                         e.Proxy.Session!.Inventory.Slots = data.Slots;
                         e.Proxy.Session!.Inventory.Equipment = data.Equipment;
@@ -973,12 +975,12 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             e.Proxy.Session.SectorY = data.SectorY;
                             e.Proxy.Session.WorldX = data.WorldX;
                             e.Proxy.Session.WorldY = data.WorldY;
-                            if ((data.RegionId & 0x8000) == 0)
-                            {
-                                e.Proxy.Session.RawX = (short)data.RawX;
-                                e.Proxy.Session.RawY = (short)data.RawY;
-                                Logger.Debug("B021", $"[{DateTime.UtcNow:HH:mm:ss.fff}] pos uid={data.UniqueId} region=0x{data.RegionId:X4} rawX={data.RawX} rawY={data.RawY}");
-                            }
+                            // Raw offsets MUST update in dungeons too: GetEstimatedPosition()
+                            // falls back to BotPosition.FromSession(RawX/RawY), so skipping
+                            // this freezes the walker's believed position and it gives up
+                            // "stuck" after 6 iterations even though the server responded.
+                            e.Proxy.Session.RawX = (short)data.RawX;
+                            e.Proxy.Session.RawY = (short)data.RawY;
                             e.Proxy.Session.LastMovementUpdate = DateTime.UtcNow;
                             e.Proxy.Session.RegionReadableName = RegionResolver.ResolveReadable(data.SectorX, data.SectorY, (short)data.RegionId);
                             e.Proxy.Session.RegionName = RegionResolver.Resolve((short)data.RegionId, data.SectorX, data.SectorY);
@@ -1020,7 +1022,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 if (e.Proxy.Session?._attackLoop?.IsPickingUp == true)
                 {
                     e.CancelTransfer = true;
-                    Logger.Debug("PickupMove", $"[{DateTime.UtcNow:HH:mm:ss.fff}] Blocked client 0x7021 during pickup");
+                    Log("PickupMove", $"[{DateTime.UtcNow:HH:mm:ss.fff}] Blocked client 0x7021 during pickup");
                 }
             });
         }
@@ -1391,15 +1393,26 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 e.CancelTransfer = true;
                 var packet = e.Packet.Clone();
 
+                // Packet: level(byte), count(byte), then per item {qty(ushort), plus(byte), codeLen(byte), code}
                 byte claimedLevel = packet.ReadByte();
-                ushort qty = packet.ReadUShort();
-                byte plus = packet.ReadByte();
+                byte count = packet.ReadByte();
+                if (count != 2)
+                {
+                    Logger.Warn("RewardClaim", $"Rejected claim with item count {count} (expected 2)");
+                    return;
+                }
 
-                byte codeLen = packet.ReadByte();
-                var codeChars = new byte[codeLen];
-                for (int i = 0; i < codeLen; i++)
-                    codeChars[i] = packet.ReadByte();
-                string itemCode = System.Text.Encoding.ASCII.GetString(codeChars);
+                var picks = new (string Code, byte Plus, ushort Qty)[count];
+                for (int k = 0; k < count; k++)
+                {
+                    ushort qty = packet.ReadUShort();
+                    byte plus = packet.ReadByte();
+                    byte codeLen = packet.ReadByte();
+                    var codeChars = new byte[codeLen];
+                    for (int i = 0; i < codeLen; i++)
+                        codeChars[i] = packet.ReadByte();
+                    picks[k] = (System.Text.Encoding.ASCII.GetString(codeChars), plus, qty);
+                }
 
                 var session = e.Proxy.Session;
                 if (session == null) return;
@@ -1411,27 +1424,62 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     return;
                 }
 
-                if (!Overseer.LevelRewardOptions.TryGetValue(claimedLevel, out var options))
+                var options = Overseer.GetRewardOptionsFor(claimedLevel,
+                    session.CharacterRace, session.CharacterGender);
+                if (options.Count == 0)
                 {
                     Logger.Warn("RewardClaim", $"No reward options for level {claimedLevel}");
                     return;
                 }
 
-                var chosen = options.FirstOrDefault(o => o.CodeName == itemCode && o.Plus == plus && o.Qty == qty);
-                if (chosen == null)
+                // The two picks must be distinct options — same slot can't be claimed twice
+                if (picks[0] == picks[1])
                 {
-                    Logger.Warn("RewardClaim", $"Invalid reward {itemCode} +{plus} x{qty} for level {claimedLevel}");
+                    Logger.Warn("RewardClaim", $"Duplicate picks {picks[0].Code} from {session.CharacterName}");
                     return;
                 }
 
-                bool isEquipment = itemCode.Contains("_WEAPON_") || itemCode.Contains("_SHIELD_")
-                                || itemCode.Contains("_ARMOR_") || itemCode.Contains("_HELM_");
+                var chosen = new Overseer.LevelReward[count];
+                for (int k = 0; k < count; k++)
+                {
+                    var p = picks[k];
+                    chosen[k] = options.FirstOrDefault(o =>
+                        o.CodeName == p.Code && o.Plus == p.Plus && o.Qty == p.Qty)!;
+                    if (chosen[k] == null)
+                    {
+                        Logger.Warn("RewardClaim",
+                            $"Invalid reward {p.Code} +{p.Plus} x{p.Qty} for level {claimedLevel}");
+                        return;
+                    }
+                }
 
-                var result = await DBConnect.GiveItemToPlayer(
-                    session.CharacterName!, chosen.CodeName, chosen.Plus, chosen.Qty,
-                    isEquipment);
+                // Give both items; deliver what we can and report failures loudly.
+                var givenNames = new List<string>();
+                bool anyFailed = false;
+                foreach (var item in chosen)
+                {
+                    bool isEquipment = item.CodeName.StartsWith("ITEM_CH_")
+                                    || item.CodeName.StartsWith("ITEM_EU_")
+                                    || item.CodeName.Contains("_AVATAR_");
 
-                if (result.success)
+                    var result = await DBConnect.GiveItemToPlayer(
+                        session.CharacterName!, item.CodeName, item.Plus, item.Qty, isEquipment);
+
+                    if (result.success)
+                    {
+                        givenNames.Add(GameObjectNameResolver.Resolve(item.CodeName));
+                        Logger.Info("RewardClaim",
+                            $"{session.CharacterName} claimed {item.CodeName} x{item.Qty} +{item.Plus} for level {claimedLevel}");
+                    }
+                    else
+                    {
+                        anyFailed = true;
+                        Logger.Error("RewardClaim",
+                            $"GiveItem failed for {session.CharacterName} ({item.CodeName}): {result.reason}");
+                    }
+                }
+
+                if (givenNames.Count > 0)
                 {
                     session.PendingLevelReward = null;
                     session.UnclaimedRewards.Remove(claimedLevel);
@@ -1442,17 +1490,12 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     });
 
                     PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null,
-                        $"Reward claimed! {GameObjectNameResolver.Resolve(itemCode)} has been added to your inventory.");
+                        $"Rewards claimed! {string.Join(" and ", givenNames)} added to your inventory.");
+                }
 
-                    Logger.Info("RewardClaim",
-                        $"{session.CharacterName} claimed {itemCode} x{qty} +{plus} for level {claimedLevel}");
-                }
-                else
-                {
-                    Logger.Error("RewardClaim", $"GiveItem failed for {session.CharacterName}: {result.reason}");
+                if (anyFailed)
                     PlayerTools.SendToProxyChat(e.Proxy, ChatType.Notice, null,
-                        "Something went wrong delivering your reward. Please contact an admin.");
-                }
+                        "Something went wrong delivering part of your reward. Please contact an admin.");
             });
 
             DllBridge.Instance.RegisterHandler("reward_reopen", async (accountName, json) =>
@@ -1472,7 +1515,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     return;
                 }
 
-                if (!Overseer.LevelRewardOptions.TryGetValue(level, out var options) || options.Count == 0)
+                var options = Overseer.GetRewardOptionsFor(level,
+                    proxy.Session.CharacterRace, proxy.Session.CharacterGender);
+                if (options.Count == 0)
                 {
                     Logger.Error("reward_reopen", $"Options dont exist");
                     return;
@@ -1699,6 +1744,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 e.CancelTransfer = true;
                 var session = e.Proxy.Session;
                 if (session == null) return;
+                // To prevent unesessary execution.
+                if (session._botTask == null && session._walkerCts == null)
+                    return;
 
                 if (session._walkerCts != null)
                 {
@@ -1729,7 +1777,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     });
                 }
 
-                Logger.Info("Bot", "Bot stopped and UI state flushed to Idle.");
+                Log("Bot", "Bot stopped and UI state flushed to Idle.");
             });
             
             _agentProxy.RegisterClientPacketHandler(Constant.DEW_SKILL_ADD, async (sender, e) =>
@@ -1936,8 +1984,6 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
 
                 if (e.Proxy.Session != null)
                 {
-                    // Capture prior world position before overwriting — needed for the
-                    // HandleStuckPacket threshold check below.
                     float prevX = e.Proxy.Session.WorldX;
                     float prevY = e.Proxy.Session.WorldY;
 
@@ -2707,7 +2753,9 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
             await AchievementService.OnLevelUp(proxy.Session!.CharacterName!, newLevel, proxy);
 
             // Reward logic and stuff
-            if (!Overseer.LevelRewardOptions.TryGetValue(newLevel, out var options) || options.Count == 0)
+            var options = Overseer.GetRewardOptionsFor(newLevel,
+                proxy.Session!.CharacterRace, proxy.Session!.CharacterGender);
+            if (options.Count == 0)
                 return;
 
             var codeNames = options.Select(o => o.CodeName);

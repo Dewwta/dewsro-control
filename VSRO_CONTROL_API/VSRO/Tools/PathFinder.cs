@@ -10,18 +10,16 @@ namespace VSRO_CONTROL_API.VSRO.Tools
         
         public static List<BotPosition> StringPull(BotPosition from, BotPosition to, bool skipCollision = false)
         {
-            Logger.Trace("StringPull", $"=== StringPull START ===");
-            Logger.Trace("StringPull", $"  From : region=0x{from.RegionId:X4} world=({from.X:F1},{from.Y:F1})");
-            Logger.Trace("StringPull", $"  To   : region=0x{to.RegionId:X4} world=({to.X:F1},{to.Y:F1})");
+            //Logger.Trace("StringPull", $"=== StringPull START ===");
+            //Logger.Trace("StringPull", $"  From : region=0x{from.RegionId:X4} world=({from.X:F1},{from.Y:F1})");
+            //Logger.Trace("StringPull", $"  To   : region=0x{to.RegionId:X4} world=({to.X:F1},{to.Y:F1})");
 
-            // 1. Initialize the path with the starting node
+            // Initialize the path with the starting node
             var result = new List<BotPosition> { from };
 
-            // 2. Unconditionally append the destination node. 
-            // No loops, no raycasts, no edge-nudging math, and zero chance of a NullReferenceException.
             result.Add(to);
 
-            Logger.Trace("StringPull", "=== StringPull END — Destination appended directly ===");
+  
             return result;
         }
         public static NavMeshTransform MakeTransform(BotPosition pos)

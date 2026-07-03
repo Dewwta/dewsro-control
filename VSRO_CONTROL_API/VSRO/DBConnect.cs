@@ -3,6 +3,7 @@ using Microsoft.Data.SqlClient;
 using System.Collections.Concurrent;
 using System.Data;
 using System.Diagnostics;
+using System.Diagnostics.Eventing.Reader;
 using System.Text;
 using System.Text.RegularExpressions;
 using VSRO_CONTROL_API.VSRO.DTO;
@@ -2953,7 +2954,7 @@ namespace VSRO_CONTROL_API.VSRO
                 return (false, null, msg);
             }
         }
-        public static async Task<(bool success, Race race, string reason)> GetCharRaceByRefObjID(int refObjId)
+        public static async Task<(bool success, Race race, Gender gender, string reason)> GetCharRaceAndGenderByRefObjID(int refObjId)
         {
             try
             {
@@ -2966,23 +2967,39 @@ namespace VSRO_CONTROL_API.VSRO
                 using SqlDataReader reader = await cmd.ExecuteReaderAsync();
 
                 if (!await reader.ReadAsync())
-                    return (false, Race.Unknown, $"RefObjID {refObjId} not found.");
+                    return (false, Race.Unknown, Gender.Unknown, $"RefObjID {refObjId} not found.");
 
                 string codeName = reader["CodeName128"].ToString() ?? string.Empty;
 
+                Race race;
+                Gender gender;
+
                 if (codeName.Contains("CHAR_EU_"))
-                    return (true, Race.European, "");
+                    race = Race.European;
+                else if (codeName.Contains("CHAR_CH_"))
+                    race = Race.Chinese;
+                else
+                    race = Race.Unknown;
+                
 
-                if (codeName.Contains("CHAR_CH_"))
-                    return (true, Race.Chinese, "");
+                if (codeName.Contains("MAN"))
+                    gender = Gender.Male;
+                else if (codeName.Contains("WOMAN"))
+                    gender = Gender.Female;
+                else
+                    gender = Gender.Unknown;
 
-                return (false, Race.Unknown, $"Unknown race for model '{codeName}'.");
+                if (gender == Gender.Unknown || race == Race.Unknown)
+                    return (false, race, gender, $"Unknown race for model '{codeName}'.");
+
+                return (true, race, gender, "");
+                
             }
             catch (Exception ex)
             {
                 string msg = $"GetCharRaceByRefObjID failed for RefObjID:{refObjId}: {ex.Message}";
                 Logger.Error(typeof(DBConnect), msg);
-                return (false, Race.Unknown, msg);
+                return (false, Race.Unknown, Gender.Unknown, msg);
             }
         }
         #endregion

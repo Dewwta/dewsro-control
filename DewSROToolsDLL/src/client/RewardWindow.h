@@ -22,7 +22,24 @@ struct RewardWindow
     int  level = 0;
     std::vector<RewardOption> options;
     IconCache* iconSource = nullptr;
-    int selectedIndex = -1;
+
+    // selected[0] is the oldest pick; a third click replaces it (FIFO).
+    static constexpr int K_PICKS = 2;
+    int selected[K_PICKS] = { -1, -1 };
+
+    bool IsSelected(int i) const {
+        return i == selected[0] || i == selected[1];
+    }
+    int SelectedCount() const {
+        return (selected[0] >= 0 ? 1 : 0) + (selected[1] >= 0 ? 1 : 0);
+    }
+    void ToggleSelect(int i) {
+        if (i == selected[0]) { selected[0] = selected[1]; selected[1] = -1; return; }
+        if (i == selected[1]) { selected[1] = -1; return; }
+        if      (selected[0] < 0) selected[0] = i;
+        else if (selected[1] < 0) selected[1] = i;
+        else { selected[0] = selected[1]; selected[1] = i; } // replace oldest
+    }
 
     static bool Contains(const std::string& str, const std::string& sub) {
         return str.find(sub) != std::string::npos;
@@ -52,7 +69,7 @@ struct RewardWindow
         
         level = lvl;
         options = std::move(opts);
-        selectedIndex = -1;
+        selected[0] = selected[1] = -1;
         isOpen = true;
     }
 

@@ -30,6 +30,9 @@ struct NavEdge
     std::string toId;
 };
 
+struct NearbyMobEntry { int x = 0; int y = 0; uint32_t refObjId = 0; };
+static constexpr int k_MaxNearbyMobs = 128;
+
 struct PlayerState
 {
     std::string accName;
@@ -152,7 +155,7 @@ struct AutoPotionSettings
     bool UseHGPPotions = false;
     int HGPPotionsThreshold = 0;
 
-    bool AutoUseContPills = false; // Fixed name from the ImGui mismatch to hold AutoUseUnivPills
+    bool AutoUseContPills = false;
     bool AutoUsePurifPills = false;
 };
 
@@ -252,6 +255,9 @@ struct State
     std::string botStateLabel = "Idle";
     float distanceToTarget = 0.0f;
     int lastTargetUid = 0;
+
+    NearbyMobEntry nearbyMobs[k_MaxNearbyMobs]{};
+    int nearbyMobCount = 0;
 
     int savedBotX = 0;
     int savedBotY = 0;

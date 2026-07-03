@@ -49,19 +49,25 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 var charIdResult = await DBConnect.GetCharIdByName(charName);
                 var charDataResult = await DBConnect.GetCharDataByID(charIdResult.charId);
                 Race race;
+                Gender gender;
+
                 if (charDataResult.character != null)
                 {
-                    var raceRes = await DBConnect.GetCharRaceByRefObjID(charDataResult.character!.RefObjID);
-                    race = raceRes.Item2; 
+                    var raceGenderRes = await DBConnect.GetCharRaceAndGenderByRefObjID(charDataResult.character!.RefObjID);
+                    race = raceGenderRes.race;
+                    gender = raceGenderRes.gender;
+
                 }
                 else
                 {
-                    race = Race.Unknown; 
+                    race = Race.Unknown;
+                    gender = Gender.Unknown;
                 }
                 if (userName.success == false)
                 {
                     Logger.Warn("PlayerLoginHandler", $"Couldnt get username by jid: {userName.reason} | JID={acc.jid}");
                 }
+
                 e.Proxy.Session = new PlayerSession
                 {
                     CharacterName = charName,
@@ -74,6 +80,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                     IsAfk = false,
                     CharacterID = (uint)charIdResult.charId,
                     CharacterRace = race,
+                    CharacterGender = gender
                 };
 
                 Log("Login", $"Character ({charName}) Race: {e.Proxy.Session!.CharacterRace.ToString()}");
@@ -484,7 +491,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             continue;
                         }
 
-                        // --- read common position header ---
+                        // read common position header
                         uint spawnUID = packet.ReadUInt();
                         byte xsec = packet.ReadByte();
                         byte ysec = packet.ReadByte();
@@ -498,7 +505,7 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                         int worldY = (int)entityPos.Y;
                         ushort regionID = (ushort)((sy << 8) | sx);
 
-                        // --- STORE (portals/gates) ---
+                        // STORE (portals/gates)
                         if (code.StartsWith("STORE"))
                         {
                             proxy.Session!.SpawnedObjects[spawnUID] = (refObjID, (short)regionID, refObjID);
@@ -509,11 +516,11 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                             continue;
                         }
 
-                        // --- Movement block ---
+                        //Movement block
                         byte hasDestination = packet.ReadByte();
 
                         if (!code.StartsWith("NPC"))
-                            packet.ReadByte(); // isRunning — MOB/COS only
+                            packet.ReadByte(); // isRunning
 
                         if (hasDestination == 1)
                         {
@@ -756,5 +763,8 @@ namespace VSRO_CONTROL_API.VSRO.AsynchronousProxy
                 }
             });
         }
+
+
+        
     }
 }

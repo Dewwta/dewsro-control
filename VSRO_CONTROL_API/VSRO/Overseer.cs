@@ -131,121 +131,331 @@ namespace VSRO_CONTROL_API.VSRO
         
         #region - Rewards -
         
-        public record LevelReward(string CodeName, int Plus = 0, int Qty = 1, string DisplayName = "");
+        public record LevelReward(string CodeName, int Plus = 0, int Qty = 1, string DisplayName = "",
+                                  Race Race = Race.Unknown, Gender Gender = Gender.Unknown);
+
+        /// <summary>Reward factory — resolves the display name from the codename.</summary>
+        private static LevelReward R(string code, int plus = 0, int qty = 1,
+                                     Race race = Race.Unknown, Gender gender = Gender.Unknown)
+            => new(code, plus, qty, GameObjectNameResolver.Resolve(code), race, gender);
+
+        /// <summary>Maximum options the reward window UI can display.</summary>
+        public const int MaxRewardSlots = 16;
+
+        /// <summary>
+        /// Returns the reward options for a level filtered by the character's race and gender.
+        /// Entries with Race/Gender = Unknown match everyone; a session with unknown race/gender
+        /// sees everything (fail-open), capped at <see cref="MaxRewardSlots"/>.
+        /// </summary>
+        public static List<LevelReward> GetRewardOptionsFor(byte level, Race race, Gender gender)
+        {
+            if (!LevelRewardOptions.TryGetValue(level, out var all))
+                return new();
+            return all.Where(r =>
+                       (r.Race   == Race.Unknown   || race   == Race.Unknown   || r.Race   == race) &&
+                       (r.Gender == Gender.Unknown || gender == Gender.Unknown || r.Gender == gender))
+                      .Take(MaxRewardSlots)
+                      .ToList();
+        }
+
         public static readonly Dictionary<byte, List<LevelReward>> LevelRewardOptions = new()
         {
-            // Level 5
+            // Level 5 — starter pets + basics
             [5] = new()
             {
-                new("ITEM_COS_P_RACCOONDOG_SCROLL",     DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_RACCOONDOG_SCROLL")),
-                new("ITEM_COS_P_CAT_SCROLL",            DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_CAT_SCROLL")),
-                new("ITEM_COS_P_RABBIT_SCROLL",         DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_RABBIT_SCROLL")),
-                new("ITEM_COS_P_SPOT_RABBIT_SCROLL",    DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_SPOT_RABBIT_SCROLL")),
-                new("ITEM_COS_P_SEOWON_SCROLL",         DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_SEOWON_SCROLL")),
-                new("ITEM_COS_P_GGLIDER_SCROLL",        DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_GGLIDER_SCROLL")),
-                new("ITEM_COS_P_MYOWON_SCROLL",         DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_MYOWON_SCROLL")),
+                R("ITEM_COS_P_RACCOONDOG_SCROLL"),
+                R("ITEM_COS_P_CAT_SCROLL"),
+                R("ITEM_COS_P_RABBIT_SCROLL"),
+                R("ITEM_COS_P_SPOT_RABBIT_SCROLL"),
+                R("ITEM_COS_P_SEOWON_SCROLL"),
+                R("ITEM_COS_P_GGLIDER_SCROLL"),
+                R("ITEM_COS_P_MYOWON_SCROLL"),
+                R("ITEM_ETC_GLOBAL_CHATTING_BASIC",           qty: 10),
+                R("ITEM_ETC_SPEED_UP_BASIC",                  qty: 20),
+                R("ITEM_ETC_HP_POTION_02",                    qty: 100),
+                R("ITEM_ETC_MP_POTION_02",                    qty: 100),
+                R("ITEM_ETC_100EXP_BASIC",                    qty: 10),
+                R("ITEM_ETC_E080723_SKILL_EXP_10_BASIC",      qty: 10),
             },
 
-            // Level 10
+            // Level 10 — wolves + travel kit
             [10] = new()
             {
-                new("ITEM_ETC_HP_POTION_02",                Qty: 250,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_HP_POTION_02")),
-                new("ITEM_ETC_MP_POTION_02",                Qty: 250,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_MP_POTION_02")),
-                new("ITEM_MALL_REVERSE_RETURN_SCROLL",      Qty: 25,   DisplayName: GameObjectNameResolver.Resolve("ITEM_MALL_REVERSE_RETURN_SCROLL")),
-                new("ITEM_MALL_RETURN_SCROLL_HIGH_SPEED",   Qty: 25,   DisplayName: GameObjectNameResolver.Resolve("ITEM_MALL_RETURN_SCROLL_HIGH_SPEED")),
-                new("ITEM_MALL_MOVE_SPEED_UP_100",          Qty: 25,   DisplayName: GameObjectNameResolver.Resolve("ITEM_MALL_MOVE_SPEED_UP_100")),
-                new("ITEM_COS_P_FLUTE_SILK",                DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_FLUTE_SILK")),
-                new("ITEM_COS_P_FLUTE_WHITE",               DisplayName: GameObjectNameResolver.Resolve("ITEM_COS_P_FLUTE_WHITE")),
-
+                R("ITEM_ETC_HP_POTION_02",                    qty: 250),
+                R("ITEM_ETC_MP_POTION_02",                    qty: 250),
+                R("ITEM_MALL_REVERSE_RETURN_SCROLL",          qty: 25),
+                R("ITEM_MALL_RETURN_SCROLL_HIGH_SPEED",       qty: 25),
+                R("ITEM_MALL_MOVE_SPEED_UP_100",              qty: 25),
+                R("ITEM_COS_P_FLUTE_SILK"),
+                R("ITEM_COS_P_FLUTE_WHITE"),
+                R("ITEM_MALL_GACHA_CARD",                     qty: 5),
+                R("ITEM_ETC_CURE_ALL_02",                     qty: 50),
+                R("ITEM_ETC_150EXP_BASIC",                    qty: 10),
+                R("ITEM_ETC_EVENT_10EXP_090121",              qty: 25),
+                R("ITEM_ETC_E080723_SKILL_EXP_10",            qty: 25),
             },
 
-            // Level 20
+            // Level 15 — first taste of alchemy (D2).
+            [15] = new()
+            {
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B",    qty: 10),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B",     qty: 10),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ACCESSARY_B", qty: 10),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_SHIELD_B",    qty: 10),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_02",       qty: 10),
+                R("ITEM_ETC_ALL_POTION_02",                        qty: 100),
+                R("ITEM_MALL_MOVE_SPEED_UP_50",                    qty: 25),
+                R("ITEM_ETC_EVENT_20EXP_090121",                   qty: 25),
+                R("ITEM_ETC_E080723_SKILL_EXP_10",                 qty: 30),
+                R("ITEM_ETC_HP_POTION_03",                         qty: 200),
+                R("ITEM_ETC_MP_POTION_03",                         qty: 200),
+            },
+
+            // Level 20 — sustain + first QoL unlock (D3)
             [20] = new()
             {
-                new("ITEM_ETC_HP_POTION_03",                        Qty: 350,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_HP_POTION_03")),
-                new("ITEM_ETC_MP_POTION_03",                        Qty: 350,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_MP_POTION_03")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_04",      Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_04")),
-                new("ITEM_ETC_ARCHEMY_MAGICSTONE_HP_04",            Qty: 3,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_HP_04")),
+                R("ITEM_ETC_HP_POTION_03",                    qty: 350),
+                R("ITEM_ETC_MP_POTION_03",                    qty: 350),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_04",  qty: 10),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_HP_04"),
+                R("ITEM_MALL_GLOBAL_CHATTING",                qty: 10),
+                R("ITEM_MALL_INVENTORY_ADDITION"),
+                R("ITEM_ETC_CURE_ALL_03",                     qty: 50),
+                R("ITEM_MALL_DAMAGE_INC_10P_SCROLL",          qty: 10),
+                R("ITEM_MALL_DAMAGE_ABS_10P_SCROLL",          qty: 10),
+                R("ITEM_ETC_EVENT_20EXP_090121",              qty: 30),
+                R("ITEM_ETC_E080723_SKILL_EXP_15",            qty: 25),
+                R("ITEM_MALL_REPAIR_HAMMER",                  qty: 5),
             },
 
-            // Level 40
+            // Level 30 — first weapon choice (D4, +3)
+            [30] = new()
+            {
+                R("ITEM_CH_SWORD_04_C",     plus: 3, race: Race.Chinese),
+                R("ITEM_CH_BLADE_04_C",     plus: 3, race: Race.Chinese),
+                R("ITEM_CH_SPEAR_04_C",     plus: 3, race: Race.Chinese),
+                R("ITEM_CH_TBLADE_04_C",    plus: 3, race: Race.Chinese),
+                R("ITEM_CH_BOW_04_C",       plus: 3, race: Race.Chinese),
+                R("ITEM_EU_SWORD_04_C",     plus: 3, race: Race.European),
+                R("ITEM_EU_TSWORD_04_C",    plus: 3, race: Race.European),
+                R("ITEM_EU_AXE_04_C",       plus: 3, race: Race.European),
+                R("ITEM_EU_DAGGER_04_C",    plus: 3, race: Race.European),
+                R("ITEM_EU_CROSSBOW_04_C",  plus: 3, race: Race.European),
+                R("ITEM_EU_STAFF_04_C",     plus: 3, race: Race.European),
+                R("ITEM_EU_TSTAFF_04_C",    plus: 3, race: Race.European),
+                R("ITEM_EU_DARKSTAFF_04_C", plus: 3, race: Race.European),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_05",  qty: 10),
+                R("ITEM_ETC_ALL_POTION_03",                   qty: 100),
+                R("ITEM_MALL_RESURRECTION_SCROLL",            qty: 10),
+                R("ITEM_ETC_EVENT_30EXP_090121",              qty: 25),
+                R("ITEM_ETC_100EXP_BASIC",                    qty: 5),
+                R("ITEM_ETC_E080723_SKILL_EXP_15",            qty: 30),
+            },
+
+            // Level 40 — alchemy stones + storage QoL (D5)
             [40] = new()
             {
-                new("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_05",      Qty: 5,   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_05")),
-                new("ITEM_ETC_ARCHEMY_MAGICSTONE_STR_05",           DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_STR_05")),
-                new("ITEM_ETC_ARCHEMY_MAGICSTONE_INT_05",           DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_INT_05")),
-                new("ITEM_ETC_ARCHEMY_MAGICSTONE_SOLID_05",         DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_SOLID_05")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_HR_05",             DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_HR_05")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_ER_05",             DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_ER_05")),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_05",  qty: 15),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_STR_05"),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_INT_05"),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_SOLID_05"),
+                R("ITEM_ETC_ARCHEMY_ATTRSTONE_HR_05",         qty: 2),
+                R("ITEM_ETC_ARCHEMY_ATTRSTONE_ER_05",         qty: 2),
+                R("ITEM_ETC_E080723_SKILL_EXP_20",            qty: 20),
+                R("ITEM_ETC_ALL_POTION_04",                   qty: 150),
+                R("ITEM_ETC_100EXP_BASIC",     qty: 8),
+                R("ITEM_ETC_EVENT_30EXP_090121",              qty: 30),
             },
 
-            // Level 60
+            // Level 50 — second weapon choice (D7, +4) + respec
+            [50] = new()
+            {
+                R("ITEM_CH_SWORD_07_B",     plus: 4, race: Race.Chinese),
+                R("ITEM_CH_BLADE_07_B",     plus: 4, race: Race.Chinese),
+                R("ITEM_CH_SPEAR_07_B",     plus: 4, race: Race.Chinese),
+                R("ITEM_CH_TBLADE_07_B",    plus: 4, race: Race.Chinese),
+                R("ITEM_CH_BOW_07_B",       plus: 4, race: Race.Chinese),
+                R("ITEM_EU_SWORD_07_B",     plus: 4, race: Race.European),
+                R("ITEM_EU_TSWORD_07_B",    plus: 4, race: Race.European),
+                R("ITEM_EU_AXE_07_B",       plus: 4, race: Race.European),
+                R("ITEM_EU_DAGGER_07_B",    plus: 4, race: Race.European),
+                R("ITEM_EU_CROSSBOW_07_B",  plus: 4, race: Race.European),
+                R("ITEM_EU_STAFF_07_B",     plus: 4, race: Race.European),
+                R("ITEM_EU_TSTAFF_07_B",    plus: 4, race: Race.European),
+                R("ITEM_EU_DARKSTAFF_07_B", plus: 4, race: Race.European),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_07",  qty: 10),
+                R("ITEM_ETC_CURE_ALL_04",                     qty: 50),
+                R("ITEM_MALL_SKILL_POINT_RECALL"),
+                R("ITEM_ETC_100EXP_BASIC",           qty: 10),
+                R("ITEM_ETC_E090930_SPEED_UP_SUPER_SCROLL",   qty: 25),
+            },
+
+            // Level 60 — growth pets + elixirs (D8)
             [60] = new()
             {
-                new("ITEM_PET2_SCROLL_ASS_DRAGON_A",                DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_ASS_DRAGON_A")),
-                new("ITEM_PET2_SCROLL_ASS_GRYPHON_A",               DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_ASS_GRYPHON_A")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B",   DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B",    DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B")),
+                R("ITEM_PET2_SCROLL_ASS_DRAGON_A"),
+                R("ITEM_PET2_SCROLL_ASS_GRYPHON_A"),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B",  qty: 15),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B",   qty: 15),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_08",     qty: 10),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_STR_08"),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_INT_08"),
+                R("ITEM_MALL_REPAIR_HAMMER",                     qty: 10),
+                R("ITEM_ETC_E060118_100EXP_HELP"),
+                R("ITEM_MALL_DAMAGE_INC_20P_SCROLL",             qty: 10),
+                R("ITEM_ETC_100EXP_BASIC",              qty: 5),
+                R("ITEM_ETC_EVENT_30EXP_090121",                 qty: 40),
+                R("ITEM_MALL_GACHA_CARD",                     qty: 15),
             },
 
-            // Level 80
+            // Level 70 — elixirs + auto-potion bags (D9)
+            [70] = new()
+            {
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_09",       qty: 10),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_LUCK_09"),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_SHIELD_B",    qty: 15),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ACCESSARY_B", qty: 15),
+                R("ITEM_MALL_HP_SUPERSET_4_BAG",                   qty: 500),
+                R("ITEM_MALL_MP_SUPERSET_4_BAG",                   qty: 500),
+                R("ITEM_ETC_ALL_POTION_05",                        qty: 200),
+                R("ITEM_MALL_GACHA_CARD",                          qty: 15),
+                R("ITEM_ETC_150EXP_BASIC",          qty: 8),
+                R("ITEM_MALL_REPAIR_HAMMER",                       qty: 10),
+                R("ITEM_MALL_RESURRECTION_60P_SCROLL",             qty: 15),
+            },
+
+            // Level 80 — degree-matched stones + survival (D10)
             [80] = new()
             {
-                new("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_12",      DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_12")),
-                new("ITEM_ETC_ARCHEMY_MAGICSTONE_LUCK_15",          DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_MAGICSTONE_LUCK_15")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_CRITICAL_12",       DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_CRITICAL_12")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_MA_12",             DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_MA_12")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_PA_12",             DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_PA_12")),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_10",  qty: 10),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_STR_10"),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_INT_10"),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_LUCK_10"),
+                R("ITEM_MALL_RESURRECTION_60P_SCROLL",        qty: 10),
+                R("ITEM_MALL_DAMAGE_ABS_20P_SCROLL",          qty: 10),
+                R("ITEM_MALL_MOVE_SPEED_UP_100",              qty: 50),
+                R("ITEM_ETC_150EXP_BASIC",           qty: 10),
+                R("ITEM_MALL_REPAIR_HAMMER",                  qty: 15),
+                R("ITEM_MALL_HP_SUPERSET_4_BAG",              qty: 500),
+                R("ITEM_MALL_MP_SUPERSET_4_BAG",              qty: 500),
+                R("ITEM_MALL_GACHA_CARD",                     qty: 15),
             },
 
-            // Level 100
+            // Level 90 — heavy alchemy push (D12)
+            [90] = new()
+            {
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_12",     qty: 10),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_STR_12"),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_INT_12"),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_LUCK_12"),
+                R("ITEM_ETC_ARCHEMY_ATTRSTONE_CRITICAL_12",      qty: 2),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B",  qty: 20),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B",   qty: 20),
+                R("ITEM_MALL_HP_SUPERSET_5_BAG",                 qty: 500),
+                R("ITEM_MALL_MP_SUPERSET_5_BAG",                 qty: 500),
+                R("ITEM_ETC_150EXP_BASIC",              qty: 12),
+                R("ITEM_MALL_RESURRECTION_100P_SCROLL",          qty: 5),
+                R("ITEM_MALL_GACHA_CARD",                     qty: 15),
+            },
+
+            // Level 100 — pets or prestige avatars (gender-gated)
             [100] = new()
             {
-                new("ITEM_PET2_SCROLL_ASS_DRAGON_A",                DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_ASS_DRAGON_A")),
-                new("ITEM_PET2_SCROLL_ASS_GRYPHON_A",               DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_ASS_GRYPHON_A")),
-                new("ITEM_PET2_SCROLL_ENC_LION_A",                  DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_ENC_LION_A")),
-                new("ITEM_PET2_SCROLL_ENC_EVOLUTION_A",             DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_ENC_EVOLUTION_A")),
-                new("ITEM_PET2_SCROLL_PRO_SILVERBACK_A",            DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_PRO_SILVERBACK_A")),
-                new("ITEM_PET2_SCROLL_PRO_EVOLUTION_A",             DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_PRO_EVOLUTION_A")),
+                R("ITEM_PET2_SCROLL_ASS_DRAGON_A"),
+                R("ITEM_PET2_SCROLL_ENC_LION_A"),
+                R("ITEM_PET2_SCROLL_PRO_SILVERBACK_A"),
+                R("ITEM_MALL_AVATAR_M_BLACKWING",   gender: Gender.Male),
+                R("ITEM_MALL_AVATAR_W_BLACKWING",   gender: Gender.Female),
+                R("ITEM_MALL_AVATAR_M_NEWANGEL",    gender: Gender.Male),
+                R("ITEM_MALL_AVATAR_W_NEWANGEL",    gender: Gender.Female),
+                R("ITEM_MALL_AVATAR_M_NEWDEVIL",    gender: Gender.Male),
+                R("ITEM_MALL_AVATAR_W_NEWDEVIL",    gender: Gender.Female),
+                R("ITEM_MALL_AVATAR_M_DRAGONDRESS", gender: Gender.Male),
+                R("ITEM_MALL_AVATAR_W_DRAGONDRESS", gender: Gender.Female),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_13",  qty: 10),
+                R("ITEM_MALL_GLOBAL_CHATTING",                qty: 20),
+                R("ITEM_ETC_150EXP_BASIC",           qty: 15),
+                R("ITEM_MALL_GACHA_CARD",                     qty: 15),
             },
 
-            // Level 110
+            // Level 105 — third weapon choice (D13 Seal of Star, +5).
+            [105] = new()
+            {
+                R("ITEM_CH_SWORD_13_A_RARE",     plus: 5, race: Race.Chinese),
+                R("ITEM_CH_BLADE_13_A_RARE",     plus: 5, race: Race.Chinese),
+                R("ITEM_CH_SPEAR_13_A_RARE",     plus: 5, race: Race.Chinese),
+                R("ITEM_CH_TBLADE_13_A_RARE",    plus: 5, race: Race.Chinese),
+                R("ITEM_CH_BOW_13_A_RARE",       plus: 5, race: Race.Chinese),
+                R("ITEM_EU_SWORD_13_A_RARE",     plus: 5, race: Race.European),
+                R("ITEM_EU_TSWORD_13_A_RARE",    plus: 5, race: Race.European),
+                R("ITEM_EU_AXE_13_A_RARE",       plus: 5, race: Race.European),
+                R("ITEM_EU_DAGGER_13_A_RARE",    plus: 5, race: Race.European),
+                R("ITEM_EU_CROSSBOW_13_A_RARE",  plus: 5, race: Race.European),
+                R("ITEM_EU_STAFF_13_A_RARE",     plus: 5, race: Race.European),
+                R("ITEM_EU_TSTAFF_13_A_RARE",    plus: 5, race: Race.European),
+                R("ITEM_EU_DARKSTAFF_13_A_RARE", plus: 5, race: Race.European),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_13",  qty: 15),
+                R("ITEM_MALL_RESURRECTION_100P_SCROLL",       qty: 10),
+                R("ITEM_ETC_CURE_ALL_06",                     qty: 100),
+                R("ITEM_ETC_150EXP_BASIC",           qty: 16),
+            },
+
+            // Level 110 — Immortal & Astral debut (D14)
             [110] = new()
             {
-                new("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_15",          DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_15")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B",       DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B",        DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ACCESSARY_B",    DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ACCESSARY_B")),
-                new("ITEM_ETC_ARCHEMY_ATTRSTONE_MAINT_12",              DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_ATTRSTONE_MAINT_12")),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_ATHANASIA"),
+                R("ITEM_ETC_ARCHEMY_ASTRAL",                       qty: 2),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_14",       qty: 10),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_STR_13"),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_INT_13"),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_LUCK_13"),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B",    qty: 25),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B",     qty: 25),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ACCESSARY_B", qty: 25),
+                R("ITEM_ETC_150EXP_BASIC",                qty: 20),
+                R("ITEM_MALL_HP_SUPERSET_5_BAG",                   qty: 15),
+                R("ITEM_MALL_MP_SUPERSET_5_BAG",                   qty: 15),
             },
 
-            // Level 115
+            // Level 115 — Seal of Sun weapons (D15, +3, race-gated)
             [115] = new()
             {
-                // CH weapons
-                new("ITEM_CH_SWORD_15_C_RARE",  Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_CH_SWORD_15_C_RARE")),
-                new("ITEM_CH_BLADE_15_C_RARE",  Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_CH_BLADE_15_C_RARE")),
-                new("ITEM_CH_SPEAR_15_C_RARE",  Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_CH_SPEAR_15_C_RARE")),
-                new("ITEM_CH_BOW_15_C_RARE",    Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_CH_BOW_15_C_RARE")),
-                new("ITEM_CH_TBLADE_15_C_RARE", Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_CH_TBLADE_15_C_RARE")),
-                // EU weapons
-                new("ITEM_EU_SWORD_15_C_RARE",      Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_EU_SWORD_15_C_RARE")),
-                new("ITEM_EU_TSWORD_15_C_RARE",     Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_EU_TSWORD_15_C_RARE")),
-                new("ITEM_EU_AXE_15_C_RARE",        Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_EU_AXE_15_C_RARE")),
-                new("ITEM_EU_DAGGER_15_C_RARE",     Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_EU_DAGGER_15_C_RARE")),
-                new("ITEM_EU_CROSSBOW_15_C_RARE",   Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_EU_CROSSBOW_15_C_RARE")),
-                new("ITEM_EU_STAFF_15_C_RARE",      Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_EU_STAFF_15_C_RARE")),
-                new("ITEM_EU_TSTAFF_15_C_RARE",     Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_EU_TSTAFF_15_C_RARE")),
-                new("ITEM_EU_DARKSTAFF_15_C_RARE",  Plus: 3, DisplayName: GameObjectNameResolver.Resolve("ITEM_EU_DARKSTAFF_15_C_RARE")),
+                R("ITEM_CH_SWORD_15_C_RARE",     plus: 3, race: Race.Chinese),
+                R("ITEM_CH_BLADE_15_C_RARE",     plus: 3, race: Race.Chinese),
+                R("ITEM_CH_SPEAR_15_C_RARE",     plus: 3, race: Race.Chinese),
+                R("ITEM_CH_BOW_15_C_RARE",       plus: 3, race: Race.Chinese),
+                R("ITEM_CH_TBLADE_15_C_RARE",    plus: 3, race: Race.Chinese),
+                R("ITEM_EU_SWORD_15_C_RARE",     plus: 3, race: Race.European),
+                R("ITEM_EU_TSWORD_15_C_RARE",    plus: 3, race: Race.European),
+                R("ITEM_EU_AXE_15_C_RARE",       plus: 3, race: Race.European),
+                R("ITEM_EU_DAGGER_15_C_RARE",    plus: 3, race: Race.European),
+                R("ITEM_EU_CROSSBOW_15_C_RARE",  plus: 3, race: Race.European),
+                R("ITEM_EU_STAFF_15_C_RARE",     plus: 3, race: Race.European),
+                R("ITEM_EU_TSTAFF_15_C_RARE",    plus: 3, race: Race.European),
+                R("ITEM_EU_DARKSTAFF_15_C_RARE", plus: 3, race: Race.European),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_14",  qty: 10),
+                R("ITEM_ETC_150EXP_BASIC",           qty: 18),
+                R("ITEM_MALL_RESURRECTION_100P_SCROLL",       qty: 15),
             },
 
-            // Level 120
+            // Level 120 — cap celebration: Devil's Spirit, Immortal/Astral, evo pets
             [120] = new()
             {
-                new("ITEM_PET2_SCROLL_ASS_EVOLUTION_A",             DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_ASS_EVOLUTION_A")),
-                new("ITEM_PET2_SCROLL_PRO_KLOX_A",                  DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_PRO_KLOX_A")),
-                new("ITEM_PET2_SCROLL_ENC_OSTRICH_A",               DisplayName: GameObjectNameResolver.Resolve("ITEM_PET2_SCROLL_ENC_OSTRICH_A")),
-                new("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_15",      Qty: 20,  DisplayName: GameObjectNameResolver.Resolve("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_15")),
+                R("ITEM_MALL_AVATAR_M_NASRUN_0", gender: Gender.Male),
+                R("ITEM_MALL_AVATAR_W_NASRUN_0", gender: Gender.Female),
+                R("ITEM_MALL_AVATAR_M_SNS_2013", gender: Gender.Male),
+                R("ITEM_MALL_AVATAR_W_SNS_2013", gender: Gender.Female),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_ATHANASIA"),
+                R("ITEM_ETC_ARCHEMY_ASTRAL",                  qty: 3),
+                R("ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_14",  qty: 25),
+                R("ITEM_ETC_ARCHEMY_MAGICSTONE_LUCK_13"),
+                R("ITEM_PET2_SCROLL_ASS_EVOLUTION_A"),
+                R("ITEM_PET2_SCROLL_PRO_KLOX_A"),
+                R("ITEM_PET2_SCROLL_ENC_OSTRICH_A"),
+                R("ITEM_MALL_GACHA_CARD",                     qty: 25),
+                R("ITEM_ETC_150EXP_BASIC",           qty: 25),
+                R("ITEM_MALL_HP_SUPERSET_5_BAG",              qty: 500),
+                R("ITEM_MALL_MP_SUPERSET_5_BAG",              qty: 500),
             },
         };
 
@@ -1475,14 +1685,13 @@ namespace VSRO_CONTROL_API.VSRO
             // All offsets are relative to window top-left
 
             // Click "Application" menu
-
             ClickAt(rect.Left + 48, rect.Top + 11);
             Thread.Sleep(600); // Slightly longer — give dropdown time to fully render
 
             // Click "LoadPlugins" dropdown item
             ClickAt(rect.Left + 48, rect.Top + 58);
-            Logger.Info(typeof(Overseer), "Clicked LoadPlugins. Waiting 6 seconds for plugins to load...");
-            Thread.Sleep(6000); // Give it extra headroom
+            Logger.Info(typeof(Overseer), "Clicked LoadPlugins. Waiting 15 seconds for plugins to load...");
+            Thread.Sleep(15000); // Give it extra headroom
 
             // Re-assert focus after the long wait
             ForceWindowToFront(hwnd);

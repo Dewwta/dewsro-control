@@ -105,16 +105,25 @@ namespace VSRO_CONTROL_API.VSRO.Bots
                 return;
             }
 
-            while (graphPath.Count > 0 && Distance(graphPath[0].Position, destination) >= Distance(current, destination))
-            {
-                Log("WalkTo", $"Pruning {graphPath[0].Id} — farther from dest than current pos");
-                graphPath.RemoveAt(0);
-            }
-
             int prunedCount = 0;
-            while (graphPath.Count > 0 && Distance(current, graphPath[0].Position) >= directDist)
+            while (graphPath.Count > 0)
             {
-                Log("WalkTo", $"Pruning {graphPath[0].Id} (dist={Distance(current, graphPath[0].Position):F1}) — destination is closer at {directDist:F1}");
+                var head = graphPath[0];
+                bool headIsBackward =
+                    Distance(head.Position, destination) >= Distance(current, destination) ||
+                    Distance(current, head.Position) >= directDist;
+                if (!headIsBackward)
+                    break;
+
+                // The leg we'd walk instead if this node is dropped
+                BotPosition shortcut = graphPath.Count > 1 ? graphPath[1].Position : destination;
+                if (HasCollision(current, shortcut))
+                {
+                    Log("WalkTo", $"Keeping {head.Id} — shortcut past it is blocked by geometry");
+                    break;
+                }
+
+                Log("WalkTo", $"Pruning {head.Id} — farther from dest than current pos, shortcut clear");
                 graphPath.RemoveAt(0);
                 prunedCount++;
             }
@@ -707,7 +716,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
 
                 if (clearance >= CLEAR_THRESHOLD)
                 {
-                    Logger.Info("AutoWalker", $"  [Avoidance] Cleared pillar after {attempt + 1} diagonal steps (clearance={clearance:F1})");
+                    Log("AutoWalker", $"  [Avoidance] Cleared pillar after {attempt + 1} diagonal steps (clearance={clearance:F1})");
                     return true;
                 }
             }
@@ -775,8 +784,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             float dy = current.Y - lineStart.Y;
             float t = Math.Clamp(dx * nx + dy * ny, 0f, len);
 
-            // --- FIX FOR EARLY DETECTION ---
-            // Physical step is 15 units ahead, but we project a long predictive check 40 units out
+            // Physical step is 15 units ahead, but project a long check 40 units out
             float targetT = Math.Min(t + STEP_DISTANCE, len);
             float predictiveT = Math.Min(t + 18f, len); // Look ahead ~6.5 seconds into the future
 
@@ -792,7 +800,6 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             if (!HasCollision(current, onLineStep) && !HasCollision(current, predictiveStep))
                 return onLineStep;
 
-            // If either has a collision, we initiate early evasion logic!
             float projX = lineStart.X + nx * t;
             float projY = lineStart.Y + ny * t;
             var projPoint = MakePosition(projX, projY, current.ZOffset);
@@ -8340,6 +8347,7 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             _graph.AddNode("sd_99", BotPosition.FromDisplayWorld(-15979, -372));
             _graph.AddNode("sd_100", BotPosition.FromDisplayWorld(-16143, -638));
             _graph.AddNode("sd_101", BotPosition.FromDisplayWorld(-16239, -552));
+            _graph.AddNode("sd_102", BotPosition.FromDisplayWorld(-16562, 353));
             _graph.AddEdge("sd_0", "sd_1");
             _graph.AddEdge("sd_1", "sd_2");
             _graph.AddEdge("sd_2", "sd_3");
@@ -8507,6 +8515,9 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             _graph.AddEdge("sd_100", "sd_101");
             _graph.AddEdge("sd_101", "sd_51");
             _graph.AddEdge("sd_101", "sd_47");
+            _graph.AddEdge("sd_15", "sd_102");
+            _graph.AddEdge("sd_102", "sd_14");
+            _graph.AddEdge("sd_102", "sd_16");
 
 
             #endregion

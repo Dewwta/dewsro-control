@@ -13,6 +13,13 @@
 #include "client/AchievementWindow.h"
 #include "client/pk2/Pk2Reader.h"
 
+static int DetectStoneCaveFloor(float worldZ)
+{
+    if (worldZ < 116.f)  return 1;
+    if (worldZ < 254.f)  return 2;
+    if (worldZ < 393.f)  return 3;
+    return 4;
+}
 
 static std::string ExtractHostFromDivisionInfo(const std::vector<uint8_t>& data)
 {
@@ -34,13 +41,6 @@ static std::string ExtractHostFromDivisionInfo(const std::vector<uint8_t>& data)
     return best;
 }
 
-static int DetectStoneCaveFloor(float worldZ)
-{
-    if (worldZ < 116.f)  return 1;
-    if (worldZ < 254.f)  return 2;
-    if (worldZ < 393.f)  return 3;
-    return 4;
-}
 
 void RegisterAllHandlers() {
     g_bridge.RegisterHandler("login_ack", [](const std::string& _) {
@@ -145,7 +145,6 @@ void RegisterAllHandlers() {
         auto pipe = code.find('|');
         if (pipe != std::string::npos)
         {
-            // Qin-Shi with explicit floor suffix
             std::string suffix = code.substr(pipe + 1);
             if (suffix.rfind("floor:", 0) == 0)
                 ss.currentFloor = std::stoi(suffix.substr(6));
@@ -415,6 +414,33 @@ void RegisterAllHandlers() {
         ss.botStateLabel = g_bridge.ExtractStr(json, "botState");
         ss.distanceToTarget = g_bridge.ExtractFloat(json, "distanceToTarget");
         ss.lastTargetUid = g_bridge.ExtractInt(json, "targetUid");
+
+        // Parse mob positions: "mobs":[{"x":...,"y":...,"refObjId":...},...]
+        NearbyMobEntry tmp[k_MaxNearbyMobs]{};
+        int cnt = 0;
+        size_t aPos = json.find("\"mobs\"");
+        if (aPos != std::string::npos) {
+            aPos = json.find('[', aPos);
+            size_t aEnd = (aPos != std::string::npos) ? json.find(']', aPos) : std::string::npos;
+            if (aPos != std::string::npos && aEnd != std::string::npos) {
+                size_t p = aPos + 1;
+                while (p < aEnd && cnt < k_MaxNearbyMobs) {
+                    size_t ob = json.find('{', p);
+                    if (ob == std::string::npos || ob >= aEnd) break;
+                    size_t oe = json.find('}', ob);
+                    if (oe == std::string::npos || oe >= aEnd) break;
+                    std::string obj = json.substr(ob, oe - ob + 1);
+                    tmp[cnt].x        = g_bridge.ExtractInt(obj, "x");
+                    tmp[cnt].y        = g_bridge.ExtractInt(obj, "y");
+                    tmp[cnt].refObjId = static_cast<uint32_t>(g_bridge.ExtractUint64(obj, "refObjId"));
+                    ++cnt;
+                    p = oe + 1;
+                }
+            }
+        }
+        // Write array before count so render thread never sees stale entries
+        memcpy(ss.nearbyMobs, tmp, sizeof(NearbyMobEntry) * cnt);
+        ss.nearbyMobCount = cnt;
     });
 
     g_bridge.RegisterHandler("bot_settings_sync", [](const std::string& json) {
@@ -506,8 +532,7 @@ void Control::Initialize()
 {
     auto& log = GetLogger();
 
-    log.Alloc();
-    log.SetState(true);
+    log.Init();
     Settings::Load();
 
     {

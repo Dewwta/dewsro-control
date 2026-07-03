@@ -394,10 +394,6 @@ namespace VSRO_CONTROL_API.VSRO.Bots
             int level = 0
             )
         {
-            // A region satisfies the target if it's an exact match OR a more-specific sub-region
-            // (e.g. "Qin-Shi Tomb|floor:2|room:1" satisfies target "Qin-Shi Tomb|floor:2").
-            // This matters for dungeons where graph edges use room-level names but RegionResolver
-            // only returns a floor-level name from the game's region ID.
             static bool Satisfies(string region, string target) =>
                 region == target || region.StartsWith(target + "|", StringComparison.Ordinal);
 

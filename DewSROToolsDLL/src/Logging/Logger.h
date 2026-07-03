@@ -1,30 +1,42 @@
 #pragma once
-#include <iostream>
 #include <Windows.h>
+#include <deque>
 #include <vector>
 #include <mutex>
+#include <string>
+
+// level: 0=INFO 1=WARN 2=ERR 3=DBG
+struct LogEntry
+{
+	int         level = 0;
+	std::string loc;
+	std::string msg;
+};
 
 class Logger
 {
 public:
-	void Alloc();
-	void ToggleState();
-	void SetState(bool enabled);
+	static constexpr size_t K_MAX_ENTRIES = 4000;
+
+	// Opens the on-disk log file.
+	void Init();
+
 	void Info(std::string loc, std::string msg);
 	void Warn(std::string loc, std::string msg);
 	void Err(std::string loc, std::string msg);
 	void Dbg(std::string loc, std::string msg);
+
+	std::mutex& Mutex() { return m_logMutex; }
+	const std::deque<LogEntry>& Entries() const { return m_entries; }
+	void Clear();
+
 private:
-	void WriteToFile(const char* level, const std::string& loc, const std::string& msg);
+	void Append(int level, const char* levelName,
+	            const std::string& loc, const std::string& msg);
+
 	FILE* m_logFile = nullptr;
-	bool m_state = false;
-	bool m_isAlloced = false;
-	std::vector<std::string> m_logs;
-	HWND m_consoleHwnd;
-	HANDLE m_consoleHandle;
+	std::deque<LogEntry> m_entries;
 	std::mutex m_logMutex;
-	const WORD DEFAULT_COLOR =
-		FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
 };
 
 Logger& GetLogger();

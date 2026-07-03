@@ -15,8 +15,10 @@ namespace VSRO_CONTROL_API.VSRO.DTO
         public uint CharacterUID { get; set; }
         public uint CharacterID { get; set; }
         public uint ActivePetUID { get; set; }
+        public uint CharacterRefObjID { get; set; }
         public bool IsGM { get; set; } = false;
         public Race CharacterRace { get; set; } = Race.Unknown;
+        public Gender CharacterGender { get; set; } = Gender.Unknown;
         public Party? PlayerParty { get; set; } = null;
         public PlayerStats? PlayerStats { get; set; } = null;
         public InventoryTracker Inventory { get; } = new InventoryTracker();

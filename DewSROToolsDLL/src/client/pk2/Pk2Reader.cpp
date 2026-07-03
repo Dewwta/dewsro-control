@@ -177,7 +177,7 @@ bool Pk2Reader::ReadFile(const std::string& archivePath, std::vector<uint8_t>& o
 #else
     if (fseeko(m_file, (off_t)e.position, SEEK_SET) != 0) return false;
 #endif
-    // File payloads are stored plaintext — no decryption needed.
+    // File payloads are stored plaintext
     return std::fread(out.data(), 1, e.size, m_file) == e.size;
 }
 

@@ -23,16 +23,9 @@ public class WaypointGraph
 
     public List<Node>? FindPath(BotPosition from, BotPosition to)
     {
-        // startNode: closest node to bot's current position (pure distance, no direction bias).
-        // Direction bias caused the algorithm to pick nodes across obstacles — A* handles routing.
+
         var startNode = GetClosestNode(from, to, destWeight: 0f);
 
-        // For dungeon regions, the endNode must be in the same room as the startNode.
-        // Without this constraint, a destination that sits right at a room boundary resolves
-        // via RegionResolver to the *adjacent* room, producing a cross-room A* pair that has
-        // no edges and always falls back to a direct (graphless) walk.
-        // We extract the room prefix from startNode.Id (e.g. "qs2_15_" from "qs2_15_4") and
-        // pass it as an override so the endNode search is filtered to the same room.
         string? roomOverride = null;
         if (startNode != null && (from.RegionId & 0x8000) != 0)
         {
@@ -43,17 +36,13 @@ public class WaypointGraph
 
         var endNode = GetClosestNode(to, from, destWeight: 0.3f, roomOverride: roomOverride);
 
-        Logger.Info("WaypointGraph", $"Start node: {startNode?.Id}");
-        Logger.Info("WaypointGraph", $"End node: {endNode?.Id}");
+        //Logger.Info("WaypointGraph", $"Start node: {startNode?.Id}");
+        //Logger.Info("WaypointGraph", $"End node: {endNode?.Id}");
 
         if (startNode == null || endNode == null) return null;
         return AStar(startNode, endNode);
     }
 
-    // Scores each candidate as dist(from, node) + destWeight * dist(node, destination).
-    // destWeight=0   for startNode: pure closest node to bot — safe to walk to directly.
-    // destWeight=0.3 for endNode:   closest to dest, mild bias away from bot-side nodes.
-    // roomOverride: when set, bypasses region-derived room filter and uses this prefix instead.
     private Node? GetClosestNode(BotPosition from, BotPosition destination, float destWeight, string? roomOverride = null)
     {
         foreach (float radius in new[] { 300f, 600f, 1200f })
@@ -65,7 +54,7 @@ public class WaypointGraph
                 .Where(n => Distance(n.Position, from) <= radius)
                 //.Where(n => CanReach(from, n.Position))
                 .Where(n => {
-                    // If the caller pinned a specific room prefix, honour it unconditionally.
+                    
                     if (roomOverride != null)
                         return n.Id.StartsWith(roomOverride);
 
